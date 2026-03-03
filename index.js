@@ -4,7 +4,7 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
-const BASE = process.env.PAGSCHOOL_BASE_URL || "";
+const BASE = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/+$/, ""); // remove barra final
 const USER = process.env.PAGSCHOOL_USER || "";
 const PASS = process.env.PAGSCHOOL_PASS || "";
 
@@ -29,7 +29,6 @@ function normalizePhone(raw) {
 }
 
 function extractPhoneFromChatId(chatId) {
-  // 5513981484410@s.whatsapp.net -> 5513981484410 -> 13981484410
   return normalizePhone(digits(chatId));
 }
 
@@ -40,35 +39,53 @@ function extractCpfFromText(text) {
   return "";
 }
 
-async function httpJson(method, url, { headers, body } = {}) {
-  const res = await fetch(url, {
-    method,
-    headers: {
-      ...(headers || {}),
-      ...(body ? { "Content-Type": "application/json" } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  const text = await res.text();
-  let data;
+function safeJsonParse(text) {
   try {
-    data = text ? JSON.parse(text) : null;
+    return text ? JSON.parse(text) : null;
   } catch {
-    data = text;
+    return text;
   }
+}
 
-  if (!res.ok) {
-    const msg = typeof data === "object" ? JSON.stringify(data) : String(data);
-    throw new Error(`HTTP ${res.status} ${res.statusText} em ${url}: ${msg}`);
+async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      method,
+      signal: controller.signal,
+      headers: {
+        ...(headers || {}),
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    const text = await res.text();
+    const data = safeJsonParse(text);
+
+    if (!res.ok) {
+      const msg = typeof data === "object" ? JSON.stringify(data) : String(data);
+      throw new Error(`HTTP ${res.status} ${res.statusText} em ${url}: ${msg}`);
+    }
+
+    return data;
+  } catch (err) {
+    if (String(err?.name) === "AbortError") {
+      throw new Error(`Timeout (${timeoutMs}ms) ao chamar ${url}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(t);
   }
-  return data;
 }
 
 async function authenticate() {
   if (!BASE || !USER || !PASS) {
     throw new Error("Config faltando: PAGSCHOOL_BASE_URL, PAGSCHOOL_USER, PAGSCHOOL_PASS");
   }
+
   const url = `${BASE}${PATH_AUTH}`;
   const data = await httpJson("POST", url, { body: { usuario: USER, senha: PASS } });
 
@@ -77,21 +94,32 @@ async function authenticate() {
     data?.jwt ||
     data?.access_token ||
     data?.data?.token ||
-    data?.data?.jwt;
+    data?.data?.jwt ||
+    data?.data?.access_token;
 
-  if (!token) throw new Error("Não encontrei token no retorno do authenticate. Verifique a doc/retorno.");
+  if (!token) {
+    throw new Error("Não encontrei token no retorno do authenticate. Verifique a doc/retorno real.");
+  }
   return token;
 }
 
+// ⚠️ Ajuste o prefixo do Authorization conforme a doc do PagSchool.
+// Troque para `Bearer ${token}` se sua API exigir.
 async function apiGet(path, token) {
   const url = `${BASE}${path}`;
   return httpJson("GET", url, { headers: { Authorization: `JWT ${token}` } });
 }
 
+function pickArray(resp) {
+  if (Array.isArray(resp)) return resp;
+  if (Array.isArray(resp?.data)) return resp.data;
+  if (Array.isArray(resp?.items)) return resp.items;
+  if (Array.isArray(resp?.result)) return resp.result;
+  return [];
+}
+
 function pickOpenParcela(parcelasResp) {
-  const arr = Array.isArray(parcelasResp)
-    ? parcelasResp
-    : parcelasResp?.data || parcelasResp?.parcelas || [];
+  const arr = pickArray(parcelasResp);
 
   const open = arr.find((p) => {
     const valor = Number(p?.valor ?? 0);
@@ -126,12 +154,6 @@ function extractBoletoInfo(parcela) {
   return { link, linha, valor, venc };
 }
 
-/**
- * ✅ RESPOSTA “COMPATÍVEL COM TUDO”
- * - reply (seu formato)
- * - text / message (muitos painéis usam isso)
- * - messages[] (muitos fluxos usam array)
- */
 function sendToPlatform(res, replyText, extra = {}) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   return res.status(200).send(
@@ -140,17 +162,21 @@ function sendToPlatform(res, replyText, extra = {}) {
       reply: replyText,
       text: replyText,
       message: replyText,
-      messages: [
-        { type: "text", text: replyText },
-        { text: replyText },
-      ],
+      messages: [{ type: "text", text: replyText }, { text: replyText }],
       ...extra,
     })
   );
 }
 
 function getTokenFromReq(req) {
-  return String(req.query.token || req.headers["x-webhook-token"] || "");
+  // aceita token via query, header ou body (muitas plataformas mandam no body)
+  return String(
+    req.query.token ||
+      req.headers["x-webhook-token"] ||
+      req.body?.token ||
+      req.body?.webhook_token ||
+      ""
+  );
 }
 
 app.get("/health", (req, res) => sendToPlatform(res, "ok", { health: true }));
@@ -162,57 +188,74 @@ async function handleBoleto(req, res) {
       return sendToPlatform(res, "Não autorizado.", { ok: false });
     }
 
-    // 👇 Loga exatamente o que chega do FacilitaFlow no Render
     console.log("[WEBHOOK] METHOD:", req.method);
     console.log("[WEBHOOK] QUERY:", req.query);
     console.log("[WEBHOOK] BODY:", JSON.stringify(req.body || {}, null, 2));
 
     const body = req.body || {};
 
-    // tenta pegar de qualquer campo possível
+    // tenta pegar de qualquer campo possível + query (pra testes)
     const rawTelefone =
-      body.telefone || body.phone || body.numero || body.number || "";
+      body.telefone ||
+      body.phone ||
+      body.numero ||
+      body.number ||
+      req.query.telefone ||
+      req.query.phone ||
+      "";
 
     const rawChatId =
       body.chatId || body.chat_id || body.remoteJid || body.jid || "";
 
     const rawMessage =
-      body.message || body.text || body.mensagem || body.body || "";
+      body.message || body.text || body.mensagem || body.body || req.query.message || req.query.text || "";
 
-    const cpf = extractCpfFromText(body.cpf || "") || extractCpfFromText(rawMessage);
-    const telefone = normalizePhone(rawTelefone) || extractPhoneFromChatId(rawChatId);
+    const cpf =
+      extractCpfFromText(body.cpf || "") ||
+      extractCpfFromText(rawMessage);
 
-    // Se não tiver CPF nem telefone, pede CPF
+    const telefone =
+      normalizePhone(rawTelefone) ||
+      extractPhoneFromChatId(rawChatId);
+
     if (!cpf && !telefone) {
-      return sendToPlatform(res, "Pra eu localizar seu boleto, me envie seu CPF (somente números) 😊", { ok: false });
+      return sendToPlatform(
+        res,
+        "Pra eu localizar seu boleto, me envie seu CPF (somente números) 😊",
+        { ok: false }
+      );
     }
 
     const jwt = await authenticate();
 
     // 1) localizar aluno
-    let alunoResp = null;
+    let alunoResp;
     if (cpf) alunoResp = await apiGet(PATH_FIND_ALUNO_BY_CPF(cpf), jwt);
     else alunoResp = await apiGet(PATH_FIND_ALUNO_BY_PHONE(telefone), jwt);
 
-    const alunoObj = Array.isArray(alunoResp) ? alunoResp[0] : (alunoResp?.data || alunoResp);
+    const alunoArr = pickArray(alunoResp);
+    const alunoObj = alunoArr[0] || (alunoResp?.data && !Array.isArray(alunoResp.data) ? alunoResp.data : alunoResp);
+
     const alunoId = alunoObj?.id || alunoObj?.aluno_id;
 
     if (!alunoId) {
       return sendToPlatform(
         res,
         "Não consegui localizar seu cadastro só pelo telefone. Me envie seu CPF (somente números) que eu puxo seu boleto agora 😊",
-        { ok: false }
+        { ok: false, debug: { cpf: !!cpf, telefone: !!telefone } }
       );
     }
 
     // 2) contratos
     const contratosResp = await apiGet(PATH_CONTRATOS_BY_ALUNO(alunoId), jwt);
-    const contratosArr = Array.isArray(contratosResp)
-      ? contratosResp
-      : (contratosResp?.data || contratosResp?.contratos || []);
+    const contratosArr = pickArray(contratosResp);
 
     if (!contratosArr.length) {
-      return sendToPlatform(res, "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊", { ok: false });
+      return sendToPlatform(
+        res,
+        "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊",
+        { ok: false }
+      );
     }
 
     const contrato = contratosArr[0];
@@ -224,7 +267,11 @@ async function handleBoleto(req, res) {
     const parcelaAberta = pickOpenParcela(parcelasResp);
 
     if (!parcelaAberta) {
-      return sendToPlatform(res, "✅ Não encontrei parcelas em aberto no momento. Se quiser, me envie seu CPF pra eu conferir melhor 😊", { ok: true });
+      return sendToPlatform(
+        res,
+        "✅ Não encontrei parcelas em aberto no momento. Se quiser, me envie seu CPF pra eu conferir melhor 😊",
+        { ok: true }
+      );
     }
 
     const { link, linha, valor, venc } = extractBoletoInfo(parcelaAberta);
@@ -242,12 +289,11 @@ async function handleBoleto(req, res) {
     return sendToPlatform(
       res,
       "Tive um erro ao buscar seu boleto agora. Me envie seu CPF (somente números) que eu resolvo rapidinho 😊",
-      { ok: false }
+      { ok: false, error: String(err?.message || err) }
     );
   }
 }
 
-// ✅ suporte GET e POST (algumas plataformas testam por GET)
 app.post("/boleto", handleBoleto);
 app.get("/boleto", handleBoleto);
 
