@@ -8,7 +8,6 @@ const BASE = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/+$/, "");
 const USER = process.env.PAGSCHOOL_USER || "";
 const PASS = process.env.PAGSCHOOL_PASS || "";
 
-// ✅ DEBUG BOOT
 console.log("[BOOT] RAW ENV BASE =", JSON.stringify(process.env.PAGSCHOOL_BASE_URL || ""));
 console.log("[BOOT] BASE AFTER REPLACE =", JSON.stringify(BASE));
 
@@ -67,7 +66,6 @@ async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) 
     const data = safeJsonParse(text);
 
     if (!res.ok) {
-      // ✅ log cru ajuda a achar o motivo real dos erros
       console.log("[HTTP ERROR]", res.status, url, text);
       const msg = typeof data === "object" ? JSON.stringify(data) : String(data);
       const err = new Error(`HTTP ${res.status} ${res.statusText} em ${url}: ${msg}`);
@@ -94,13 +92,8 @@ async function authenticate() {
   }
 
   const url = `${BASE}${PATH_AUTH}`;
-
-  // ✅ login com username/password (mais comum)
   const data = await httpJson("POST", url, {
-    body: {
-      username: USER,
-      password: PASS,
-    },
+    body: { username: USER, password: PASS },
   });
 
   const token =
@@ -115,8 +108,7 @@ async function authenticate() {
   return token;
 }
 
-// ⚠️ Se a API exigir, troque JWT por Bearer aqui.
-// (Como está dando 404 e não 401, por enquanto ok.)
+// ⚠️ Se precisar, troque JWT por Bearer aqui:
 async function apiGet(path, token) {
   const url = `${BASE}${path}`;
   return httpJson("GET", url, { headers: { Authorization: `JWT ${token}` } });
@@ -139,30 +131,21 @@ function pickObj(resp) {
   return resp;
 }
 
-/**
- * Tenta várias rotas até achar uma que NÃO dê 404.
- * Se todas derem 404, retorna null.
- */
-async function apiGetFirstThatWorks(paths, token) {
-  let lastErr = null;
-
+async function apiGetFirstThatWorks(paths, token, label = "") {
   for (const path of paths) {
     try {
       const data = await apiGet(path, token);
-      console.log("[API OK]", path);
+      console.log("[API OK]", label, path);
       return data;
     } catch (err) {
       const status = err?.status;
       if (status === 404) {
-        console.log("[API 404]", path);
-        lastErr = err;
+        console.log("[API 404]", label, path);
         continue;
       }
-      // qualquer outro erro (401/500/etc) a gente para e estoura
       throw err;
     }
   }
-
   return null;
 }
 
@@ -203,15 +186,29 @@ function contratosByAlunoPaths(alunoId) {
   ];
 }
 
+// ✅ ATUALIZADO: rotas de parcelas por contrato (prioriza padrão /contrato/{id}/parcelas)
 function parcelasByContratoPaths(contratoId) {
   const c = encodeURIComponent(contratoId);
   return [
-    `/api/parcela/by-contrato/${c}`,
-    `/api/parcelas/by-contrato/${c}`,
+    // padrões mais comuns:
+    `/api/contrato/${c}/parcelas`,
+    `/api/contratos/${c}/parcelas`,
+    `/api/contrato/${c}/parcela`,
+    `/api/contratos/${c}/parcela`,
+
+    // variações:
+    `/api/contrato/parcelas/${c}`,
+    `/api/contratos/parcelas/${c}`,
     `/api/parcela/contrato/${c}`,
     `/api/parcelas/contrato/${c}`,
+    `/api/parcela/by-contrato/${c}`,
+    `/api/parcelas/by-contrato/${c}`,
+
+    // por query (já sabemos que algumas deram 404, mas deixo por último):
     `/api/parcelas?contrato_id=${c}`,
     `/api/parcela?contrato_id=${c}`,
+    `/api/parcelas?contrato=${c}`,
+    `/api/parcela?contrato=${c}`,
   ];
 }
 
@@ -242,13 +239,13 @@ function extractBoletoInfo(parcela) {
     parcela?.linhaDigitavel ||
     parcela?.linha_digitavel ||
     parcela?.linha ||
-    parcela?.numeroBoleto ||          // 👈 seu exemplo JSON tem "numeroBoleto"
+    parcela?.numeroBoleto ||
     parcela?.numero_boleto;
 
   const valor = parcela?.valor ?? parcela?.valorParcela ?? parcela?.valor_total ?? "";
   const venc =
     parcela?.dataVencimento ||
-    parcela?.vencimento ||            // 👈 seu exemplo JSON tem "vencimento"
+    parcela?.vencimento ||
     parcela?.data_vencimento ||
     "";
 
@@ -315,16 +312,11 @@ async function handleBoleto(req, res) {
 
     const jwt = await authenticate();
 
-    // 1) localizar aluno (tenta telefone primeiro, se falhar pede CPF / tenta CPF)
+    // 1) localizar aluno
     let alunoResp = null;
 
-    if (telefone) {
-      alunoResp = await apiGetFirstThatWorks(alunoByPhonePaths(telefone), jwt);
-    }
-
-    if (!alunoResp && cpf) {
-      alunoResp = await apiGetFirstThatWorks(alunoByCpfPaths(cpf), jwt);
-    }
+    if (telefone) alunoResp = await apiGetFirstThatWorks(alunoByPhonePaths(telefone), jwt, "ALUNO_PHONE");
+    if (!alunoResp && cpf) alunoResp = await apiGetFirstThatWorks(alunoByCpfPaths(cpf), jwt, "ALUNO_CPF");
 
     if (!alunoResp) {
       return sendToPlatform(
@@ -345,8 +337,8 @@ async function handleBoleto(req, res) {
       );
     }
 
-    // 2) contratos (fallback)
-    const contratosResp = await apiGetFirstThatWorks(contratosByAlunoPaths(alunoId), jwt);
+    // 2) contratos
+    const contratosResp = await apiGetFirstThatWorks(contratosByAlunoPaths(alunoId), jwt, "CONTRATOS");
     const contratosArr = pickArray(contratosResp);
 
     if (!contratosArr.length) {
@@ -364,14 +356,13 @@ async function handleBoleto(req, res) {
       );
     }
 
-    // 3) parcelas (fallback)
-    const parcelasResp = await apiGetFirstThatWorks(parcelasByContratoPaths(contratoId), jwt);
+    // 3) parcelas (agora com as rotas novas)
+    const parcelasResp = await apiGetFirstThatWorks(parcelasByContratoPaths(contratoId), jwt, "PARCELAS");
     if (!parcelasResp) {
       return sendToPlatform(res, "Não consegui acessar as parcelas do contrato agora. Me envie seu CPF que eu verifico 😊", { ok: false });
     }
 
     const parcelaAberta = pickOpenParcela(parcelasResp);
-
     if (!parcelaAberta) {
       return sendToPlatform(res, "✅ Não encontrei parcelas em aberto no momento. Se quiser, me envie seu CPF pra eu conferir melhor 😊", { ok: true });
     }
