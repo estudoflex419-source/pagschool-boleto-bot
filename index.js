@@ -11,11 +11,32 @@ const PASS = process.env.PAGSCHOOL_PASS || "";
 console.log("[BOOT] BASE=", JSON.stringify(process.env.PAGSCHOOL_BASE_URL || ""));
 
 // ====== AJUSTE CONFORME A DOC DO PAGSCHOOL ======
-const PATH_AUTH = "/api/authenticate";
-const PATH_FIND_ALUNO_BY_CPF = (cpf) => `/api/aluno/by-cpf/${encodeURIComponent(cpf)}`;
-const PATH_FIND_ALUNO_BY_PHONE = (phone) => `/api/aluno/by-telefone/${encodeURIComponent(phone)}`;
-const PATH_CONTRATOS_BY_ALUNO = (alunoId) => `/api/contrato/by-aluno/${encodeURIComponent(alunoId)}`;
-const PATH_PARCELAS_BY_CONTRATO = (contratoId) => `/api/parcela/by-contrato/${encodeURIComponent(contratoId)}`;
+async function authenticate() {
+  if (!BASE || !USER || !PASS) {
+    throw new Error("Config faltando: PAGSCHOOL_BASE_URL, PAGSCHOOL_USER, PAGSCHOOL_PASS");
+  }
+
+  const url = `${BASE}/api/authenticate`;
+
+  const data = await httpJson("POST", url, {
+    body: {
+      username: USER,
+      password: PASS
+    }
+  });
+
+  const token =
+    data?.token ||
+    data?.jwt ||
+    data?.access_token ||
+    data?.data?.token;
+
+  if (!token) {
+    throw new Error("Não encontrei token no retorno do authenticate.");
+  }
+
+  return token;
+}
 // ================================================
 
 function digits(v) {
