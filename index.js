@@ -170,13 +170,20 @@ function contratosByAlunoPaths(alunoId) {
   ];
 }
 
-/**
- * ✅ ATUALIZAÇÃO FINAL: PagSchool aqui NÃO usa by-contrato
- * Então tentamos SOMENTE por querystring (mais provável).
- */
-function parcelasByContratoPaths(contratoId) {
+// ✅ NOVO: buscar detalhe do contrato (muitas vezes vem as parcelas aqui)
+function contratoDetalhePaths(contratoId) {
   const c = encodeURIComponent(contratoId);
+  return [
+    `/api/contrato/${c}`,
+    `/api/contratos/${c}`,
+    `/api/contrato/detalhe/${c}`,
+    `/api/contratos/detalhe/${c}`,
+  ];
+}
 
+// ✅ fallback: parcelas por querystring (caso não venha no detalhe)
+function parcelasByContratoQueryPaths(contratoId) {
+  const c = encodeURIComponent(contratoId);
   return [
     `/api/parcelas?contrato_id=${c}`,
     `/api/parcelas?contrato=${c}`,
@@ -233,7 +240,9 @@ function sendToPlatform(res, replyText, extra = {}) {
 }
 
 function getTokenFromReq(req) {
-  return String(req.query.token || req.headers["x-webhook-token"] || req.body?.token || req.body?.webhook_token || "");
+  return String(
+    req.query.token || req.headers["x-webhook-token"] || req.body?.token || req.body?.webhook_token || ""
+  );
 }
 
 // ===== routes =====
@@ -275,7 +284,6 @@ async function handleBoleto(req, res) {
 
     const alunoObj = pickObj(alunoResp);
     const alunoId = alunoObj?.id || alunoObj?.aluno_id;
-
     if (!alunoId) {
       return sendToPlatform(res, "Encontrei seu cadastro, mas não identifiquei o ID do aluno. Me envie seu CPF novamente 😊", {
         ok: false,
@@ -295,7 +303,6 @@ async function handleBoleto(req, res) {
 
     const contrato = contratosArr[0];
     const contratoId = contrato?.id || contrato?.contrato_id;
-
     if (!contratoId) {
       return sendToPlatform(res, "Encontrei contrato, mas não identifiquei o ID. Me envie seu CPF pra eu conferir melhor 😊", {
         ok: false,
@@ -303,21 +310,36 @@ async function handleBoleto(req, res) {
       });
     }
 
-    // 3) parcelas (somente querystring)
-    const parcelasResp = await apiGetFirstThatWorks(parcelasByContratoPaths(contratoId), jwt, "PARCELAS");
-    if (!parcelasResp) {
+    // 3) ✅ TENTATIVA 1: detalhe do contrato (muitas vezes vem parcelas aqui)
+    const contratoDetResp = await apiGetFirstThatWorks(contratoDetalhePaths(contratoId), jwt, "CONTRATO_DETALHE");
+    let parcelaAberta = null;
+
+    if (contratoDetResp) {
+      const contratoDetObj = pickObj(contratoDetResp);
+      const parcelasDentro =
+        contratoDetObj?.parcelas ||
+        contratoDetObj?.data?.parcelas ||
+        null;
+
+      if (parcelasDentro) {
+        parcelaAberta = pickOpenParcela(parcelasDentro);
+      }
+    }
+
+    // 4) ✅ TENTATIVA 2 (fallback): querystring de parcelas
+    if (!parcelaAberta) {
+      const parcelasResp = await apiGetFirstThatWorks(parcelasByContratoQueryPaths(contratoId), jwt, "PARCELAS_QUERY");
+      if (parcelasResp) {
+        parcelaAberta = pickOpenParcela(parcelasResp);
+      }
+    }
+
+    if (!parcelaAberta) {
       return sendToPlatform(
         res,
         "Não consegui acessar as parcelas do contrato agora. Me envie seu CPF que eu verifico 😊",
         { ok: false, contratoId }
       );
-    }
-
-    const parcelaAberta = pickOpenParcela(parcelasResp);
-    if (!parcelaAberta) {
-      return sendToPlatform(res, "✅ Não encontrei parcelas em aberto no momento. Se quiser, me envie seu CPF pra eu conferir melhor 😊", {
-        ok: true,
-      });
     }
 
     const { link, linha, valor, venc } = extractBoletoInfo(parcelaAberta);
