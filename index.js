@@ -37,6 +37,8 @@ function pickArray(resp) {
   if (Array.isArray(resp?.result)) return resp.result;
   if (Array.isArray(resp?.parcelas)) return resp.parcelas;
   if (Array.isArray(resp?.contratos)) return resp.contratos;
+  if (Array.isArray(resp?.boletos)) return resp.boletos;
+  if (Array.isArray(resp?.titulos)) return resp.titulos;
   return [];
 }
 function pickObj(resp) {
@@ -50,6 +52,7 @@ function pickObj(resp) {
 async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const res = await fetch(url, {
       method,
@@ -76,6 +79,11 @@ async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) 
     }
 
     return data;
+  } catch (err) {
+    if (String(err?.name) === "AbortError") {
+      throw new Error(`Timeout (${timeoutMs}ms) ao chamar ${url}`);
+    }
+    throw err;
   } finally {
     clearTimeout(t);
   }
@@ -105,11 +113,10 @@ async function authenticateLegacy() {
 
   const url = `${BASE}${PATH_AUTH}`;
 
-  // ✅ tentativas de body (sistemas antigos mudam nome dos campos)
   const bodies = [
-    { usuario: USER, senha: PASS },
-    { username: USER, password: PASS },
-    { login: USER, senha: PASS },
+    { usuario: USER, senha: PASS }, // legado BR
+    { username: USER, password: PASS }, // padrão
+    { login: USER, senha: PASS }, // legado comum
     { user: USER, pass: PASS },
   ];
 
@@ -122,13 +129,11 @@ async function authenticateLegacy() {
       const token = extractToken(data);
       if (!token) throw new Error("Auth ok mas sem token no retorno.");
 
-      // alguns sistemas retornam qual esquema usar, mas quase nunca.
-      // a gente decide depois tentando nos GETs.
       const expiresInSec = Number(data?.expires_in ?? data?.data?.expires_in ?? 0) || 600;
 
       cached = {
         token,
-        scheme: null, // vamos descobrir automaticamente no primeiro GET
+        scheme: null, // vamos detectar no 1º GET
         expiresAt: Date.now() + Math.max(60, expiresInSec - 30) * 1000,
       };
 
@@ -136,9 +141,7 @@ async function authenticateLegacy() {
       return cached;
     } catch (e) {
       lastErr = e;
-      // se for 401/403, tenta próximo body
       if (e?.status === 401 || e?.status === 403) continue;
-      // outros erros: estoura
       throw e;
     }
   }
@@ -146,38 +149,34 @@ async function authenticateLegacy() {
   throw lastErr || new Error("Falha ao autenticar (todas as tentativas).");
 }
 
-// ===== API GET com auto-detecção do esquema de Authorization =====
 function buildAuthHeaders(token, scheme) {
   if (scheme === "JWT") return { Authorization: `JWT ${token}` };
   if (scheme === "Bearer") return { Authorization: `Bearer ${token}` };
   if (scheme === "X") return { "x-access-token": token };
-  // tentativa default: JWT
   return { Authorization: `JWT ${token}` };
 }
 
 async function apiGetAuto(path, auth) {
   const url = `${BASE}${path}`;
 
-  // Se já detectou o esquema, usa direto
   if (auth.scheme) {
     return httpJson("GET", url, { headers: buildAuthHeaders(auth.token, auth.scheme) });
   }
 
-  // Caso não tenha scheme detectado, tenta 3 padrões
   const schemes = ["JWT", "Bearer", "X"];
   let lastErr = null;
 
   for (const scheme of schemes) {
     try {
       const data = await httpJson("GET", url, { headers: buildAuthHeaders(auth.token, scheme) });
-      auth.scheme = scheme; // ✅ fixou
+      auth.scheme = scheme;
       cached.scheme = scheme;
       console.log("[AUTH SCHEME OK]", scheme);
       return data;
     } catch (e) {
       lastErr = e;
-      if (e?.status === 401 || e?.status === 403) continue; // tenta próximo
-      throw e; // 404/500 etc, não é esquema
+      if (e?.status === 401 || e?.status === 403) continue;
+      throw e;
     }
   }
 
@@ -195,7 +194,7 @@ async function apiGetFirstThatWorks(paths, auth, label = "") {
         console.log("[API 404]", label, path);
         continue;
       }
-      throw err; // 401/403/500 etc
+      throw err;
     }
   }
   return null;
@@ -227,7 +226,6 @@ function contratosByAlunoPaths(alunoId) {
   ];
 }
 
-// detalhe do contrato (antigo costuma ter)
 function contratoDetalhePaths(contratoId) {
   const c = encodeURIComponent(contratoId);
   return [
@@ -238,54 +236,125 @@ function contratoDetalhePaths(contratoId) {
   ];
 }
 
-// parcelas por querystring com nomes antigos de parâmetro
+/**
+ * ✅ PARCELAS (LEGADO): tenta MUITOS nomes e áreas (financeiro/titulo)
+ * Se não existir, vamos ter fallback de BOLETO direto.
+ */
 function parcelasQueryPaths(contratoId) {
   const c = encodeURIComponent(contratoId);
 
-  return [
-    // financeiro (mais comum em sistemas antigos)
-    `/api/financeiro/parcelas?contrato=${c}`,
-    `/api/financeiro/parcela?contrato=${c}`,
-    `/api/financeiro/parcelas?contrato_id=${c}`,
+  const params = [
+    `contrato_id=${c}`,
+    `contrato=${c}`,
+    `contratoId=${c}`,
+    `idContrato=${c}`,
+    `contrato_idContrato=${c}`,
+  ];
 
-    // outros formatos
-    `/api/parcelas?contrato=${c}`,
-    `/api/parcela?contrato=${c}`,
-    `/api/parcelas?contrato_id=${c}`,
-    `/api/parcela?contrato_id=${c}`,
+  const bases = [
+    "/api/parcelas",
+    "/api/parcela",
+    "/api/financeiro/parcelas",
+    "/api/financeiro/parcela",
+    "/api/titulos",
+    "/api/titulo",
+    "/api/financeiro/titulos",
+    "/api/financeiro/titulo",
+  ];
+
+  const paths = [];
+
+  for (const b of bases) {
+    for (const p of params) {
+      paths.push(`${b}?${p}`);
+    }
+  }
+
+  // alguns legados usam plural com recurso /contrato
+  paths.push(`/api/financeiro/parcelas/contrato/${c}`);
+  paths.push(`/api/financeiro/titulos/contrato/${c}`);
+  paths.push(`/api/titulos/contrato/${c}`);
+
+  return paths;
+}
+
+/**
+ * ✅ FALLBACK: BOLETO direto pelo contrato (muito comum em sistema antigo)
+ */
+function boletosByContratoPaths(contratoId) {
+  const c = encodeURIComponent(contratoId);
+
+  return [
+    `/api/boleto?contrato=${c}`,
+    `/api/boleto?contrato_id=${c}`,
+    `/api/boletos?contrato=${c}`,
+    `/api/boletos?contrato_id=${c}`,
+
+    `/api/segunda-via?contrato=${c}`,
+    `/api/segunda-via?contrato_id=${c}`,
+    `/api/2via?contrato=${c}`,
+    `/api/2via?contrato_id=${c}`,
+    `/api/boleto/2via?contrato=${c}`,
+    `/api/boleto/2via?contrato_id=${c}`,
+    `/api/boleto/segunda-via?contrato=${c}`,
+    `/api/boleto/segunda-via?contrato_id=${c}`,
+
+    `/api/carne?contrato=${c}`,
+    `/api/carne?contrato_id=${c}`,
+    `/api/carne/by-contrato/${c}`,
+
+    `/api/financeiro/boleto?contrato=${c}`,
+    `/api/financeiro/boleto?contrato_id=${c}`,
+    `/api/financeiro/boletos?contrato=${c}`,
+    `/api/financeiro/boletos?contrato_id=${c}`,
+    `/api/financeiro/carne?contrato=${c}`,
+    `/api/financeiro/carne?contrato_id=${c}`,
   ];
 }
 
-// ===== boleto helpers =====
-function pickOpenParcela(parcelasResp) {
-  const arr = pickArray(parcelasResp);
-  return (
-    arr.find((p) => {
-      const valor = Number(p?.valor ?? 0);
-      const pago = Number(p?.valorPago ?? 0);
-      const dataPag = p?.dataPagamento || p?.data_pagamento;
-      return !dataPag && pago < valor;
-    }) || null
-  );
+// ===== boleto parsing =====
+function pickOpenItem(arr) {
+  const items = Array.isArray(arr) ? arr : pickArray(arr);
+
+  const open = items.find((p) => {
+    const valor = Number(p?.valor ?? p?.valorParcela ?? p?.valor_total ?? 0);
+    const pago = Number(p?.valorPago ?? p?.valor_pago ?? 0);
+    const dataPag = p?.dataPagamento || p?.data_pagamento || p?.dt_pagamento;
+    return !dataPag && pago < valor;
+  });
+
+  return open || (items[0] || null);
 }
 
-function extractBoletoInfo(parcela) {
+function extractBoletoInfo(obj) {
+  if (!obj) return { link: "", linha: "", valor: "", venc: "" };
+
   const link =
-    parcela?.linkBoleto ||
-    parcela?.boletoUrl ||
-    parcela?.urlBoleto ||
-    parcela?.url ||
-    parcela?.link;
+    obj?.linkBoleto ||
+    obj?.boletoUrl ||
+    obj?.urlBoleto ||
+    obj?.url_boleto ||
+    obj?.url ||
+    obj?.link ||
+    obj?.pdf ||
+    obj?.pdfUrl;
 
   const linha =
-    parcela?.linhaDigitavel ||
-    parcela?.linha_digitavel ||
-    parcela?.linha ||
-    parcela?.numeroBoleto ||
-    parcela?.numero_boleto;
+    obj?.linhaDigitavel ||
+    obj?.linha_digitavel ||
+    obj?.linha ||
+    obj?.numeroBoleto ||
+    obj?.numero_boleto ||
+    obj?.codigoBarras ||
+    obj?.codigo_barras;
 
-  const valor = parcela?.valor ?? parcela?.valorParcela ?? parcela?.valor_total ?? "";
-  const venc = parcela?.dataVencimento || parcela?.vencimento || parcela?.data_vencimento || "";
+  const valor = obj?.valor ?? obj?.valorParcela ?? obj?.valor_total ?? obj?.valorTitulo ?? "";
+  const venc =
+    obj?.dataVencimento ||
+    obj?.vencimento ||
+    obj?.data_vencimento ||
+    obj?.dt_vencimento ||
+    "";
 
   return { link, linha, valor, venc };
 }
@@ -342,6 +411,7 @@ async function handleBoleto(req, res) {
 
     const alunoObj = pickObj(alunoResp);
     const alunoId = alunoObj?.id || alunoObj?.aluno_id;
+
     if (!alunoId) {
       return sendToPlatform(res, "Encontrei seu cadastro, mas não identifiquei o ID do aluno. Me envie seu CPF novamente 😊", {
         ok: false,
@@ -352,12 +422,16 @@ async function handleBoleto(req, res) {
     // 2) contratos
     const contratosResp = await apiGetFirstThatWorks(contratosByAlunoPaths(alunoId), auth, "CONTRATOS");
     const contratosArr = pickArray(contratosResp);
+
     if (!contratosArr.length) {
-      return sendToPlatform(res, "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊", { ok: false });
+      return sendToPlatform(res, "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊", {
+        ok: false,
+      });
     }
 
     const contrato = contratosArr[0];
     const contratoId = contrato?.id || contrato?.contrato_id;
+
     if (!contratoId) {
       return sendToPlatform(res, "Encontrei contrato, mas não identifiquei o ID. Me envie seu CPF pra eu conferir melhor 😊", {
         ok: false,
@@ -365,45 +439,55 @@ async function handleBoleto(req, res) {
       });
     }
 
-    // 3) parcelas - tenta (A) detalhe do contrato e (B) querystring
-    let parcelaAberta = null;
-
+    // 3A) tenta parcelas dentro do detalhe do contrato
+    let itemAberto = null;
     const detResp = await apiGetFirstThatWorks(contratoDetalhePaths(contratoId), auth, "CONTRATO_DETALHE");
     if (detResp) {
       const detObj = pickObj(detResp);
-      const parcelasDentro = detObj?.parcelas || detObj?.data?.parcelas || null;
-      if (parcelasDentro) parcelaAberta = pickOpenParcela(parcelasDentro);
+      const parcelasDentro = detObj?.parcelas || detObj?.data?.parcelas || detObj?.titulos || detObj?.data?.titulos || null;
+      if (parcelasDentro) itemAberto = pickOpenItem(parcelasDentro);
     }
 
-    if (!parcelaAberta) {
+    // 3B) tenta endpoints de parcelas/titulos
+    if (!itemAberto) {
       const parcelasResp = await apiGetFirstThatWorks(parcelasQueryPaths(contratoId), auth, "PARCELAS_QUERY");
-      if (parcelasResp) parcelaAberta = pickOpenParcela(parcelasResp);
+      if (parcelasResp) itemAberto = pickOpenItem(parcelasResp);
     }
 
-    if (!parcelaAberta) {
-      return sendToPlatform(res, "Não consegui acessar as parcelas do contrato agora. Me envie seu CPF que eu verifico 😊", {
-        ok: false,
-        contratoId,
-        authScheme: auth.scheme || null,
-      });
+    // 3C) fallback: boleto direto pelo contrato
+    let boletoObj = null;
+    if (!itemAberto) {
+      const boletosResp = await apiGetFirstThatWorks(boletosByContratoPaths(contratoId), auth, "BOLETOS_CONTRATO");
+      if (boletosResp) boletoObj = pickOpenItem(boletosResp);
     }
 
-    const { link, linha, valor, venc } = extractBoletoInfo(parcelaAberta);
+    const alvo = itemAberto || boletoObj;
+    if (!alvo) {
+      return sendToPlatform(
+        res,
+        "Não consegui acessar boletos/parcelas desse contrato agora. Me envie seu CPF que eu verifico 😊",
+        { ok: false, contratoId, authScheme: auth.scheme || null }
+      );
+    }
+
+    const { link, linha, valor, venc } = extractBoletoInfo(alvo);
 
     let msg = "Perfeito 😊 Segue sua 2ª via do boleto:\n\n";
     if (link) msg += `🔗 Link: ${link}\n`;
     if (linha) msg += `🧾 Linha digitável: ${linha}\n`;
     if (valor) msg += `💰 Valor: R$ ${valor}\n`;
     if (venc) msg += `📅 Vencimento: ${venc}\n`;
+    if (!link && !linha) msg += "⚠️ Achei o registro, mas não veio link/linha digitável nesse retorno.\n";
     msg += "\nSe precisar de ajuda, é só me chamar 😊";
 
     return sendToPlatform(res, msg, { ok: true });
   } catch (err) {
     console.error("[WEBHOOK] ERRO:", err);
-    return sendToPlatform(res, "Tive um erro ao buscar seu boleto agora. Me envie seu CPF (somente números) que eu resolvo rapidinho 😊", {
-      ok: false,
-      error: String(err?.message || err),
-    });
+    return sendToPlatform(
+      res,
+      "Tive um erro ao buscar seu boleto agora. Me envie seu CPF (somente números) que eu resolvo rapidinho 😊",
+      { ok: false, error: String(err?.message || err) }
+    );
   }
 }
 
