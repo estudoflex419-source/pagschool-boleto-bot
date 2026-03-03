@@ -4,20 +4,16 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
-const BASE = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/+$/, ""); // remove barra final
+const BASE = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/+$/, "");
 const USER = process.env.PAGSCHOOL_USER || "";
 const PASS = process.env.PAGSCHOOL_PASS || "";
 
-// ✅ DEBUG BOOT (confirma o que o Render está lendo)
+// ✅ DEBUG BOOT
 console.log("[BOOT] RAW ENV BASE =", JSON.stringify(process.env.PAGSCHOOL_BASE_URL || ""));
 console.log("[BOOT] BASE AFTER REPLACE =", JSON.stringify(BASE));
 
 // ====== AJUSTE CONFORME A DOC DO PAGSCHOOL ======
-const PATH_AUTH = "/api/authenticate";
-const PATH_FIND_ALUNO_BY_CPF = (cpf) => `/api/aluno/by-cpf/${encodeURIComponent(cpf)}`;
-const PATH_FIND_ALUNO_BY_PHONE = (phone) => `/api/aluno/by-telefone/${encodeURIComponent(phone)}`;
-const PATH_CONTRATOS_BY_ALUNO = (alunoId) => `/api/contrato/by-aluno/${encodeURIComponent(alunoId)}`;
-const PATH_PARCELAS_BY_CONTRATO = (contratoId) => `/api/parcela/by-contrato/${encodeURIComponent(contratoId)}`;
+const PATH_AUTH = process.env.PAGSCHOOL_AUTH_PATH || "/api/authenticate";
 // ================================================
 
 function digits(v) {
@@ -33,7 +29,6 @@ function normalizePhone(raw) {
 }
 
 function extractPhoneFromChatId(chatId) {
-  // 5513981484410@s.whatsapp.net -> 5513981484410 -> 13981484410
   return normalizePhone(digits(chatId));
 }
 
@@ -72,10 +67,14 @@ async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) 
     const data = safeJsonParse(text);
 
     if (!res.ok) {
-      // ✅ log cru ajuda a descobrir o motivo real do 401/403 etc
+      // ✅ log cru ajuda a achar o motivo real dos erros
       console.log("[HTTP ERROR]", res.status, url, text);
       const msg = typeof data === "object" ? JSON.stringify(data) : String(data);
-      throw new Error(`HTTP ${res.status} ${res.statusText} em ${url}: ${msg}`);
+      const err = new Error(`HTTP ${res.status} ${res.statusText} em ${url}: ${msg}`);
+      err.status = res.status;
+      err.url = url;
+      err.raw = text;
+      throw err;
     }
 
     return data;
@@ -96,7 +95,7 @@ async function authenticate() {
 
   const url = `${BASE}${PATH_AUTH}`;
 
-  // ✅ ALTERAÇÃO: muitas APIs usam username/password
+  // ✅ login com username/password (mais comum)
   const data = await httpJson("POST", url, {
     body: {
       username: USER,
@@ -112,12 +111,12 @@ async function authenticate() {
     data?.data?.jwt ||
     data?.data?.access_token;
 
-  if (!token) throw new Error("Não encontrei token no retorno do authenticate. Verifique a doc/retorno.");
+  if (!token) throw new Error("Não encontrei token no retorno do authenticate.");
   return token;
 }
 
-// ⚠️ Se sua API exigir, troque JWT por Bearer.
-// Ex: Authorization: `Bearer ${token}`
+// ⚠️ Se a API exigir, troque JWT por Bearer aqui.
+// (Como está dando 404 e não 401, por enquanto ok.)
 async function apiGet(path, token) {
   const url = `${BASE}${path}`;
   return httpJson("GET", url, { headers: { Authorization: `JWT ${token}` } });
@@ -132,6 +131,91 @@ function pickArray(resp) {
   if (Array.isArray(resp?.contratos)) return resp.contratos;
   return [];
 }
+
+function pickObj(resp) {
+  if (!resp) return null;
+  if (Array.isArray(resp)) return resp[0] || null;
+  if (resp?.data && !Array.isArray(resp.data)) return resp.data;
+  return resp;
+}
+
+/**
+ * Tenta várias rotas até achar uma que NÃO dê 404.
+ * Se todas derem 404, retorna null.
+ */
+async function apiGetFirstThatWorks(paths, token) {
+  let lastErr = null;
+
+  for (const path of paths) {
+    try {
+      const data = await apiGet(path, token);
+      console.log("[API OK]", path);
+      return data;
+    } catch (err) {
+      const status = err?.status;
+      if (status === 404) {
+        console.log("[API 404]", path);
+        lastErr = err;
+        continue;
+      }
+      // qualquer outro erro (401/500/etc) a gente para e estoura
+      throw err;
+    }
+  }
+
+  return null;
+}
+
+// ======== CANDIDATOS DE ROTAS (fallback) ========
+
+function alunoByPhonePaths(phone) {
+  const p = encodeURIComponent(phone);
+  return [
+    `/api/aluno/by-telefone/${p}`,
+    `/api/aluno/telefone/${p}`,
+    `/api/aluno/por-telefone/${p}`,
+    `/api/alunos/telefone/${p}`,
+    `/api/alunos?telefone=${p}`,
+    `/api/aluno?telefone=${p}`,
+  ];
+}
+
+function alunoByCpfPaths(cpf) {
+  const c = encodeURIComponent(cpf);
+  return [
+    `/api/aluno/by-cpf/${c}`,
+    `/api/aluno/cpf/${c}`,
+    `/api/aluno/por-cpf/${c}`,
+    `/api/alunos?cpf=${c}`,
+    `/api/aluno?cpf=${c}`,
+  ];
+}
+
+function contratosByAlunoPaths(alunoId) {
+  const a = encodeURIComponent(alunoId);
+  return [
+    `/api/contrato/by-aluno/${a}`,
+    `/api/contratos/by-aluno/${a}`,
+    `/api/contrato/aluno/${a}`,
+    `/api/contratos/aluno/${a}`,
+    `/api/contratos?aluno_id=${a}`,
+    `/api/contrato?aluno_id=${a}`,
+  ];
+}
+
+function parcelasByContratoPaths(contratoId) {
+  const c = encodeURIComponent(contratoId);
+  return [
+    `/api/parcela/by-contrato/${c}`,
+    `/api/parcelas/by-contrato/${c}`,
+    `/api/parcela/contrato/${c}`,
+    `/api/parcelas/contrato/${c}`,
+    `/api/parcelas?contrato_id=${c}`,
+    `/api/parcela?contrato_id=${c}`,
+  ];
+}
+
+// ===============================================
 
 function pickOpenParcela(parcelasResp) {
   const arr = pickArray(parcelasResp);
@@ -157,24 +241,20 @@ function extractBoletoInfo(parcela) {
   const linha =
     parcela?.linhaDigitavel ||
     parcela?.linha_digitavel ||
-    parcela?.linha;
+    parcela?.linha ||
+    parcela?.numeroBoleto ||          // 👈 seu exemplo JSON tem "numeroBoleto"
+    parcela?.numero_boleto;
 
-  const valor = parcela?.valor ?? parcela?.valorParcela ?? "";
+  const valor = parcela?.valor ?? parcela?.valorParcela ?? parcela?.valor_total ?? "";
   const venc =
     parcela?.dataVencimento ||
-    parcela?.vencimento ||
+    parcela?.vencimento ||            // 👈 seu exemplo JSON tem "vencimento"
     parcela?.data_vencimento ||
     "";
 
   return { link, linha, valor, venc };
 }
 
-/**
- * ✅ RESPOSTA “COMPATÍVEL COM TUDO”
- * - reply (seu formato)
- * - text / message (muitos painéis usam isso)
- * - messages[] (muitos fluxos usam array)
- */
 function sendToPlatform(res, replyText, extra = {}) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   return res.status(200).send(
@@ -190,7 +270,6 @@ function sendToPlatform(res, replyText, extra = {}) {
 }
 
 function getTokenFromReq(req) {
-  // ✅ aceita token via query, header ou body
   return String(
     req.query.token ||
       req.headers["x-webhook-token"] ||
@@ -200,11 +279,7 @@ function getTokenFromReq(req) {
   );
 }
 
-// ✅ rota raiz (pra não aparecer Cannot GET /)
-app.get("/", (req, res) => {
-  res.status(200).send("API ON ✅ Use /health ou /boleto");
-});
-
+app.get("/", (req, res) => res.status(200).send("API ON ✅ Use /health ou /boleto"));
 app.get("/health", (req, res) => sendToPlatform(res, "ok", { health: true }));
 
 async function handleBoleto(req, res) {
@@ -214,65 +289,64 @@ async function handleBoleto(req, res) {
       return sendToPlatform(res, "Não autorizado.", { ok: false });
     }
 
-    // 👇 Loga exatamente o que chega
     console.log("[WEBHOOK] METHOD:", req.method);
     console.log("[WEBHOOK] QUERY:", req.query);
     console.log("[WEBHOOK] BODY:", JSON.stringify(req.body || {}, null, 2));
 
     const body = req.body || {};
 
-    // tenta pegar de qualquer campo possível + query (pra testes)
     const rawTelefone =
-      body.telefone ||
-      body.phone ||
-      body.numero ||
-      body.number ||
-      req.query.telefone ||
-      req.query.phone ||
-      "";
+      body.telefone || body.phone || body.numero || body.number ||
+      req.query.telefone || req.query.phone || "";
 
     const rawChatId =
       body.chatId || body.chat_id || body.remoteJid || body.jid || "";
 
     const rawMessage =
-      body.message ||
-      body.text ||
-      body.mensagem ||
-      body.body ||
-      req.query.message ||
-      req.query.text ||
-      "";
+      body.message || body.text || body.mensagem || body.body ||
+      req.query.message || req.query.text || "";
 
     const cpf = extractCpfFromText(body.cpf || "") || extractCpfFromText(rawMessage);
     const telefone = normalizePhone(rawTelefone) || extractPhoneFromChatId(rawChatId);
 
-    // Se não tiver CPF nem telefone, pede CPF
     if (!cpf && !telefone) {
       return sendToPlatform(res, "Pra eu localizar seu boleto, me envie seu CPF (somente números) 😊", { ok: false });
     }
 
     const jwt = await authenticate();
 
-    // 1) localizar aluno
+    // 1) localizar aluno (tenta telefone primeiro, se falhar pede CPF / tenta CPF)
     let alunoResp = null;
-    if (cpf) alunoResp = await apiGet(PATH_FIND_ALUNO_BY_CPF(cpf), jwt);
-    else alunoResp = await apiGet(PATH_FIND_ALUNO_BY_PHONE(telefone), jwt);
 
-    const alunoArr = pickArray(alunoResp);
-    const alunoObj = alunoArr[0] || (alunoResp?.data && !Array.isArray(alunoResp.data) ? alunoResp.data : alunoResp);
+    if (telefone) {
+      alunoResp = await apiGetFirstThatWorks(alunoByPhonePaths(telefone), jwt);
+    }
 
+    if (!alunoResp && cpf) {
+      alunoResp = await apiGetFirstThatWorks(alunoByCpfPaths(cpf), jwt);
+    }
+
+    if (!alunoResp) {
+      return sendToPlatform(
+        res,
+        "Não consegui localizar seu cadastro. Me envie seu CPF (somente números) que eu puxo seu boleto agora 😊",
+        { ok: false }
+      );
+    }
+
+    const alunoObj = pickObj(alunoResp);
     const alunoId = alunoObj?.id || alunoObj?.aluno_id;
 
     if (!alunoId) {
       return sendToPlatform(
         res,
-        "Não consegui localizar seu cadastro só pelo telefone. Me envie seu CPF (somente números) que eu puxo seu boleto agora 😊",
-        { ok: false }
+        "Encontrei retorno, mas não achei o ID do aluno. Me envie seu CPF (somente números) pra eu localizar certinho 😊",
+        { ok: false, debug: { alunoKeys: alunoObj ? Object.keys(alunoObj) : [] } }
       );
     }
 
-    // 2) contratos
-    const contratosResp = await apiGet(PATH_CONTRATOS_BY_ALUNO(alunoId), jwt);
+    // 2) contratos (fallback)
+    const contratosResp = await apiGetFirstThatWorks(contratosByAlunoPaths(alunoId), jwt);
     const contratosArr = pickArray(contratosResp);
 
     if (!contratosArr.length) {
@@ -281,10 +355,21 @@ async function handleBoleto(req, res) {
 
     const contrato = contratosArr[0];
     const contratoId = contrato?.id || contrato?.contrato_id;
-    if (!contratoId) throw new Error("Não encontrei contratoId no retorno de contratos.");
 
-    // 3) parcelas
-    const parcelasResp = await apiGet(PATH_PARCELAS_BY_CONTRATO(contratoId), jwt);
+    if (!contratoId) {
+      return sendToPlatform(
+        res,
+        "Encontrei contrato, mas não identifiquei o ID. Me envie seu CPF pra eu conferir melhor 😊",
+        { ok: false, debug: { contratoKeys: Object.keys(contrato || {}) } }
+      );
+    }
+
+    // 3) parcelas (fallback)
+    const parcelasResp = await apiGetFirstThatWorks(parcelasByContratoPaths(contratoId), jwt);
+    if (!parcelasResp) {
+      return sendToPlatform(res, "Não consegui acessar as parcelas do contrato agora. Me envie seu CPF que eu verifico 😊", { ok: false });
+    }
+
     const parcelaAberta = pickOpenParcela(parcelasResp);
 
     if (!parcelaAberta) {
@@ -311,7 +396,6 @@ async function handleBoleto(req, res) {
   }
 }
 
-// ✅ suporte GET e POST (algumas plataformas testam por GET)
 app.post("/boleto", handleBoleto);
 app.get("/boleto", handleBoleto);
 
