@@ -19,18 +19,6 @@ function digits(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
-function normalizePhone(raw) {
-  const d = digits(raw);
-  if (!d) return "";
-  if (d.startsWith("55") && d.length >= 12) return d.slice(-11);
-  if (d.length > 11) return d.slice(-11);
-  return d;
-}
-
-function extractPhoneFromChatId(chatId) {
-  return normalizePhone(digits(chatId));
-}
-
 function extractCpfFromText(text) {
   const d = digits(text);
   if (d.length === 11) return d;
@@ -86,12 +74,24 @@ async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) 
   }
 }
 
+// ====== CACHE DO TOKEN (performance) ======
+let cachedToken = null;
+let tokenExpiresAt = 0; // epoch ms
+
 async function authenticate() {
   if (!BASE || !USER || !PASS) {
     throw new Error("Config faltando: PAGSCHOOL_BASE_URL, PAGSCHOOL_USER, PAGSCHOOL_PASS");
   }
 
+  // se token ainda está válido, reutiliza
+  const now = Date.now();
+  if (cachedToken && tokenExpiresAt && now < tokenExpiresAt) {
+    return cachedToken;
+  }
+
   const url = `${BASE}${PATH_AUTH}`;
+
+  // ✅ login com username/password
   const data = await httpJson("POST", url, {
     body: { username: USER, password: PASS },
   });
@@ -105,10 +105,19 @@ async function authenticate() {
     data?.data?.access_token;
 
   if (!token) throw new Error("Não encontrei token no retorno do authenticate.");
+
+  // tenta ler expiração (se vier). Se não vier, assume 10 minutos.
+  const expiresInSec =
+    Number(data?.expires_in ?? data?.data?.expires_in ?? 0) || 600;
+
+  cachedToken = token;
+  tokenExpiresAt = Date.now() + Math.max(60, expiresInSec - 30) * 1000; // margem de 30s
+
+  console.log("[AUTH] token cacheado por ~", expiresInSec, "segundos");
   return token;
 }
 
-// ⚠️ Se precisar, troque JWT por Bearer aqui:
+// ⚠️ Se a API exigir, troque JWT por Bearer aqui:
 async function apiGet(path, token) {
   const url = `${BASE}${path}`;
   return httpJson("GET", url, { headers: { Authorization: `JWT ${token}` } });
@@ -149,19 +158,7 @@ async function apiGetFirstThatWorks(paths, token, label = "") {
   return null;
 }
 
-// ======== CANDIDATOS DE ROTAS (fallback) ========
-
-function alunoByPhonePaths(phone) {
-  const p = encodeURIComponent(phone);
-  return [
-    `/api/aluno/by-telefone/${p}`,
-    `/api/aluno/telefone/${p}`,
-    `/api/aluno/por-telefone/${p}`,
-    `/api/alunos/telefone/${p}`,
-    `/api/alunos?telefone=${p}`,
-    `/api/aluno?telefone=${p}`,
-  ];
-}
+// ======== ROTAS (CPF / CONTRATO / PARCELAS) ========
 
 function alunoByCpfPaths(cpf) {
   const c = encodeURIComponent(cpf);
@@ -186,11 +183,10 @@ function contratosByAlunoPaths(alunoId) {
   ];
 }
 
-// ✅ ATUALIZADO: rotas de parcelas por contrato (prioriza padrão /contrato/{id}/parcelas)
 function parcelasByContratoPaths(contratoId) {
   const c = encodeURIComponent(contratoId);
   return [
-    // padrões mais comuns:
+    // padrões comuns:
     `/api/contrato/${c}/parcelas`,
     `/api/contratos/${c}/parcelas`,
     `/api/contrato/${c}/parcela`,
@@ -203,12 +199,6 @@ function parcelasByContratoPaths(contratoId) {
     `/api/parcelas/contrato/${c}`,
     `/api/parcela/by-contrato/${c}`,
     `/api/parcelas/by-contrato/${c}`,
-
-    // por query (já sabemos que algumas deram 404, mas deixo por último):
-    `/api/parcelas?contrato_id=${c}`,
-    `/api/parcela?contrato_id=${c}`,
-    `/api/parcelas?contrato=${c}`,
-    `/api/parcela?contrato=${c}`,
   ];
 }
 
@@ -292,36 +282,30 @@ async function handleBoleto(req, res) {
 
     const body = req.body || {};
 
-    const rawTelefone =
-      body.telefone || body.phone || body.numero || body.number ||
-      req.query.telefone || req.query.phone || "";
-
-    const rawChatId =
-      body.chatId || body.chat_id || body.remoteJid || body.jid || "";
-
     const rawMessage =
       body.message || body.text || body.mensagem || body.body ||
       req.query.message || req.query.text || "";
 
-    const cpf = extractCpfFromText(body.cpf || "") || extractCpfFromText(rawMessage);
-    const telefone = normalizePhone(rawTelefone) || extractPhoneFromChatId(rawChatId);
+    const cpf =
+      extractCpfFromText(body.cpf || "") ||
+      extractCpfFromText(rawMessage);
 
-    if (!cpf && !telefone) {
-      return sendToPlatform(res, "Pra eu localizar seu boleto, me envie seu CPF (somente números) 😊", { ok: false });
+    if (!cpf) {
+      return sendToPlatform(
+        res,
+        "Pra eu localizar seu boleto, me envie seu CPF (somente números) 😊",
+        { ok: false }
+      );
     }
 
     const jwt = await authenticate();
 
-    // 1) localizar aluno
-    let alunoResp = null;
-
-    if (telefone) alunoResp = await apiGetFirstThatWorks(alunoByPhonePaths(telefone), jwt, "ALUNO_PHONE");
-    if (!alunoResp && cpf) alunoResp = await apiGetFirstThatWorks(alunoByCpfPaths(cpf), jwt, "ALUNO_CPF");
-
+    // 1) localizar aluno por CPF
+    const alunoResp = await apiGetFirstThatWorks(alunoByCpfPaths(cpf), jwt, "ALUNO_CPF");
     if (!alunoResp) {
       return sendToPlatform(
         res,
-        "Não consegui localizar seu cadastro. Me envie seu CPF (somente números) que eu puxo seu boleto agora 😊",
+        "Não consegui localizar seu cadastro com esse CPF. Confere se está correto e me envie novamente (somente números) 😊",
         { ok: false }
       );
     }
@@ -332,17 +316,21 @@ async function handleBoleto(req, res) {
     if (!alunoId) {
       return sendToPlatform(
         res,
-        "Encontrei retorno, mas não achei o ID do aluno. Me envie seu CPF (somente números) pra eu localizar certinho 😊",
+        "Encontrei seu cadastro, mas não identifiquei o ID do aluno. Me envie seu CPF novamente que eu verifico 😊",
         { ok: false, debug: { alunoKeys: alunoObj ? Object.keys(alunoObj) : [] } }
       );
     }
 
-    // 2) contratos
+    // 2) contratos por aluno
     const contratosResp = await apiGetFirstThatWorks(contratosByAlunoPaths(alunoId), jwt, "CONTRATOS");
     const contratosArr = pickArray(contratosResp);
 
     if (!contratosArr.length) {
-      return sendToPlatform(res, "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊", { ok: false });
+      return sendToPlatform(
+        res,
+        "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊",
+        { ok: false }
+      );
     }
 
     const contrato = contratosArr[0];
@@ -356,15 +344,24 @@ async function handleBoleto(req, res) {
       );
     }
 
-    // 3) parcelas (agora com as rotas novas)
+    // 3) parcelas por contrato
     const parcelasResp = await apiGetFirstThatWorks(parcelasByContratoPaths(contratoId), jwt, "PARCELAS");
     if (!parcelasResp) {
-      return sendToPlatform(res, "Não consegui acessar as parcelas do contrato agora. Me envie seu CPF que eu verifico 😊", { ok: false });
+      return sendToPlatform(
+        res,
+        "Não consegui acessar as parcelas do contrato agora. Me envie seu CPF que eu verifico 😊",
+        { ok: false, contratoId }
+      );
     }
 
     const parcelaAberta = pickOpenParcela(parcelasResp);
+
     if (!parcelaAberta) {
-      return sendToPlatform(res, "✅ Não encontrei parcelas em aberto no momento. Se quiser, me envie seu CPF pra eu conferir melhor 😊", { ok: true });
+      return sendToPlatform(
+        res,
+        "✅ Não encontrei parcelas em aberto no momento. Se quiser, me envie seu CPF pra eu conferir melhor 😊",
+        { ok: true }
+      );
     }
 
     const { link, linha, valor, venc } = extractBoletoInfo(parcelaAberta);
