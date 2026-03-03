@@ -105,7 +105,7 @@ async function authenticate() {
   return token;
 }
 
-// ⚠️ Se for Bearer, troque aqui:
+// ⚠️ Se a API exigir, troque JWT por Bearer aqui:
 async function apiGet(path, token) {
   const url = `${BASE}${path}`;
   return httpJson("GET", url, { headers: { Authorization: `JWT ${token}` } });
@@ -134,12 +134,11 @@ async function apiGetFirstThatWorks(paths, token, label = "") {
       console.log("[API OK]", label, path);
       return data;
     } catch (err) {
-      const status = err?.status;
-      if (status === 404) {
+      if (err?.status === 404) {
         console.log("[API 404]", label, path);
         continue;
       }
-      throw err; // 401/403/500 etc
+      throw err;
     }
   }
   return null;
@@ -166,61 +165,35 @@ function contratosByAlunoPaths(alunoId) {
     `/api/contratos/aluno/${a}`,
     `/api/contratos?aluno_id=${a}`,
     `/api/contrato?aluno_id=${a}`,
-    // variações possíveis
     `/api/contrato?aluno=${a}`,
     `/api/contratos?aluno=${a}`,
   ];
 }
 
-// ✅ AQUI está a “bala de prata”: tenta querystring + nested + by-contrato
+/**
+ * ✅ ATUALIZAÇÃO FINAL: PagSchool aqui NÃO usa by-contrato
+ * Então tentamos SOMENTE por querystring (mais provável).
+ */
 function parcelasByContratoPaths(contratoId) {
   const c = encodeURIComponent(contratoId);
 
   return [
-    // querystring (muito comum)
     `/api/parcelas?contrato_id=${c}`,
     `/api/parcelas?contrato=${c}`,
     `/api/parcela?contrato_id=${c}`,
     `/api/parcela?contrato=${c}`,
-
-    // nested no contrato
-    `/api/contrato/${c}/parcelas`,
-    `/api/contratos/${c}/parcelas`,
-    `/api/contrato/${c}/parcela`,
-    `/api/contratos/${c}/parcela`,
-
-    // caminhos “by-contrato”
-    `/api/parcela/by-contrato/${c}`,
-    `/api/parcelas/by-contrato/${c}`,
-    `/api/parcela/contrato/${c}`,
-    `/api/parcelas/contrato/${c}`,
-    `/api/contrato/parcelas/${c}`,
-    `/api/contratos/parcelas/${c}`,
-
-    // REST simples
-    `/api/parcelas/${c}`,
-    `/api/parcela/${c}`,
-
-    // financeiro (alguns sistemas colocam aqui)
-    `/api/financeiro/parcelas?contrato_id=${c}`,
-    `/api/financeiro/parcelas?contrato=${c}`,
-    `/api/financeiro/parcelas/${c}`,
-    `/api/financeiro/parcela?contrato_id=${c}`,
-    `/api/financeiro/parcela?contrato=${c}`,
   ];
 }
 
 // ===== boleto helpers =====
 function pickOpenParcela(parcelasResp) {
   const arr = pickArray(parcelasResp);
-
   const open = arr.find((p) => {
     const valor = Number(p?.valor ?? 0);
     const pago = Number(p?.valorPago ?? 0);
     const dataPag = p?.dataPagamento || p?.data_pagamento;
     return !dataPag && pago < valor;
   });
-
   return open || null;
 }
 
@@ -240,11 +213,7 @@ function extractBoletoInfo(parcela) {
     parcela?.numero_boleto;
 
   const valor = parcela?.valor ?? parcela?.valorParcela ?? parcela?.valor_total ?? "";
-  const venc =
-    parcela?.dataVencimento ||
-    parcela?.vencimento ||
-    parcela?.data_vencimento ||
-    "";
+  const venc = parcela?.dataVencimento || parcela?.vencimento || parcela?.data_vencimento || "";
 
   return { link, linha, valor, venc };
 }
@@ -319,7 +288,9 @@ async function handleBoleto(req, res) {
     const contratosArr = pickArray(contratosResp);
 
     if (!contratosArr.length) {
-      return sendToPlatform(res, "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊", { ok: false });
+      return sendToPlatform(res, "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊", {
+        ok: false,
+      });
     }
 
     const contrato = contratosArr[0];
@@ -332,11 +303,9 @@ async function handleBoleto(req, res) {
       });
     }
 
-    // 3) parcelas (TENTA TUDO)
+    // 3) parcelas (somente querystring)
     const parcelasResp = await apiGetFirstThatWorks(parcelasByContratoPaths(contratoId), jwt, "PARCELAS");
-
     if (!parcelasResp) {
-      // aqui te devolvo o contratoId pra você ver e eu ajustar rapidinho se faltar alguma rota
       return sendToPlatform(
         res,
         "Não consegui acessar as parcelas do contrato agora. Me envie seu CPF que eu verifico 😊",
