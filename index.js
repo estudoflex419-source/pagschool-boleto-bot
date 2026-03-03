@@ -241,17 +241,18 @@ function contratoDetalhePaths(contratoId) {
 // parcelas por querystring com nomes antigos de parâmetro
 function parcelasQueryPaths(contratoId) {
   const c = encodeURIComponent(contratoId);
-  return [
-    `/api/parcelas?contrato_id=${c}`,
-    `/api/parcelas?contrato=${c}`,
-    `/api/parcelas?contratoId=${c}`,
-    `/api/parcelas?idContrato=${c}`,
-    `/api/parcelas?contrato_idContrato=${c}`,
 
-    `/api/parcela?contrato_id=${c}`,
+  return [
+    // financeiro (mais comum em sistemas antigos)
+    `/api/financeiro/parcelas?contrato=${c}`,
+    `/api/financeiro/parcela?contrato=${c}`,
+    `/api/financeiro/parcelas?contrato_id=${c}`,
+
+    // outros formatos
+    `/api/parcelas?contrato=${c}`,
     `/api/parcela?contrato=${c}`,
-    `/api/parcela?contratoId=${c}`,
-    `/api/parcela?idContrato=${c}`,
+    `/api/parcelas?contrato_id=${c}`,
+    `/api/parcela?contrato_id=${c}`,
   ];
 }
 
