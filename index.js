@@ -7,12 +7,12 @@ app.use(express.json({ limit: "1mb" }));
  * CONFIG (Render -> Environment Variables)
  * - WEBHOOK_TOKEN: um token secreto seu (ex: "minha_chave_123")
  * - PAGSCHOOL_BASE_URL: ex: "https://sistema.pagschool.com.br/prod"
- * - PAGSCHOOL_USER: seu usuário da API
- * - PAGSCHOOL_PASS: sua senha da API
+ * - PAGSCHOOL_USER: seu usuário da API (o mesmo login do sistema)
+ * - PAGSCHOOL_PASS: sua senha da API (a mesma senha do sistema)
  *
  * IMPORTANTE:
- * Os endpoints de busca/boletos podem variar conforme a documentação que eles te mandaram.
- * Por isso, você vai ajustar os "PATHS" abaixo conforme a doc.
+ * Os endpoints de busca/boletos podem variar conforme a documentação.
+ * Ajuste os PATHS abaixo conforme a doc do PagSchool.
  */
 
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
@@ -24,18 +24,22 @@ const PASS = process.env.PAGSCHOOL_PASS;
 const PATH_AUTH = "/api/authenticate";
 
 // Exemplo de caminhos (VOCÊ VAI TROCAR pelos corretos da doc):
-const PATH_FIND_ALUNO_BY_CPF = (cpf) => `/api/aluno/by-cpf/${encodeURIComponent(cpf)}`;
-const PATH_FIND_ALUNO_BY_PHONE = (phone) => `/api/aluno/by-telefone/${encodeURIComponent(phone)}`;
-const PATH_CONTRATOS_BY_ALUNO = (alunoId) => `/api/contrato/by-aluno/${encodeURIComponent(alunoId)}`;
-const PATH_PARCELAS_BY_CONTRATO = (contratoId) => `/api/parcela/by-contrato/${encodeURIComponent(contratoId)}`;
+const PATH_FIND_ALUNO_BY_CPF = (cpf) =>
+  `/api/aluno/by-cpf/${encodeURIComponent(cpf)}`;
+const PATH_FIND_ALUNO_BY_PHONE = (phone) =>
+  `/api/aluno/by-telefone/${encodeURIComponent(phone)}`;
+const PATH_CONTRATOS_BY_ALUNO = (alunoId) =>
+  `/api/contrato/by-aluno/${encodeURIComponent(alunoId)}`;
+const PATH_PARCELAS_BY_CONTRATO = (contratoId) =>
+  `/api/parcela/by-contrato/${encodeURIComponent(contratoId)}`;
 // ===========================================================================
 
 function normalizePhone(raw) {
   if (!raw) return "";
   // mantém só números
   const digits = String(raw).replace(/\D/g, "");
-  // tenta pegar os últimos 11 (DDD+numero) ou 13 com 55
-  if (digits.length > 11 && digits.endsWith(digits.slice(-11))) return digits.slice(-11);
+  // pega os últimos 11 dígitos (DDD + número) se vier com 55 na frente
+  if (digits.length > 11) return digits.slice(-11);
   return digits;
 }
 
@@ -49,13 +53,18 @@ async function httpJson(method, url, { headers, body } = {}) {
     method,
     headers: {
       ...(headers || {}),
-      ...(body ? { "Content-Type": "application/json" } : {})
+      ...(body ? { "Content-Type": "application/json" } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined
+    body: body ? JSON.stringify(body) : undefined,
   });
+
   const text = await res.text();
   let data;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
 
   if (!res.ok) {
     const msg = typeof data === "object" ? JSON.stringify(data) : String(data);
@@ -66,40 +75,53 @@ async function httpJson(method, url, { headers, body } = {}) {
 
 async function authenticate() {
   if (!BASE || !USER || !PASS) {
-    throw new Error("Config faltando: PAGSCHOOL_BASE_URL, PAGSCHOOL_USER, PAGSCHOOL_PASS");
+    throw new Error(
+      "Config faltando: PAGSCHOOL_BASE_URL, PAGSCHOOL_USER, PAGSCHOOL_PASS"
+    );
   }
   const url = `${BASE}${PATH_AUTH}`;
-  const data = await httpJson("POST", url, { body: { usuario: USER, senha: PASS } });
+  const data = await httpJson("POST", url, {
+    body: { usuario: USER, senha: PASS },
+  });
 
   // Alguns retornam { token: "..." } ou { jwt: "..." } etc.
   const token =
-    data?.token || data?.jwt || data?.access_token || data?.data?.token || data?.data?.jwt;
+    data?.token ||
+    data?.jwt ||
+    data?.access_token ||
+    data?.data?.token ||
+    data?.data?.jwt;
 
-  if (!token) throw new Error("Não encontrei token no retorno do authenticate. Verifique a doc/retorno.");
+  if (!token)
+    throw new Error(
+      "Não encontrei token no retorno do authenticate. Verifique a doc/retorno."
+    );
   return token;
 }
 
 async function apiGet(path, token) {
   const url = `${BASE}${path}`;
-  return httpJson("GET", url, { headers: { Authorization: `JWT ${token}` } });
+  return httpJson("GET", url, {
+    headers: { Authorization: `JWT ${token}` },
+  });
 }
 
 function pickOpenBoleto(parcelaList) {
-  // Você pode ajustar conforme os campos reais do PagSchool.
-  // Regra: parcela em aberto = sem dataPagamento e (valorPago < valor)
-  const arr = Array.isArray(parcelaList) ? parcelaList : (parcelaList?.data || parcelaList?.parcelas || []);
-  const open = arr.find(p => {
+  const arr = Array.isArray(parcelaList)
+    ? parcelaList
+    : parcelaList?.data || parcelaList?.parcelas || [];
+
+  const open = arr.find((p) => {
     const valor = Number(p?.valor ?? 0);
     const pago = Number(p?.valorPago ?? 0);
     const dataPag = p?.dataPagamento;
-    return !dataPag && (pago < valor);
+    return !dataPag && pago < valor;
   });
 
   return open || null;
 }
 
 function extractBoletoLink(parcela) {
-  // Ajuste conforme retorno real: pode ser "linkBoleto", "boletoUrl", "url", "linhaDigitavel", etc.
   const link =
     parcela?.linkBoleto ||
     parcela?.boletoUrl ||
@@ -120,11 +142,10 @@ app.get("/health", (req, res) => okJson(res, { ok: true }));
 
 /**
  * Endpoint que seu FLUXO vai chamar
- * Body esperado (o fluxo manda):
- * {
- *   "telefone": "5516999999999" ou "16999999999",
- *   "cpf": "00000000000" (opcional)
- * }
+ * Pode chegar:
+ * - por telefone do WhatsApp (ex: 5513...@s.whatsapp.net)
+ * - por campos variados (from/phone/number/chatId etc)
+ * - ou por CPF (opcional)
  */
 app.post("/boleto", async (req, res) => {
   try {
@@ -134,14 +155,38 @@ app.post("/boleto", async (req, res) => {
       return res.status(401).json({ ok: false, message: "Não autorizado." });
     }
 
-    const telefone = normalizePhone(req.body?.telefone);
+    // Log para você ver exatamente o que o FacilitaFlow está mandando
+    console.log("BODY RECEBIDO:", JSON.stringify(req.body, null, 2));
+
+    // Tenta pegar telefone de vários campos possíveis do FacilitaFlow
+    const rawFrom =
+      req.body?.telefone ||
+      req.body?.phone ||
+      req.body?.from ||
+      req.body?.number ||
+      req.body?.chatId ||
+      req.body?.chat_id ||
+      req.body?.message?.from ||
+      req.body?.data?.from ||
+      req.body?.sender ||
+      req.body?.remoteJid ||
+      "";
+
+    // remove sufixos comuns do WhatsApp
+    const cleanedFrom = String(rawFrom)
+      .replace("@s.whatsapp.net", "")
+      .replace("@c.us", "")
+      .trim();
+
+    const telefone = normalizePhone(cleanedFrom);
     const cpf = String(req.body?.cpf || "").replace(/\D/g, "");
 
+    // Se não veio telefone nem cpf, pede cpf (fallback)
     if (!telefone && !cpf) {
       return okJson(res, {
         ok: false,
         reply:
-          "Para eu gerar seu boleto, me envie por favor seu CPF (somente números). 😊"
+          "Para eu localizar seu boleto, me envie seu CPF (somente números). 😊",
       });
     }
 
@@ -158,33 +203,38 @@ app.post("/boleto", async (req, res) => {
     }
 
     // Ajuste: aluno pode vir em aluno.data / aluno[0] etc.
-    const alunoObj = Array.isArray(aluno) ? aluno[0] : (aluno?.data || aluno);
+    const alunoObj = Array.isArray(aluno)
+      ? aluno[0]
+      : aluno?.data || aluno;
 
     const alunoId = alunoObj?.id || alunoObj?.aluno_id;
     if (!alunoId) {
       return okJson(res, {
         ok: false,
         reply:
-          "Não encontrei seu cadastro pelo telefone. Me envie seu CPF (somente números) para localizar e gerar o boleto. 😊"
+          "Não encontrei seu cadastro pelo telefone. Me envie seu CPF (somente números) para localizar e gerar o boleto. 😊",
       });
     }
 
     // 2) Buscar contratos do aluno
     const contratos = await apiGet(PATH_CONTRATOS_BY_ALUNO(alunoId), jwt);
-    const contratosArr = Array.isArray(contratos) ? contratos : (contratos?.data || contratos?.contratos || []);
+    const contratosArr = Array.isArray(contratos)
+      ? contratos
+      : contratos?.data || contratos?.contratos || [];
 
     if (!contratosArr.length) {
       return okJson(res, {
         ok: false,
         reply:
-          "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido para eu gerar o boleto certinho. 😊"
+          "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido para eu gerar o boleto certinho. 😊",
       });
     }
 
     // Pega o contrato mais recente (ajuste se tiver campo de data)
     const contrato = contratosArr[0];
     const contratoId = contrato?.id || contrato?.contrato_id;
-    if (!contratoId) throw new Error("Não encontrei contratoId no retorno de contratos.");
+    if (!contratoId)
+      throw new Error("Não encontrei contratoId no retorno de contratos.");
 
     // 3) Buscar parcelas do contrato e achar parcela em aberto
     const parcelas = await apiGet(PATH_PARCELAS_BY_CONTRATO(contratoId), jwt);
@@ -194,7 +244,7 @@ app.post("/boleto", async (req, res) => {
       return okJson(res, {
         ok: true,
         reply:
-          "✅ Não encontrei parcelas em aberto no momento. Se você acredita que ainda está pendente, me envie seu CPF para eu conferir. 😊"
+          "✅ Não encontrei parcelas em aberto no momento. Se você acredita que ainda está pendente, me envie seu CPF para eu conferir. 😊",
       });
     }
 
@@ -217,7 +267,7 @@ app.post("/boleto", async (req, res) => {
     return okJson(res, {
       ok: false,
       reply:
-        "Tive um erro ao buscar seu boleto agora. Me envie seu CPF (somente números) que eu resolvo para você rapidinho. 😊"
+        "Tive um erro ao buscar seu boleto agora. Me envie seu CPF (somente números) que eu resolvo para você rapidinho. 😊",
     });
   }
 });
