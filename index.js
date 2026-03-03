@@ -8,6 +8,8 @@ const BASE = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/+$/, ""); // remo
 const USER = process.env.PAGSCHOOL_USER || "";
 const PASS = process.env.PAGSCHOOL_PASS || "";
 
+console.log("[BOOT] BASE=", JSON.stringify(process.env.PAGSCHOOL_BASE_URL || ""));
+
 // ====== AJUSTE CONFORME A DOC DO PAGSCHOOL ======
 const PATH_AUTH = "/api/authenticate";
 const PATH_FIND_ALUNO_BY_CPF = (cpf) => `/api/aluno/by-cpf/${encodeURIComponent(cpf)}`;
