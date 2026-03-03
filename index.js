@@ -160,14 +160,16 @@ async function apiGetFirstThatWorks(paths, token, label = "") {
 
 // ======== ROTAS (CPF / CONTRATO / PARCELAS) ========
 
-function alunoByCpfPaths(cpf) {
-  const c = encodeURIComponent(cpf);
+function parcelasByContratoPaths(contratoId) {
+  const c = encodeURIComponent(contratoId);
+
   return [
-    `/api/aluno/by-cpf/${c}`,
-    `/api/aluno/cpf/${c}`,
-    `/api/aluno/por-cpf/${c}`,
-    `/api/alunos?cpf=${c}`,
-    `/api/aluno?cpf=${c}`,
+    `/api/parcelas?contrato_id=${c}`,
+    `/api/parcelas?contrato=${c}`,
+    `/api/parcela?contrato_id=${c}`,
+    `/api/parcela?contrato=${c}`,
+    `/api/parcelas/${c}`,
+    `/api/parcela/${c}`,
   ];
 }
 
