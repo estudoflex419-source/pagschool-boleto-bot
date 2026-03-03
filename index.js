@@ -11,21 +11,18 @@ const PASS = process.env.PAGSCHOOL_PASS || "";
 console.log("[BOOT] RAW ENV BASE =", JSON.stringify(process.env.PAGSCHOOL_BASE_URL || ""));
 console.log("[BOOT] BASE AFTER REPLACE =", JSON.stringify(BASE));
 
-// ====== AJUSTE CONFORME A DOC DO PAGSCHOOL ======
 const PATH_AUTH = process.env.PAGSCHOOL_AUTH_PATH || "/api/authenticate";
-// ================================================
 
+// ===== helpers =====
 function digits(v) {
   return String(v || "").replace(/\D/g, "");
 }
-
 function extractCpfFromText(text) {
   const d = digits(text);
   if (d.length === 11) return d;
   if (d.length > 11) return d.slice(-11);
   return "";
 }
-
 function safeJsonParse(text) {
   try {
     return text ? JSON.parse(text) : null;
@@ -34,6 +31,7 @@ function safeJsonParse(text) {
   }
 }
 
+// ===== http =====
 async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -74,27 +72,20 @@ async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) 
   }
 }
 
-// ====== CACHE DO TOKEN (performance) ======
+// ===== token cache =====
 let cachedToken = null;
-let tokenExpiresAt = 0; // epoch ms
+let tokenExpiresAt = 0;
 
 async function authenticate() {
   if (!BASE || !USER || !PASS) {
     throw new Error("Config faltando: PAGSCHOOL_BASE_URL, PAGSCHOOL_USER, PAGSCHOOL_PASS");
   }
 
-  // se token ainda está válido, reutiliza
   const now = Date.now();
-  if (cachedToken && tokenExpiresAt && now < tokenExpiresAt) {
-    return cachedToken;
-  }
+  if (cachedToken && tokenExpiresAt && now < tokenExpiresAt) return cachedToken;
 
   const url = `${BASE}${PATH_AUTH}`;
-
-  // ✅ login com username/password
-  const data = await httpJson("POST", url, {
-    body: { username: USER, password: PASS },
-  });
+  const data = await httpJson("POST", url, { body: { username: USER, password: PASS } });
 
   const token =
     data?.token ||
@@ -106,18 +97,15 @@ async function authenticate() {
 
   if (!token) throw new Error("Não encontrei token no retorno do authenticate.");
 
-  // tenta ler expiração (se vier). Se não vier, assume 10 minutos.
-  const expiresInSec =
-    Number(data?.expires_in ?? data?.data?.expires_in ?? 0) || 600;
-
+  const expiresInSec = Number(data?.expires_in ?? data?.data?.expires_in ?? 0) || 600;
   cachedToken = token;
-  tokenExpiresAt = Date.now() + Math.max(60, expiresInSec - 30) * 1000; // margem de 30s
+  tokenExpiresAt = Date.now() + Math.max(60, expiresInSec - 30) * 1000;
 
-  console.log("[AUTH] token cacheado por ~", expiresInSec, "segundos");
+  console.log("[AUTH] token cacheado ~", expiresInSec, "s");
   return token;
 }
 
-// ⚠️ Se a API exigir, troque JWT por Bearer aqui:
+// ⚠️ Se for Bearer, troque aqui:
 async function apiGet(path, token) {
   const url = `${BASE}${path}`;
   return httpJson("GET", url, { headers: { Authorization: `JWT ${token}` } });
@@ -132,7 +120,6 @@ function pickArray(resp) {
   if (Array.isArray(resp?.contratos)) return resp.contratos;
   return [];
 }
-
 function pickObj(resp) {
   if (!resp) return null;
   if (Array.isArray(resp)) return resp[0] || null;
@@ -152,24 +139,21 @@ async function apiGetFirstThatWorks(paths, token, label = "") {
         console.log("[API 404]", label, path);
         continue;
       }
-      throw err;
+      throw err; // 401/403/500 etc
     }
   }
   return null;
 }
 
-// ======== ROTAS (CPF / CONTRATO / PARCELAS) ========
-
-function parcelasByContratoPaths(contratoId) {
-  const c = encodeURIComponent(contratoId);
-
+// ===== endpoints candidates =====
+function alunoByCpfPaths(cpf) {
+  const c = encodeURIComponent(cpf);
   return [
-    `/api/parcelas?contrato_id=${c}`,
-    `/api/parcelas?contrato=${c}`,
-    `/api/parcela?contrato_id=${c}`,
-    `/api/parcela?contrato=${c}`,
-    `/api/parcelas/${c}`,
-    `/api/parcela/${c}`,
+    `/api/aluno/by-cpf/${c}`,
+    `/api/aluno/cpf/${c}`,
+    `/api/aluno/por-cpf/${c}`,
+    `/api/alunos?cpf=${c}`,
+    `/api/aluno?cpf=${c}`,
   ];
 }
 
@@ -182,30 +166,51 @@ function contratosByAlunoPaths(alunoId) {
     `/api/contratos/aluno/${a}`,
     `/api/contratos?aluno_id=${a}`,
     `/api/contrato?aluno_id=${a}`,
+    // variações possíveis
+    `/api/contrato?aluno=${a}`,
+    `/api/contratos?aluno=${a}`,
   ];
 }
 
+// ✅ AQUI está a “bala de prata”: tenta querystring + nested + by-contrato
 function parcelasByContratoPaths(contratoId) {
   const c = encodeURIComponent(contratoId);
+
   return [
-    // padrões comuns:
+    // querystring (muito comum)
+    `/api/parcelas?contrato_id=${c}`,
+    `/api/parcelas?contrato=${c}`,
+    `/api/parcela?contrato_id=${c}`,
+    `/api/parcela?contrato=${c}`,
+
+    // nested no contrato
     `/api/contrato/${c}/parcelas`,
     `/api/contratos/${c}/parcelas`,
     `/api/contrato/${c}/parcela`,
     `/api/contratos/${c}/parcela`,
 
-    // variações:
-    `/api/contrato/parcelas/${c}`,
-    `/api/contratos/parcelas/${c}`,
-    `/api/parcela/contrato/${c}`,
-    `/api/parcelas/contrato/${c}`,
+    // caminhos “by-contrato”
     `/api/parcela/by-contrato/${c}`,
     `/api/parcelas/by-contrato/${c}`,
+    `/api/parcela/contrato/${c}`,
+    `/api/parcelas/contrato/${c}`,
+    `/api/contrato/parcelas/${c}`,
+    `/api/contratos/parcelas/${c}`,
+
+    // REST simples
+    `/api/parcelas/${c}`,
+    `/api/parcela/${c}`,
+
+    // financeiro (alguns sistemas colocam aqui)
+    `/api/financeiro/parcelas?contrato_id=${c}`,
+    `/api/financeiro/parcelas?contrato=${c}`,
+    `/api/financeiro/parcelas/${c}`,
+    `/api/financeiro/parcela?contrato_id=${c}`,
+    `/api/financeiro/parcela?contrato=${c}`,
   ];
 }
 
-// ===============================================
-
+// ===== boleto helpers =====
 function pickOpenParcela(parcelasResp) {
   const arr = pickArray(parcelasResp);
 
@@ -259,15 +264,10 @@ function sendToPlatform(res, replyText, extra = {}) {
 }
 
 function getTokenFromReq(req) {
-  return String(
-    req.query.token ||
-      req.headers["x-webhook-token"] ||
-      req.body?.token ||
-      req.body?.webhook_token ||
-      ""
-  );
+  return String(req.query.token || req.headers["x-webhook-token"] || req.body?.token || req.body?.webhook_token || "");
 }
 
+// ===== routes =====
 app.get("/", (req, res) => res.status(200).send("API ON ✅ Use /health ou /boleto"));
 app.get("/health", (req, res) => sendToPlatform(res, "ok", { health: true }));
 
@@ -283,26 +283,18 @@ async function handleBoleto(req, res) {
     console.log("[WEBHOOK] BODY:", JSON.stringify(req.body || {}, null, 2));
 
     const body = req.body || {};
-
     const rawMessage =
-      body.message || body.text || body.mensagem || body.body ||
-      req.query.message || req.query.text || "";
+      body.message || body.text || body.mensagem || body.body || req.query.message || req.query.text || "";
 
-    const cpf =
-      extractCpfFromText(body.cpf || "") ||
-      extractCpfFromText(rawMessage);
+    const cpf = extractCpfFromText(body.cpf || "") || extractCpfFromText(rawMessage);
 
     if (!cpf) {
-      return sendToPlatform(
-        res,
-        "Pra eu localizar seu boleto, me envie seu CPF (somente números) 😊",
-        { ok: false }
-      );
+      return sendToPlatform(res, "Pra eu localizar seu boleto, me envie seu CPF (somente números) 😊", { ok: false });
     }
 
     const jwt = await authenticate();
 
-    // 1) localizar aluno por CPF
+    // 1) aluno por CPF
     const alunoResp = await apiGetFirstThatWorks(alunoByCpfPaths(cpf), jwt, "ALUNO_CPF");
     if (!alunoResp) {
       return sendToPlatform(
@@ -316,39 +308,35 @@ async function handleBoleto(req, res) {
     const alunoId = alunoObj?.id || alunoObj?.aluno_id;
 
     if (!alunoId) {
-      return sendToPlatform(
-        res,
-        "Encontrei seu cadastro, mas não identifiquei o ID do aluno. Me envie seu CPF novamente que eu verifico 😊",
-        { ok: false, debug: { alunoKeys: alunoObj ? Object.keys(alunoObj) : [] } }
-      );
+      return sendToPlatform(res, "Encontrei seu cadastro, mas não identifiquei o ID do aluno. Me envie seu CPF novamente 😊", {
+        ok: false,
+        debug: { alunoKeys: alunoObj ? Object.keys(alunoObj) : [] },
+      });
     }
 
-    // 2) contratos por aluno
+    // 2) contratos
     const contratosResp = await apiGetFirstThatWorks(contratosByAlunoPaths(alunoId), jwt, "CONTRATOS");
     const contratosArr = pickArray(contratosResp);
 
     if (!contratosArr.length) {
-      return sendToPlatform(
-        res,
-        "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊",
-        { ok: false }
-      );
+      return sendToPlatform(res, "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊", { ok: false });
     }
 
     const contrato = contratosArr[0];
     const contratoId = contrato?.id || contrato?.contrato_id;
 
     if (!contratoId) {
-      return sendToPlatform(
-        res,
-        "Encontrei contrato, mas não identifiquei o ID. Me envie seu CPF pra eu conferir melhor 😊",
-        { ok: false, debug: { contratoKeys: Object.keys(contrato || {}) } }
-      );
+      return sendToPlatform(res, "Encontrei contrato, mas não identifiquei o ID. Me envie seu CPF pra eu conferir melhor 😊", {
+        ok: false,
+        debug: { contratoKeys: Object.keys(contrato || {}) },
+      });
     }
 
-    // 3) parcelas por contrato
+    // 3) parcelas (TENTA TUDO)
     const parcelasResp = await apiGetFirstThatWorks(parcelasByContratoPaths(contratoId), jwt, "PARCELAS");
+
     if (!parcelasResp) {
+      // aqui te devolvo o contratoId pra você ver e eu ajustar rapidinho se faltar alguma rota
       return sendToPlatform(
         res,
         "Não consegui acessar as parcelas do contrato agora. Me envie seu CPF que eu verifico 😊",
@@ -357,13 +345,10 @@ async function handleBoleto(req, res) {
     }
 
     const parcelaAberta = pickOpenParcela(parcelasResp);
-
     if (!parcelaAberta) {
-      return sendToPlatform(
-        res,
-        "✅ Não encontrei parcelas em aberto no momento. Se quiser, me envie seu CPF pra eu conferir melhor 😊",
-        { ok: true }
-      );
+      return sendToPlatform(res, "✅ Não encontrei parcelas em aberto no momento. Se quiser, me envie seu CPF pra eu conferir melhor 😊", {
+        ok: true,
+      });
     }
 
     const { link, linha, valor, venc } = extractBoletoInfo(parcelaAberta);
