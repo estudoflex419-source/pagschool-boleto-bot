@@ -4,340 +4,49 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
-const BASE = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/+$/, "");
-const USER = process.env.PAGSCHOOL_USER || "";
-const PASS = process.env.PAGSCHOOL_PASS || "";
 
-console.log("[BOOT] BASE =", JSON.stringify(BASE));
-console.log("[BOOT] USER set?", Boolean(USER), "PASS set?", Boolean(PASS));
+// ========= ARMAZENAMENTO SIMPLES (EM MEMÓRIA) =========
+// chave: contrato_id -> dados do último webhook
+const storeByContrato = new Map();
 
-const PATH_AUTH = process.env.PAGSCHOOL_AUTH_PATH || "/api/authenticate";
+// opcional: chave: nossoNumero -> dados
+const storeByNossoNumero = new Map();
 
-// ===== helpers =====
+// ========= HELPERS =========
 function digits(v) {
   return String(v || "").replace(/\D/g, "");
 }
-function extractCpfFromText(text) {
-  const d = digits(text);
-  if (d.length === 11) return d;
-  if (d.length > 11) return d.slice(-11);
-  return "";
-}
-function safeJsonParse(text) {
-  try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return text;
-  }
-}
-function pickArray(resp) {
-  if (Array.isArray(resp)) return resp;
-  if (Array.isArray(resp?.data)) return resp.data;
-  if (Array.isArray(resp?.items)) return resp.items;
-  if (Array.isArray(resp?.result)) return resp.result;
-  if (Array.isArray(resp?.parcelas)) return resp.parcelas;
-  if (Array.isArray(resp?.contratos)) return resp.contratos;
-  if (Array.isArray(resp?.boletos)) return resp.boletos;
-  if (Array.isArray(resp?.titulos)) return resp.titulos;
-  return [];
-}
-function pickObj(resp) {
-  if (!resp) return null;
-  if (Array.isArray(resp)) return resp[0] || null;
-  if (resp?.data && !Array.isArray(resp.data)) return resp.data;
-  return resp;
+
+function getTokenFromReq(req) {
+  return String(
+    req.query.token ||
+      req.headers["x-webhook-token"] ||
+      req.headers["authorization"] || // se vier "Bearer xxx"
+      req.body?.token ||
+      req.body?.webhook_token ||
+      ""
+  ).replace(/^Bearer\s+/i, "");
 }
 
-// ===== http =====
-async function httpJson(method, url, { headers, body, timeoutMs = 15000 } = {}) {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(url, {
-      method,
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        ...(headers || {}),
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    const text = await res.text();
-    const data = safeJsonParse(text);
-
-    if (!res.ok) {
-      console.log("[HTTP ERROR]", res.status, url, text);
-      const msg = typeof data === "object" ? JSON.stringify(data) : String(data);
-      const err = new Error(`HTTP ${res.status} ${res.statusText} em ${url}: ${msg}`);
-      err.status = res.status;
-      err.url = url;
-      err.raw = text;
-      throw err;
-    }
-
-    return data;
-  } catch (err) {
-    if (String(err?.name) === "AbortError") {
-      throw new Error(`Timeout (${timeoutMs}ms) ao chamar ${url}`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-// ===== token cache =====
-let cached = { token: null, scheme: null, expiresAt: 0 };
-
-function extractToken(data) {
-  return (
-    data?.token ||
-    data?.jwt ||
-    data?.access_token ||
-    data?.data?.token ||
-    data?.data?.jwt ||
-    data?.data?.access_token
-  );
-}
-
-async function authenticateLegacy() {
-  if (!BASE || !USER || !PASS) {
-    throw new Error("Config faltando: PAGSCHOOL_BASE_URL, PAGSCHOOL_USER, PAGSCHOOL_PASS");
-  }
-
-  const now = Date.now();
-  if (cached.token && cached.expiresAt && now < cached.expiresAt) return cached;
-
-  const url = `${BASE}${PATH_AUTH}`;
-
-  const bodies = [
-    { usuario: USER, senha: PASS }, // legado BR
-    { username: USER, password: PASS }, // padrão
-    { login: USER, senha: PASS }, // legado comum
-    { user: USER, pass: PASS },
-  ];
-
-  let lastErr = null;
-  for (const body of bodies) {
-    try {
-      console.log("[AUTH TRY BODY]", Object.keys(body).join(","));
-      const data = await httpJson("POST", url, { body });
-
-      const token = extractToken(data);
-      if (!token) throw new Error("Auth ok mas sem token no retorno.");
-
-      const expiresInSec = Number(data?.expires_in ?? data?.data?.expires_in ?? 0) || 600;
-
-      cached = {
-        token,
-        scheme: null, // vamos detectar no 1º GET
-        expiresAt: Date.now() + Math.max(60, expiresInSec - 30) * 1000,
-      };
-
-      console.log("[AUTH OK] token cacheado ~", expiresInSec, "s");
-      return cached;
-    } catch (e) {
-      lastErr = e;
-      if (e?.status === 401 || e?.status === 403) continue;
-      throw e;
-    }
-  }
-
-  throw lastErr || new Error("Falha ao autenticar (todas as tentativas).");
-}
-
-function buildAuthHeaders(token, scheme) {
-  if (scheme === "JWT") return { Authorization: `JWT ${token}` };
-  if (scheme === "Bearer") return { Authorization: `Bearer ${token}` };
-  if (scheme === "X") return { "x-access-token": token };
-  return { Authorization: `JWT ${token}` };
-}
-
-async function apiGetAuto(path, auth) {
-  const url = `${BASE}${path}`;
-
-  if (auth.scheme) {
-    return httpJson("GET", url, { headers: buildAuthHeaders(auth.token, auth.scheme) });
-  }
-
-  const schemes = ["JWT", "Bearer", "X"];
-  let lastErr = null;
-
-  for (const scheme of schemes) {
-    try {
-      const data = await httpJson("GET", url, { headers: buildAuthHeaders(auth.token, scheme) });
-      auth.scheme = scheme;
-      cached.scheme = scheme;
-      console.log("[AUTH SCHEME OK]", scheme);
-      return data;
-    } catch (e) {
-      lastErr = e;
-      if (e?.status === 401 || e?.status === 403) continue;
-      throw e;
-    }
-  }
-
-  throw lastErr || new Error("Falha de autorização (nenhum esquema funcionou).");
-}
-
-async function apiGetFirstThatWorks(paths, auth, label = "") {
-  for (const path of paths) {
-    try {
-      const data = await apiGetAuto(path, auth);
-      console.log("[API OK]", label, path);
-      return data;
-    } catch (err) {
-      if (err?.status === 404) {
-        console.log("[API 404]", label, path);
-        continue;
-      }
-      throw err;
-    }
-  }
-  return null;
-}
-
-// ===== endpoints =====
-function alunoByCpfPaths(cpf) {
-  const c = encodeURIComponent(cpf);
-  return [
-    `/api/aluno/by-cpf/${c}`,
-    `/api/aluno/cpf/${c}`,
-    `/api/aluno/por-cpf/${c}`,
-    `/api/alunos?cpf=${c}`,
-    `/api/aluno?cpf=${c}`,
-  ];
-}
-
-function contratosByAlunoPaths(alunoId) {
-  const a = encodeURIComponent(alunoId);
-  return [
-    `/api/contrato/by-aluno/${a}`,
-    `/api/contratos/by-aluno/${a}`,
-    `/api/contrato/aluno/${a}`,
-    `/api/contratos/aluno/${a}`,
-    `/api/contratos?aluno_id=${a}`,
-    `/api/contrato?aluno_id=${a}`,
-    `/api/contrato?aluno=${a}`,
-    `/api/contratos?aluno=${a}`,
-  ];
-}
-
-function contratoDetalhePaths(contratoId) {
-  const c = encodeURIComponent(contratoId);
-  return [
-    `/api/contrato/${c}`,
-    `/api/contratos/${c}`,
-    `/api/contrato/detalhe/${c}`,
-    `/api/contratos/detalhe/${c}`,
-  ];
+function isAuthorized(req) {
+  const t = getTokenFromReq(req);
+  return Boolean(WEBHOOK_TOKEN) && t === WEBHOOK_TOKEN;
 }
 
 /**
- * ✅ PARCELAS (LEGADO): tenta MUITOS nomes e áreas (financeiro/titulo)
- * Se não existir, vamos ter fallback de BOLETO direto.
+ * Pega link/linha digitável/valor/vencimento de forma tolerante
+ * (API antiga + webhook variando nomes)
  */
-function parcelasQueryPaths(contratoId) {
-  const c = encodeURIComponent(contratoId);
-
-  const params = [
-    `contrato_id=${c}`,
-    `contrato=${c}`,
-    `contratoId=${c}`,
-    `idContrato=${c}`,
-    `contrato_idContrato=${c}`,
-  ];
-
-  const bases = [
-    "/api/parcelas",
-    "/api/parcela",
-    "/api/financeiro/parcelas",
-    "/api/financeiro/parcela",
-    "/api/titulos",
-    "/api/titulo",
-    "/api/financeiro/titulos",
-    "/api/financeiro/titulo",
-  ];
-
-  const paths = [];
-
-  for (const b of bases) {
-    for (const p of params) {
-      paths.push(`${b}?${p}`);
-    }
-  }
-
-  // alguns legados usam plural com recurso /contrato
-  paths.push(`/api/financeiro/parcelas/contrato/${c}`);
-  paths.push(`/api/financeiro/titulos/contrato/${c}`);
-  paths.push(`/api/titulos/contrato/${c}`);
-
-  return paths;
-}
-
-/**
- * ✅ FALLBACK: BOLETO direto pelo contrato (muito comum em sistema antigo)
- */
-function boletosByContratoPaths(contratoId) {
-  const c = encodeURIComponent(contratoId);
-
-  return [
-    `/api/boleto?contrato=${c}`,
-    `/api/boleto?contrato_id=${c}`,
-    `/api/boletos?contrato=${c}`,
-    `/api/boletos?contrato_id=${c}`,
-
-    `/api/segunda-via?contrato=${c}`,
-    `/api/segunda-via?contrato_id=${c}`,
-    `/api/2via?contrato=${c}`,
-    `/api/2via?contrato_id=${c}`,
-    `/api/boleto/2via?contrato=${c}`,
-    `/api/boleto/2via?contrato_id=${c}`,
-    `/api/boleto/segunda-via?contrato=${c}`,
-    `/api/boleto/segunda-via?contrato_id=${c}`,
-
-    `/api/carne?contrato=${c}`,
-    `/api/carne?contrato_id=${c}`,
-    `/api/carne/by-contrato/${c}`,
-
-    `/api/financeiro/boleto?contrato=${c}`,
-    `/api/financeiro/boleto?contrato_id=${c}`,
-    `/api/financeiro/boletos?contrato=${c}`,
-    `/api/financeiro/boletos?contrato_id=${c}`,
-    `/api/financeiro/carne?contrato=${c}`,
-    `/api/financeiro/carne?contrato_id=${c}`,
-  ];
-}
-
-// ===== boleto parsing =====
-function pickOpenItem(arr) {
-  const items = Array.isArray(arr) ? arr : pickArray(arr);
-
-  const open = items.find((p) => {
-    const valor = Number(p?.valor ?? p?.valorParcela ?? p?.valor_total ?? 0);
-    const pago = Number(p?.valorPago ?? p?.valor_pago ?? 0);
-    const dataPag = p?.dataPagamento || p?.data_pagamento || p?.dt_pagamento;
-    return !dataPag && pago < valor;
-  });
-
-  return open || (items[0] || null);
-}
-
-function extractBoletoInfo(obj) {
-  if (!obj) return { link: "", linha: "", valor: "", venc: "" };
-
+function extractBoletoInfo(obj = {}) {
   const link =
     obj?.linkBoleto ||
-    obj?.boletoUrl ||
     obj?.urlBoleto ||
-    obj?.url_boleto ||
+    obj?.boletoUrl ||
+    obj?.pdfUrl ||
+    obj?.pdf ||
     obj?.url ||
     obj?.link ||
-    obj?.pdf ||
-    obj?.pdfUrl;
+    "";
 
   const linha =
     obj?.linhaDigitavel ||
@@ -345,13 +54,12 @@ function extractBoletoInfo(obj) {
     obj?.linha ||
     obj?.numeroBoleto ||
     obj?.numero_boleto ||
-    obj?.codigoBarras ||
-    obj?.codigo_barras;
+    "";
 
-  const valor = obj?.valor ?? obj?.valorParcela ?? obj?.valor_total ?? obj?.valorTitulo ?? "";
+  const valor = obj?.valor ?? obj?.valorParcela ?? obj?.valor_total ?? "";
   const venc =
-    obj?.dataVencimento ||
     obj?.vencimento ||
+    obj?.dataVencimento ||
     obj?.data_vencimento ||
     obj?.dt_vencimento ||
     "";
@@ -373,126 +81,136 @@ function sendToPlatform(res, replyText, extra = {}) {
   );
 }
 
-function getTokenFromReq(req) {
-  return String(req.query.token || req.headers["x-webhook-token"] || req.body?.token || req.body?.webhook_token || "");
-}
-
-// ===== routes =====
-app.get("/", (req, res) => res.status(200).send("API ON ✅ Use /health ou /boleto"));
+// ========= ROTAS =========
+app.get("/", (req, res) => res.status(200).send("API ON ✅ Use /health, /webhook/pagschool (POST) e /boleto"));
 app.get("/health", (req, res) => sendToPlatform(res, "ok", { health: true }));
 
+/**
+ * ✅ WEBHOOK do PagSchool
+ * URL que você manda pra eles:
+ * https://pagschool-boleto-bot.onrender.com/webhook/pagschool?token=SEU_WEBHOOK_TOKEN
+ */
+app.post("/webhook/pagschool", (req, res) => {
+  try {
+    if (!isAuthorized(req)) {
+      return res.status(401).json({ ok: false, error: "Não autorizado" });
+    }
+
+    const body = req.body || {};
+    console.log("[PAGSCHOOL WEBHOOK] BODY:", JSON.stringify(body, null, 2));
+
+    // Exemplo que você mostrou:
+    // { id, valor, valorPago, numeroBoleto, vencimento, dataPagamento, nossoNumero, contrato_id }
+    const id = body?.id;
+    const contratoId = body?.contrato_id ?? body?.contratoId ?? body?.idContrato;
+    const nossoNumero = body?.nossoNumero ?? body?.nosso_numero;
+
+    if (!id || !contratoId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Webhook sem id ou contrato_id",
+        receivedKeys: Object.keys(body || {}),
+      });
+    }
+
+    const info = extractBoletoInfo(body);
+
+    // guarda
+    const payload = {
+      receivedAt: new Date().toISOString(),
+      raw: body,
+      id,
+      contrato_id: String(contratoId),
+      nossoNumero: nossoNumero ? String(nossoNumero) : "",
+      ...info,
+      // extras úteis:
+      valorPago: body?.valorPago ?? body?.valor_pago ?? "",
+      dataPagamento: body?.dataPagamento ?? body?.data_pagamento ?? "",
+      status: body?.status ?? (body?.dataPagamento ? "PAGO" : "ABERTO"),
+    };
+
+    storeByContrato.set(String(contratoId), payload);
+    if (nossoNumero) storeByNossoNumero.set(String(nossoNumero), payload);
+
+    return res.status(200).json({ ok: true, saved: { contrato_id: String(contratoId), id } });
+  } catch (err) {
+    console.error("[PAGSCHOOL WEBHOOK] ERRO:", err);
+    return res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+/**
+ * ✅ Consultar boleto (para seu fluxo do WhatsApp)
+ * Você pode chamar assim:
+ * /boleto?token=SEU_WEBHOOK_TOKEN&contrato_id=60011
+ * ou
+ * /boleto?token=SEU_WEBHOOK_TOKEN&nossoNumero=607595305
+ * ou
+ * /boleto?token=SEU_WEBHOOK_TOKEN&message=60011   (se o usuário mandar só números)
+ */
 async function handleBoleto(req, res) {
   try {
-    const token = getTokenFromReq(req);
-    if (!WEBHOOK_TOKEN || token !== WEBHOOK_TOKEN) {
+    if (!isAuthorized(req)) {
       return sendToPlatform(res, "Não autorizado.", { ok: false });
     }
 
     const body = req.body || {};
     const rawMessage =
-      body.message || body.text || body.mensagem || body.body || req.query.message || req.query.text || "";
-    const cpf = extractCpfFromText(body.cpf || "") || extractCpfFromText(rawMessage);
+      body.message || body.text || body.mensagem || body.body ||
+      req.query.message || req.query.text || "";
 
-    if (!cpf) {
-      return sendToPlatform(res, "Pra eu localizar seu boleto, me envie seu CPF (somente números) 😊", { ok: false });
-    }
+    const contratoId =
+      String(req.query.contrato_id || body.contrato_id || "").trim() ||
+      (digits(rawMessage).length >= 4 ? digits(rawMessage) : "");
 
-    const auth = await authenticateLegacy();
+    const nossoNumero =
+      String(req.query.nossoNumero || body.nossoNumero || "").trim();
 
-    // 1) aluno
-    const alunoResp = await apiGetFirstThatWorks(alunoByCpfPaths(cpf), auth, "ALUNO_CPF");
-    if (!alunoResp) {
+    let data = null;
+
+    if (nossoNumero) data = storeByNossoNumero.get(String(nossoNumero)) || null;
+    if (!data && contratoId) data = storeByContrato.get(String(contratoId)) || null;
+
+    if (!data) {
       return sendToPlatform(
         res,
-        "Não consegui localizar seu cadastro com esse CPF. Confere se está correto e me envie novamente (somente números) 😊",
-        { ok: false }
+        "Ainda não encontrei boleto salvo pra esse contrato. Se você acabou de gerar/pagar, aguarde alguns instantes e tente novamente 😊",
+        { ok: false, hint: "Preciso receber o webhook do PagSchool primeiro." }
       );
     }
 
-    const alunoObj = pickObj(alunoResp);
-    const alunoId = alunoObj?.id || alunoObj?.aluno_id;
-
-    if (!alunoId) {
-      return sendToPlatform(res, "Encontrei seu cadastro, mas não identifiquei o ID do aluno. Me envie seu CPF novamente 😊", {
-        ok: false,
-        debug: { alunoKeys: alunoObj ? Object.keys(alunoObj) : [] },
-      });
-    }
-
-    // 2) contratos
-    const contratosResp = await apiGetFirstThatWorks(contratosByAlunoPaths(alunoId), auth, "CONTRATOS");
-    const contratosArr = pickArray(contratosResp);
-
-    if (!contratosArr.length) {
-      return sendToPlatform(res, "Encontrei seu cadastro, mas não achei contrato ativo. Me confirme o curso escolhido 😊", {
-        ok: false,
-      });
-    }
-
-    const contrato = contratosArr[0];
-    const contratoId = contrato?.id || contrato?.contrato_id;
-
-    if (!contratoId) {
-      return sendToPlatform(res, "Encontrei contrato, mas não identifiquei o ID. Me envie seu CPF pra eu conferir melhor 😊", {
-        ok: false,
-        debug: { contratoKeys: Object.keys(contrato || {}) },
-      });
-    }
-
-    // 3A) tenta parcelas dentro do detalhe do contrato
-    let itemAberto = null;
-    const detResp = await apiGetFirstThatWorks(contratoDetalhePaths(contratoId), auth, "CONTRATO_DETALHE");
-    if (detResp) {
-      const detObj = pickObj(detResp);
-      const parcelasDentro = detObj?.parcelas || detObj?.data?.parcelas || detObj?.titulos || detObj?.data?.titulos || null;
-      if (parcelasDentro) itemAberto = pickOpenItem(parcelasDentro);
-    }
-
-    // 3B) tenta endpoints de parcelas/titulos
-    if (!itemAberto) {
-      const parcelasResp = await apiGetFirstThatWorks(parcelasQueryPaths(contratoId), auth, "PARCELAS_QUERY");
-      if (parcelasResp) itemAberto = pickOpenItem(parcelasResp);
-    }
-
-    // 3C) fallback: boleto direto pelo contrato
-    let boletoObj = null;
-    if (!itemAberto) {
-      const boletosResp = await apiGetFirstThatWorks(boletosByContratoPaths(contratoId), auth, "BOLETOS_CONTRATO");
-      if (boletosResp) boletoObj = pickOpenItem(boletosResp);
-    }
-
-    const alvo = itemAberto || boletoObj;
-    if (!alvo) {
-      return sendToPlatform(
-        res,
-        "Não consegui acessar boletos/parcelas desse contrato agora. Me envie seu CPF que eu verifico 😊",
-        { ok: false, contratoId, authScheme: auth.scheme || null }
-      );
-    }
-
-    const { link, linha, valor, venc } = extractBoletoInfo(alvo);
+    // Você quer B = link/PDF.
+    // Se não vier link, devolve a linha digitável (fallback) pra não te deixar na mão.
+    const { link, linha, valor, venc } = data;
 
     let msg = "Perfeito 😊 Segue sua 2ª via do boleto:\n\n";
-    if (link) msg += `🔗 Link: ${link}\n`;
-    if (linha) msg += `🧾 Linha digitável: ${linha}\n`;
-    if (valor) msg += `💰 Valor: R$ ${valor}\n`;
+
+    if (link) {
+      msg += `📄 Boleto (PDF/Link): ${link}\n`;
+    } else if (linha) {
+      msg += `🧾 Linha digitável: ${linha}\n`;
+      msg += "\n⚠️ Observação: o PagSchool não enviou link/PDF neste webhook, apenas a linha digitável.\n";
+    } else {
+      msg += "⚠️ Recebi o webhook, mas ele não veio com link nem linha digitável.\n";
+    }
+
+    if (valor !== "" && valor != null) msg += `💰 Valor: R$ ${valor}\n`;
     if (venc) msg += `📅 Vencimento: ${venc}\n`;
-    if (!link && !linha) msg += "⚠️ Achei o registro, mas não veio link/linha digitável nesse retorno.\n";
+
     msg += "\nSe precisar de ajuda, é só me chamar 😊";
 
-    return sendToPlatform(res, msg, { ok: true });
+    return sendToPlatform(res, msg, { ok: true, contrato_id: data.contrato_id, receivedAt: data.receivedAt });
   } catch (err) {
-    console.error("[WEBHOOK] ERRO:", err);
-    return sendToPlatform(
-      res,
-      "Tive um erro ao buscar seu boleto agora. Me envie seu CPF (somente números) que eu resolvo rapidinho 😊",
-      { ok: false, error: String(err?.message || err) }
-    );
+    console.error("[BOLETO] ERRO:", err);
+    return sendToPlatform(res, "Tive um erro ao buscar seu boleto agora. Me chama aqui de novo 😊", {
+      ok: false,
+      error: String(err?.message || err),
+    });
   }
 }
 
-app.post("/boleto", handleBoleto);
 app.get("/boleto", handleBoleto);
+app.post("/boleto", handleBoleto);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`ON http://localhost:${PORT}`));
