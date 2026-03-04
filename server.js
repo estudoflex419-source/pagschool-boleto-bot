@@ -17,16 +17,14 @@ app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
 
-const PAGSCHOOL_BASE_URL = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/$/, "");
+// ---- ENV
+let PAGSCHOOL_BASE_URL = (process.env.PAGSCHOOL_BASE_URL || "").trim().replace(/\/$/, "");
 const PAGSCHOOL_EMAIL = (process.env.PAGSCHOOL_EMAIL || "").trim();
 const PAGSCHOOL_PASSWORD = (process.env.PAGSCHOOL_PASSWORD || "").trim();
 
 const FACILITAFLOW_SEND_URL = (process.env.FACILITAFLOW_SEND_URL || "https://licenca.facilitaflow.com.br/sendWebhook").trim();
 const FACILITAFLOW_API_TOKEN = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
-
-console.log("[BOOT] VERSION=API-PREFIX-AUTO");
-console.log("[OK] PagSchool base:", PAGSCHOOL_BASE_URL);
-console.log("[OK] FacilitaFlow send url:", FACILITAFLOW_SEND_URL);
+const ADMIN_SECRET = (process.env.ADMIN_SECRET || "").trim();
 
 function mustHaveEnv() {
   if (!PAGSCHOOL_BASE_URL) throw new Error("PAGSCHOOL_BASE_URL não configurado");
@@ -38,21 +36,11 @@ function onlyDigits(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
-// ✅ Se base termina com /api => rotas sem /api
-// ✅ Se base NÃO termina com /api => rotas com /api
-function apiPath(p) {
-  const clean = String(p || "").startsWith("/") ? String(p) : `/${p}`;
-  const baseHasApi = /\/api$/i.test(PAGSCHOOL_BASE_URL);
-  if (baseHasApi) return clean;             // /authenticate, /alunos/all, ...
-  return `/api${clean}`;                    // /api/authenticate, /api/alunos/all, ...
+function toISODate(d) {
+  if (!d) return "";
+  if (typeof d === "string") return d.slice(0, 10);
+  try { return new Date(d).toISOString().slice(0, 10); } catch { return ""; }
 }
-
-const pagschool = axios.create({
-  baseURL: PAGSCHOOL_BASE_URL,
-  timeout: 20000
-});
-
-let tokenCache = { token: "", expMs: 0 };
 
 function parseJwtPayload(token) {
   try {
@@ -66,19 +54,85 @@ function parseJwtPayload(token) {
   }
 }
 
-async function authenticate() {
-  mustHaveEnv();
+// Se o usuário colocar /api no final, a gente remove pra evitar duplicação
+if (/\/api$/i.test(PAGSCHOOL_BASE_URL)) {
+  PAGSCHOOL_BASE_URL = PAGSCHOOL_BASE_URL.replace(/\/api$/i, "");
+}
 
-  if (tokenCache.token && Date.now() < tokenCache.expMs - 60_000) return tokenCache.token;
+// Axios PagSchool
+const pagschool = axios.create({
+  baseURL: PAGSCHOOL_BASE_URL,
+  timeout: 20000
+});
 
-  const url = apiPath("/authenticate");
+// ---- Detecção dinâmica de prefixo
+let apiPrefix = null; // "/api" ou ""
+let tokenCache = { token: "", expMs: 0 };
 
-  const resp = await pagschool.post(
+async function tryAuth(prefix) {
+  const url = `${prefix}/authenticate`;
+  return await pagschool.post(
     url,
     { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD },
     { headers: { "Content-Type": "application/json" } }
   );
+}
 
+async function ensureApiPrefix() {
+  if (apiPrefix !== null) return apiPrefix;
+
+  mustHaveEnv();
+
+  // tenta primeiro com /api, depois sem /api
+  const candidates = ["/api", ""];
+
+  let lastErr = null;
+  for (const pref of candidates) {
+    try {
+      const resp = await tryAuth(pref);
+      const token = resp?.data?.token;
+      if (!token) throw new Error("Auth OK mas token não retornou.");
+
+      // define prefixo e cacheia token
+      apiPrefix = pref;
+
+      const payload = parseJwtPayload(token);
+      const expSec = payload?.exp ? Number(payload.exp) : 0;
+
+      tokenCache = {
+        token,
+        expMs: expSec ? expSec * 1000 : Date.now() + 15 * 60_000
+      };
+
+      console.log("[PAGSCHOOL] apiPrefix detectado:", apiPrefix || "(sem /api)");
+      return apiPrefix;
+    } catch (err) {
+      lastErr = err;
+      const status = err?.response?.status;
+      // se for 404, tenta o próximo prefixo
+      if (status === 404) continue;
+      // qualquer outro erro (401, 500) a gente para e mostra
+      throw err;
+    }
+  }
+
+  // Se chegou aqui, deu 404 nos dois formatos
+  const status = lastErr?.response?.status;
+  const data = lastErr?.response?.data;
+  throw new Error(
+    `Não consegui localizar o endpoint de autenticação na PagSchool. Tentei /api/authenticate e /authenticate. status=${status} resp=${typeof data === "string" ? data.slice(0, 120) : JSON.stringify(data)}`
+  );
+}
+
+async function authenticate() {
+  await ensureApiPrefix();
+
+  if (tokenCache.token && Date.now() < tokenCache.expMs - 60_000) {
+    return tokenCache.token;
+  }
+
+  // se expirou, autentica de novo usando prefixo já detectado
+  const resp = await tryAuth(apiPrefix);
   const token = resp?.data?.token;
   if (!token) throw new Error("Auth falhou: token não retornou");
 
@@ -93,11 +147,18 @@ async function authenticate() {
   return tokenCache.token;
 }
 
+function apiUrl(path) {
+  const p = String(path || "");
+  const clean = p.startsWith("/") ? p : `/${p}`;
+  const pref = apiPrefix === null ? "/api" : apiPrefix; // fallback
+  return `${pref}${clean}`;
+}
+
 async function pagschoolRequest({ method, url, params, data, responseType }) {
   const token = await authenticate();
   return await pagschool.request({
     method,
-    url: apiPath(url),
+    url: apiUrl(url),
     params,
     data,
     responseType,
@@ -105,6 +166,7 @@ async function pagschoolRequest({ method, url, params, data, responseType }) {
   });
 }
 
+// ---- PagSchool helpers
 function extractAlunoFromAlunosAll(data) {
   const rows = data?.rows || data?.data?.rows || data?.result?.rows || data?.alunos || data?.items;
   if (Array.isArray(rows) && rows.length) return rows[0];
@@ -137,23 +199,22 @@ function isOpenStatus(status) {
   return !isPaidStatus(st);
 }
 
-function toISODate(d) {
-  if (!d) return "";
-  if (typeof d === "string") return d.slice(0, 10);
-  try { return new Date(d).toISOString().slice(0, 10); } catch { return ""; }
-}
-
 function pickBestParcela(parcelas) {
   const todayStr = new Date().toISOString().slice(0, 10);
+
   const open = (parcelas || []).filter(p => isOpenStatus(p?.status));
   if (!open.length) return null;
 
-  const withDates = open.map(p => ({ p, venc: toISODate(p?.vencimento || p?.dataVencimento) }));
+  const withDates = open.map(p => ({ p, venc: toISODate(p?.vencimento || p?.dataVencimento || p?.dueDate) }));
 
-  const vencidas = withDates.filter(x => x.venc && x.venc < todayStr).sort((a, b) => a.venc.localeCompare(b.venc));
+  const vencidas = withDates
+    .filter(x => x.venc && x.venc < todayStr)
+    .sort((a, b) => a.venc.localeCompare(b.venc));
   if (vencidas.length) return vencidas[0].p;
 
-  const proximas = withDates.filter(x => x.venc).sort((a, b) => a.venc.localeCompare(b.venc));
+  const proximas = withDates
+    .filter(x => x.venc)
+    .sort((a, b) => a.venc.localeCompare(b.venc));
   return (proximas[0] || withDates[0]).p;
 }
 
@@ -186,12 +247,17 @@ async function getBoletoByCpf({ cpf, basePublic }) {
     const candidate = pickBestParcela(parcelas);
     if (!candidate) continue;
 
-    if (!best) { best = candidate; bestContrato = c; continue; }
+    if (!best) {
+      best = candidate;
+      bestContrato = c;
+      continue;
+    }
 
     const vencA = toISODate(best?.vencimento || best?.dataVencimento);
     const vencB = toISODate(candidate?.vencimento || candidate?.dataVencimento);
     if (vencB && (!vencA || vencB < vencA)) {
-      best = candidate; bestContrato = c;
+      best = candidate;
+      bestContrato = c;
     }
   }
 
@@ -207,6 +273,7 @@ async function getBoletoByCpf({ cpf, basePublic }) {
       method: "POST",
       url: `/parcela-contrato/gera-boleto-parcela/${parcelaId}/gera-boleto`
     });
+
     nossoNumero = geraResp?.data?.nossoNumero || geraResp?.data?.nosso_numero || geraResp?.data?.data?.nossoNumero;
     if (!nossoNumero) return { ok: false, error: "Falhei ao gerar boleto (nossoNumero não retornou)." };
   }
@@ -223,10 +290,82 @@ async function getBoletoByCpf({ cpf, basePublic }) {
   };
 }
 
-// ✅ debug/hit
+// ---- FacilitaFlow sendWebhook (tentativas comuns)
+async function facilitaSend({ to, text }) {
+  if (!FACILITAFLOW_API_TOKEN) throw new Error("FACILITAFLOW_API_TOKEN não configurado");
+
+  const bodies = [
+    { token: FACILITAFLOW_API_TOKEN, to, message: text },
+    { token: FACILITAFLOW_API_TOKEN, chatId: to, message: text },
+    { token: FACILITAFLOW_API_TOKEN, phone: to, text },
+    { token: FACILITAFLOW_API_TOKEN, number: to, message: text },
+    { token: FACILITAFLOW_API_TOKEN, numero: to, mensagem: text },
+  ];
+
+  for (const body of bodies) {
+    try {
+      const r = await axios.post(FACILITAFLOW_SEND_URL, body, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 20000
+      });
+      return { ok: true, status: r.status, data: r.data };
+    } catch (_) {}
+  }
+
+  const r2 = await axios.post(
+    FACILITAFLOW_SEND_URL,
+    { to, message: text },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${FACILITAFLOW_API_TOKEN}`
+      },
+      timeout: 20000
+    }
+  );
+  return { ok: true, status: r2.status, data: r2.data };
+}
+
+function extractTextAny(obj) {
+  if (!obj) return "";
+  return obj.text || obj.message || obj.mensagem || obj.body || obj.content || obj?.data?.text || obj?.data?.message || "";
+}
+function extractTargetAny(obj) {
+  const raw = obj?.chatId || obj?.from || obj?.phone || obj?.numero || obj?.number || obj?.sender || obj?.data?.chatId || obj?.data?.from || "";
+  if (!raw) return "";
+  if (String(raw).includes("@")) return String(raw).trim();
+  return onlyDigits(raw);
+}
+function extractCpfFromText(text) {
+  const digits = onlyDigits(text);
+  const m = digits.match(/\d{11}/);
+  return m ? m[0] : "";
+}
+
+let lastInbound = null;
+let lastInboundAt = null;
+
+// ---- Routes
+app.get("/", (_req, res) => res.json({ ok: true, service: "pagschool-boleto-bot" }));
+app.get("/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+
 app.all("/debug/hit", (req, res) => res.json({ ok: true, hit: true, method: req.method }));
 
-// ✅ debug/boleto
+// ✅ mostra se autenticou e qual prefixo foi detectado
+app.get("/debug/auth", async (req, res) => {
+  try {
+    await ensureApiPrefix();
+    const token = await authenticate();
+    res.json({ ok: true, base: PAGSCHOOL_BASE_URL, apiPrefix: apiPrefix || "(sem /api)", tokenLen: String(token || "").length });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: "erro",
+      details: err?.response?.data || err?.message || String(err)
+    });
+  }
+});
+
 app.get("/debug/boleto", async (req, res) => {
   try {
     const cpf = onlyDigits(req.query?.cpf);
@@ -241,8 +380,6 @@ app.get("/debug/boleto", async (req, res) => {
     const baseURL = err?.config?.baseURL;
     const url = err?.config?.url;
 
-    console.error("[DEBUG/BOLETO ERROR]", { status, baseURL, url, data });
-
     return res.status(500).json({
       ok: false,
       error: "erro",
@@ -250,13 +387,14 @@ app.get("/debug/boleto", async (req, res) => {
         status,
         request: `${baseURL || ""}${url || ""}`,
         response: typeof data === "string" ? data.slice(0, 300) : data,
-        message: err?.message || String(err)
+        message: err?.message || String(err),
+        apiPrefix: apiPrefix || "(ainda não detectado)"
       }
     });
   }
 });
 
-// ✅ pdf proxy
+// PDF proxy
 app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   try {
     const { parcelaId, nossoNumero } = req.params;
@@ -268,9 +406,10 @@ app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
     });
 
     res.setHeader("Content-Type", resp.headers["content-type"] || "application/pdf");
+    res.setHeader("Cache-Control", "no-store");
     resp.data.pipe(res);
   } catch (err) {
-    return res.status(err?.response?.status || 500).json({
+    res.status(err?.response?.status || 500).json({
       ok: false,
       error: "Erro ao gerar PDF do boleto",
       details: err?.response?.data || err?.message || String(err)
@@ -278,4 +417,57 @@ app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log("[OK] Server on :", PORT));
+// PagSchool webhook (eventos)
+app.post("/webhook", (req, res) => {
+  console.log("[PAGSCHOOL WEBHOOK] recebido:", JSON.stringify(req.body || {}).slice(0, 2000));
+  res.json({ ok: true });
+});
+
+// FacilitaFlow inbound
+app.all("/ff/inbound", async (req, res) => {
+  res.json({ ok: true, received: true });
+
+  try {
+    lastInbound = { method: req.method, headers: req.headers, query: req.query, body: req.body };
+    lastInboundAt = new Date().toISOString();
+
+    const text = extractTextAny(req.body) || extractTextAny(req.query);
+    const cpf = extractCpfFromText(text);
+    const to = extractTargetAny(req.body) || extractTargetAny(req.query);
+
+    if (!to) return;
+
+    if (!cpf) {
+      await facilitaSend({ to, text: "Envie assim: boleto 12345678901 (boleto + CPF, só números) 😊" });
+      return;
+    }
+
+    const basePublic = `https://${req.get("host")}`;
+    const r = await getBoletoByCpf({ cpf, basePublic });
+
+    if (!r.ok) {
+      await facilitaSend({ to, text: `Não consegui localizar seu boleto: ${r.error} 😕` });
+      return;
+    }
+
+    await facilitaSend({ to, text: `Aqui está a sua 2ª via ✅\nPDF: ${r.pdfUrl}` });
+  } catch (err) {
+    console.error("[FF INBOUND] erro:", err?.response?.data || err?.message || err);
+  }
+});
+
+// ver último payload do FacilitaFlow (opcional)
+app.get("/debug/last", (req, res) => {
+  if (ADMIN_SECRET) {
+    const got = String(req.query?.secret || "");
+    if (got !== ADMIN_SECRET) return res.status(401).json({ ok: false, error: "secret inválido" });
+  }
+  res.json({ ok: true, at: lastInboundAt, lastInbound });
+});
+
+app.listen(PORT, () => {
+  console.log("[BOOT] VERSION=PAGSCHOOL-PREFIX-DETECT");
+  console.log("[OK] Server on :", PORT);
+  console.log("[OK] PagSchool base:", PAGSCHOOL_BASE_URL);
+  console.log("[OK] FacilitaFlow send url:", FACILITAFLOW_SEND_URL);
+});
