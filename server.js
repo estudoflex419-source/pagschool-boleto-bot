@@ -5,7 +5,6 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const axios = require("axios");
-const crypto = require("crypto");
 
 const app = express();
 
@@ -23,48 +22,38 @@ const PORT = process.env.PORT || 3000;
 const PAGSCHOOL_BASE_URL = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/$/, "");
 const PAGSCHOOL_AUTH_TYPE = (process.env.PAGSCHOOL_AUTH_TYPE || "bearer").toLowerCase(); // bearer | basic | header
 const PAGSCHOOL_TOKEN = process.env.PAGSCHOOL_TOKEN || "";
-const PAGSCHOOL_USER = process.env.PAGSCHOOL_USER || ""; // se usar basic
-const PAGSCHOOL_PASS = process.env.PAGSCHOOL_PASS || ""; // se usar basic
-const PAGSCHOOL_HEADER_NAME = process.env.PAGSCHOOL_HEADER_NAME || "Authorization"; // se usar header custom
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || ""; // opcional
+const PAGSCHOOL_USER = process.env.PAGSCHOOL_USER || "";
+const PAGSCHOOL_PASS = process.env.PAGSCHOOL_PASS || "";
+const PAGSCHOOL_HEADER_NAME = process.env.PAGSCHOOL_HEADER_NAME || "Authorization";
 
 function authHeaders() {
-  if (!PAGSCHOOL_BASE_URL) throw new Error("PAGSCHOOL_BASE_URL não configurado");
-
   if (PAGSCHOOL_AUTH_TYPE === "basic") {
     const token = Buffer.from(`${PAGSCHOOL_USER}:${PAGSCHOOL_PASS}`).toString("base64");
     return { Authorization: `Basic ${token}` };
   }
-
   if (PAGSCHOOL_AUTH_TYPE === "header") {
-    // header custom com token
     return { [PAGSCHOOL_HEADER_NAME]: PAGSCHOOL_TOKEN };
   }
-
-  // bearer (padrão)
   return { Authorization: `Bearer ${PAGSCHOOL_TOKEN}` };
 }
 
-function normalizePhone(s) {
-  if (!s) return "";
-  return String(s).replace(/\D/g, ""); // só números
+function onlyDigits(v) {
+  return String(v || "").replace(/\D/g, "");
 }
 
 /**
- * HELPERS
- * Aqui é onde você liga a consulta do boleto no PagSchool.
- * Como eu não sei exatamente qual endpoint o seu PagSchool usa para buscar boleto por telefone/CPF,
- * eu deixei a função preparada para você ajustar 1 linha quando o PagSchool confirmar.
+ * BUSCAR BOLETO NO PAGSCHOOL
+ * ⚠️ Se o PagSchool usar outro caminho, você troca APENAS essa linha:
+ * const url = `${PAGSCHOOL_BASE_URL}/boleto`;
  */
-async function buscarBoletoNoPagSchool({ cpf, telefone }) {
-  // ✅ Ajuste aqui conforme o endpoint REAL que o PagSchool te passou.
-  // Exemplos comuns (NÃO GARANTIDO): /boleto, /boletos, /segunda-via, /cobrancas
-  // Vou montar uma tentativa genérica usando querystring:
-  const url = `${PAGSCHOOL_BASE_URL}/boleto`;
+async function buscarBoleto({ cpf, telefone }) {
+  if (!PAGSCHOOL_BASE_URL) throw new Error("PAGSCHOOL_BASE_URL não configurado");
+
+  const url = `${PAGSCHOOL_BASE_URL}/boleto`; // <- se o PagSchool te passar outro endpoint, troca aqui
 
   const params = {};
-  if (cpf) params.cpf = String(cpf).replace(/\D/g, "");
-  if (telefone) params.telefone = normalizePhone(telefone);
+  if (cpf) params.cpf = onlyDigits(cpf);
+  if (telefone) params.telefone = onlyDigits(telefone);
 
   const { data } = await axios.get(url, {
     headers: authHeaders(),
@@ -72,9 +61,7 @@ async function buscarBoletoNoPagSchool({ cpf, telefone }) {
     timeout: 20000,
   });
 
-  // Esperado que venha algo com link/linha digitável
-  // Vamos tentar padronizar:
-  const boletoLink =
+  const boleto =
     data?.boleto ||
     data?.link ||
     data?.url ||
@@ -83,18 +70,14 @@ async function buscarBoletoNoPagSchool({ cpf, telefone }) {
     data?.data?.link ||
     "";
 
-  const linhaDigitavel =
+  const linha_digitavel =
     data?.linha_digitavel ||
     data?.linhaDigitavel ||
     data?.linha ||
     data?.data?.linha_digitavel ||
     "";
 
-  return {
-    raw: data,
-    boletoLink,
-    linhaDigitavel,
-  };
+  return { boleto, linha_digitavel, raw: data };
 }
 
 /**
@@ -105,123 +88,29 @@ app.get(["/", "/health"], (req, res) => {
 });
 
 /**
- * PAGSCHOOL WEBHOOK (eventos do PagSchool)
+ * WEBHOOK PAGSCHOOL (eventos)
  */
-app.get("/webhook", (req, res) => {
-  res.status(200).send("Webhook ativo");
-});
+app.get("/webhook", (req, res) => res.status(200).send("Webhook ativo ✅"));
 
 app.post("/webhook", (req, res) => {
-  // Se quiser validar assinatura/secret, dá pra implementar aqui.
   console.log("[PAGSCHOOL] Webhook recebido:", JSON.stringify(req.body));
-
-  // Sempre responda 200 rápido
   return res.status(200).json({ ok: true });
 });
 
 /**
- * FACILITAFLOW WEBHOOK (mensagens do fluxo)
- * -> configure no FacilitaFlow: https://pagschool-boleto-bot-1.onrender.com/flow
- */
-function extractFromFacilitaFlowPayload(body) {
-  // Como cada plataforma manda um formato, vamos tentar achar telefone e texto em vários campos.
-  const text =
-    body?.message ||
-    body?.text ||
-    body?.mensagem ||
-    body?.data?.message ||
-    body?.data?.text ||
-    body?.input ||
-    "";
-
-  const phone =
-    body?.phone ||
-    body?.telefone ||
-    body?.from ||
-    body?.contato?.telefone ||
-    body?.contact?.phone ||
-    body?.data?.phone ||
-    body?.data?.from ||
-    "";
-
-  const cpf =
-    body?.cpf ||
-    body?.document ||
-    body?.documento ||
-    body?.data?.cpf ||
-    "";
-
-  return { text: String(text || ""), phone: normalizePhone(phone), cpf: String(cpf || "") };
-}
-
-function respondToFlow(res, msg, extra = {}) {
-  // Resposta “tolerante”: devolve JSON e também pode ser lida como texto dependendo da plataforma.
-  // Muitas plataformas usam a resposta do webhook como mensagem.
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  return res.status(200).json({
-    ok: true,
-    reply: msg,
-    text: msg,
-    message: msg,
-    ...extra,
-  });
-}
-
-app.all("/flow", async (req, res) => {
-  try {
-    // Log completo para você ver o que o FacilitaFlow está mandando
-    console.log("[FLOW] Method:", req.method);
-    console.log("[FLOW] Headers:", JSON.stringify(req.headers));
-    console.log("[FLOW] Body:", JSON.stringify(req.body));
-    console.log("[FLOW] Query:", JSON.stringify(req.query));
-
-    const payload = req.method === "GET" ? req.query : req.body;
-    const { text, phone, cpf } = extractFromFacilitaFlowPayload(payload);
-
-    // Se não veio telefone nem cpf, pede de forma simples
-    if (!phone && !cpf) {
-      return respondToFlow(
-        res,
-        "Para eu enviar sua 2ª via, me diga seu CPF (somente números). 😊"
-      );
-    }
-
-    // Tenta buscar boleto no PagSchool
-    const result = await buscarBoletoNoPagSchool({ cpf, telefone: phone });
-
-    if (!result?.boletoLink && !result?.linhaDigitavel) {
-      return respondToFlow(
-        res,
-        "Não encontrei um boleto agora. Me confirme seu CPF (somente números) para eu localizar certinho. 😊",
-        { debug: { gotPhone: !!phone, gotCpf: !!cpf } }
-      );
-    }
-
-    let msg = "Aqui está sua 2ª via do boleto 😊\n\n";
-    if (result.linhaDigitavel) msg += `Linha digitável:\n${result.linhaDigitavel}\n\n`;
-    if (result.boletoLink) msg += `Link:\n${result.boletoLink}`;
-
-    return respondToFlow(res, msg);
-  } catch (err) {
-    console.error("[FLOW] Erro:", err?.response?.data || err?.message || err);
-    return respondToFlow(res, "Tive um erro ao buscar seu boleto. Tente novamente em 1 minuto, por favor. 🙏");
-  }
-});
-
-/**
- * ENDPOINT MANUAL /BOLETO (se você quiser chamar direto)
+ * BOLETO (manual)
  */
 app.post("/boleto", async (req, res) => {
   try {
-    const cpf = req.body?.cpf ? String(req.body.cpf) : "";
-    const telefone = req.body?.telefone ? String(req.body.telefone) : "";
+    const cpf = req.body?.cpf || "";
+    const telefone = req.body?.telefone || "";
 
-    const result = await buscarBoletoNoPagSchool({ cpf, telefone });
+    const result = await buscarBoleto({ cpf, telefone });
 
     return res.json({
       ok: true,
-      boleto: result.boletoLink,
-      linha_digitavel: result.linhaDigitavel,
+      boleto: result.boleto,
+      linha_digitavel: result.linha_digitavel,
       raw: result.raw,
     });
   } catch (err) {
@@ -230,10 +119,69 @@ app.post("/boleto", async (req, res) => {
   }
 });
 
+/**
+ * FLOW (FacilitaFlow)
+ * -> coloque no FacilitaFlow: https://pagschool-boleto-bot-1.onrender.com/flow
+ */
+function responderFlow(res, msg, extra = {}) {
+  return res.status(200).json({
+    ok: true,
+    reply: msg,
+    message: msg,
+    text: msg,
+    ...extra,
+  });
+}
+
+app.all("/flow", async (req, res) => {
+  try {
+    console.log("[FLOW] method:", req.method);
+    console.log("[FLOW] query:", JSON.stringify(req.query));
+    console.log("[FLOW] body:", JSON.stringify(req.body));
+
+    const payload = req.method === "GET" ? req.query : req.body;
+
+    // tenta pegar cpf/telefone de vários formatos
+    const cpf = payload?.cpf || payload?.documento || payload?.document || "";
+    const telefone =
+      payload?.telefone ||
+      payload?.phone ||
+      payload?.from ||
+      payload?.contato?.telefone ||
+      payload?.contact?.phone ||
+      "";
+
+    if (!cpf && !telefone) {
+      return responderFlow(res, "Para eu enviar sua 2ª via, me diga seu CPF (somente números). 😊");
+    }
+
+    const result = await buscarBoleto({ cpf, telefone });
+
+    if (!result.boleto && !result.linha_digitavel) {
+      return responderFlow(
+        res,
+        "Não encontrei um boleto agora. Me confirme seu CPF (somente números) para eu localizar certinho. 😊"
+      );
+    }
+
+    let msg = "Aqui está sua 2ª via do boleto 😊\n\n";
+    if (result.linha_digitavel) msg += `Linha digitável:\n${result.linha_digitavel}\n\n`;
+    if (result.boleto) msg += `Link:\n${result.boleto}`;
+
+    return responderFlow(res, msg, {
+      boleto: result.boleto,
+      linha_digitavel: result.linha_digitavel,
+    });
+  } catch (err) {
+    console.error("[FLOW] Erro:", err?.response?.data || err?.message || err);
+    return responderFlow(res, "Tive um erro ao buscar seu boleto. Tente novamente em 1 minuto. 🙏");
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`[OK] Server rodando na porta ${PORT}`);
   console.log(`[OK] Health: /health`);
   console.log(`[OK] Boleto: POST /boleto`);
-  console.log(`[OK] PagSchool Webhook: POST /webhook`);
-  console.log(`[OK] FacilitaFlow: GET/POST /flow`);
+  console.log(`[OK] Webhook: POST /webhook`);
+  console.log(`[OK] Flow: GET/POST /flow`);
 });
