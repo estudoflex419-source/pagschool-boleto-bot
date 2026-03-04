@@ -7,77 +7,109 @@ const morgan = require("morgan");
 const axios = require("axios");
 
 const app = express();
-
 app.use(cors());
 app.use(helmet());
 app.use(morgan("combined"));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-/**
- * CONFIG
- */
 const PORT = process.env.PORT || 3000;
 
+// BASE: https://sistema.pagschool.com.br/prod
 const PAGSCHOOL_BASE_URL = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/$/, "");
-const PAGSCHOOL_AUTH_TYPE = (process.env.PAGSCHOOL_AUTH_TYPE || "bearer").toLowerCase(); // bearer | basic | header
-const PAGSCHOOL_TOKEN = process.env.PAGSCHOOL_TOKEN || "";
-const PAGSCHOOL_USER = process.env.PAGSCHOOL_USER || "";
-const PAGSCHOOL_PASS = process.env.PAGSCHOOL_PASS || "";
-const PAGSCHOOL_HEADER_NAME = process.env.PAGSCHOOL_HEADER_NAME || "Authorization";
+const PAGSCHOOL_EMAIL = process.env.PAGSCHOOL_EMAIL || "";
+const PAGSCHOOL_PASSWORD = process.env.PAGSCHOOL_PASSWORD || "";
 
-function authHeaders() {
-  if (PAGSCHOOL_AUTH_TYPE === "basic") {
-    const token = Buffer.from(`${PAGSCHOOL_USER}:${PAGSCHOOL_PASS}`).toString("base64");
-    return { Authorization: `Basic ${token}` };
-  }
-  if (PAGSCHOOL_AUTH_TYPE === "header") {
-    return { [PAGSCHOOL_HEADER_NAME]: PAGSCHOOL_TOKEN };
-  }
-  return { Authorization: `Bearer ${PAGSCHOOL_TOKEN}` };
-}
+// Cache simples do token
+let tokenCache = { token: "", exp: 0 };
 
 function onlyDigits(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
-/**
- * BUSCAR BOLETO NO PAGSCHOOL
- * ⚠️ Se o PagSchool usar outro caminho, você troca APENAS essa linha:
- * const url = `${PAGSCHOOL_BASE_URL}/boleto`;
- */
-async function buscarBoleto({ cpf, telefone }) {
+function mustHaveEnv() {
   if (!PAGSCHOOL_BASE_URL) throw new Error("PAGSCHOOL_BASE_URL não configurado");
+  if (!PAGSCHOOL_EMAIL) throw new Error("PAGSCHOOL_EMAIL não configurado");
+  if (!PAGSCHOOL_PASSWORD) throw new Error("PAGSCHOOL_PASSWORD não configurado");
+}
 
-  const url = `${PAGSCHOOL_BASE_URL}/boleto`; // <- se o PagSchool te passar outro endpoint, troca aqui
+// Pagschool exige Content-type application/json (doc)
+function baseHeaders(jwtToken) {
+  const h = { "Content-Type": "application/json" };
+  if (jwtToken) h["Authorization"] = `JWT ${jwtToken}`; // doc: Authorization: JWT <token>
+  return h;
+}
 
-  const params = {};
-  if (cpf) params.cpf = onlyDigits(cpf);
-  if (telefone) params.telefone = onlyDigits(telefone);
+async function getJwtToken() {
+  mustHaveEnv();
 
+  const now = Date.now();
+  if (tokenCache.token && tokenCache.exp > now) return tokenCache.token;
+
+  // POST - {{endpoint}}/api/authenticate
+  const url = `${PAGSCHOOL_BASE_URL}/api/authenticate`;
+  const { data } = await axios.post(
+    url,
+    { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD },
+    { headers: baseHeaders(), timeout: 20000 }
+  );
+
+  if (!data?.token) throw new Error("Autenticação não retornou token");
+
+  // JWT costuma durar um tempo; cache por 50 min
+  tokenCache = { token: data.token, exp: now + 50 * 60 * 1000 };
+  return data.token;
+}
+
+async function apiGet(path, params = {}) {
+  const token = await getJwtToken();
+  const url = `${PAGSCHOOL_BASE_URL}${path}`;
   const { data } = await axios.get(url, {
-    headers: authHeaders(),
+    headers: baseHeaders(token),
     params,
     timeout: 20000,
   });
+  return data;
+}
 
-  const boleto =
-    data?.boleto ||
-    data?.link ||
-    data?.url ||
-    data?.pdf ||
-    data?.data?.boleto ||
-    data?.data?.link ||
-    "";
+async function apiPost(path, body = {}) {
+  const token = await getJwtToken();
+  const url = `${PAGSCHOOL_BASE_URL}${path}`;
+  const { data } = await axios.post(url, body, {
+    headers: baseHeaders(token),
+    timeout: 20000,
+  });
+  return data;
+}
 
-  const linha_digitavel =
-    data?.linha_digitavel ||
-    data?.linhaDigitavel ||
-    data?.linha ||
-    data?.data?.linha_digitavel ||
-    "";
+async function buscarAlunoPorCpf(cpf) {
+  // GET - {{endpoint}}/api/aluno/all?cpf=...
+  const data = await apiGet("/api/aluno/all", { cpf: onlyDigits(cpf), limit: 1, offset: 0 });
+  const aluno = Array.isArray(data?.rows) ? data.rows[0] : null;
+  if (!aluno?.id) return null;
+  return aluno;
+}
 
-  return { boleto, linha_digitavel, raw: data };
+function escolherParcelaEmAberto(contratos) {
+  // pega 1ª parcela que NÃO esteja PAGO
+  for (const c of contratos || []) {
+    const parcelas = c?.parcelas || [];
+    for (const p of parcelas) {
+      const status = String(p?.status || "").toUpperCase();
+      if (status && status !== "PAGO") return { contrato: c, parcela: p };
+    }
+  }
+  return null;
+}
+
+async function gerarBoletoSePrecisa(parcelaId) {
+  // POST - {{endpoint}}/api/parcelas-contrato/gerar-boleto-parcela/:parcelaId
+  return apiPost(`/api/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`, {});
+}
+
+function montarLinkPdfParcela(parcelaId, nossoNumero) {
+  // {{endpoint}}/api/parcelas-contrato/pdf/:parcelaId/:nossoNumero
+  return `${PAGSCHOOL_BASE_URL}/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`;
 }
 
 /**
@@ -88,49 +120,20 @@ app.get(["/", "/health"], (req, res) => {
 });
 
 /**
- * WEBHOOK PAGSCHOOL (eventos)
+ * WEBHOOK PAGSCHOOL (eventos) - continua igual
  */
 app.get("/webhook", (req, res) => res.status(200).send("Webhook ativo ✅"));
-
 app.post("/webhook", (req, res) => {
   console.log("[PAGSCHOOL] Webhook recebido:", JSON.stringify(req.body));
   return res.status(200).json({ ok: true });
 });
 
 /**
- * BOLETO (manual)
- */
-app.post("/boleto", async (req, res) => {
-  try {
-    const cpf = req.body?.cpf || "";
-    const telefone = req.body?.telefone || "";
-
-    const result = await buscarBoleto({ cpf, telefone });
-
-    return res.json({
-      ok: true,
-      boleto: result.boleto,
-      linha_digitavel: result.linha_digitavel,
-      raw: result.raw,
-    });
-  } catch (err) {
-    console.error("[BOLETO] Erro:", err?.response?.data || err?.message || err);
-    return res.status(500).json({ ok: false, error: "Falha ao buscar boleto" });
-  }
-});
-
-/**
  * FLOW (FacilitaFlow)
- * -> coloque no FacilitaFlow: https://pagschool-boleto-bot-1.onrender.com/flow
+ * Configure no FacilitaFlow: https://pagschool-boleto-bot-1.onrender.com/flow
  */
 function responderFlow(res, msg, extra = {}) {
-  return res.status(200).json({
-    ok: true,
-    reply: msg,
-    message: msg,
-    text: msg,
-    ...extra,
-  });
+  return res.status(200).json({ ok: true, reply: msg, message: msg, text: msg, ...extra });
 }
 
 app.all("/flow", async (req, res) => {
@@ -141,37 +144,53 @@ app.all("/flow", async (req, res) => {
 
     const payload = req.method === "GET" ? req.query : req.body;
 
-    // tenta pegar cpf/telefone de vários formatos
+    // o mais confiável: CPF
     const cpf = payload?.cpf || payload?.documento || payload?.document || "";
-    const telefone =
-      payload?.telefone ||
-      payload?.phone ||
-      payload?.from ||
-      payload?.contato?.telefone ||
-      payload?.contact?.phone ||
-      "";
 
-    if (!cpf && !telefone) {
-      return responderFlow(res, "Para eu enviar sua 2ª via, me diga seu CPF (somente números). 😊");
+    if (!cpf) {
+      return responderFlow(res, "Para eu te enviar a 2ª via, me mande seu CPF (somente números). 😊");
     }
 
-    const result = await buscarBoleto({ cpf, telefone });
+    const aluno = await buscarAlunoPorCpf(cpf);
+    if (!aluno) {
+      return responderFlow(res, "Não encontrei aluno com esse CPF. Confere se digitou certinho (11 números). 🙏");
+    }
 
-    if (!result.boleto && !result.linha_digitavel) {
+    // GET - {{endpoint}}/api/contrato/by-aluno/:alunoId
+    const contratos = await apiGet(`/api/contrato/by-aluno/${aluno.id}`);
+
+    const escolhido = escolherParcelaEmAberto(contratos);
+    if (!escolhido?.parcela?.id) {
+      return responderFlow(res, "Não achei parcelas em aberto para esse CPF. ✅");
+    }
+
+    const parcelaId = escolhido.parcela.id;
+
+    // Se já tiver nossoNumero, dá pra montar o PDF direto.
+    // Se não tiver, gera boleto e pega nossoNumero.
+    let nossoNumero = escolhido.parcela?.nossoNumero;
+    let numeroBoleto = escolhido.parcela?.numeroBoleto;
+
+    if (!nossoNumero) {
+      const parcelaGerada = await gerarBoletoSePrecisa(parcelaId);
+      nossoNumero = parcelaGerada?.nossoNumero;
+      numeroBoleto = parcelaGerada?.numeroBoleto || numeroBoleto;
+    }
+
+    if (!nossoNumero) {
       return responderFlow(
         res,
-        "Não encontrei um boleto agora. Me confirme seu CPF (somente números) para eu localizar certinho. 😊"
+        "Consegui localizar sua parcela, mas não consegui gerar o boleto agora. Tente novamente em 1 minuto. 🙏"
       );
     }
 
-    let msg = "Aqui está sua 2ª via do boleto 😊\n\n";
-    if (result.linha_digitavel) msg += `Linha digitável:\n${result.linha_digitavel}\n\n`;
-    if (result.boleto) msg += `Link:\n${result.boleto}`;
+    const linkPdf = montarLinkPdfParcela(parcelaId, nossoNumero);
 
-    return responderFlow(res, msg, {
-      boleto: result.boleto,
-      linha_digitavel: result.linha_digitavel,
-    });
+    let msg = "Aqui está sua 2ª via do boleto 😊\n\n";
+    if (numeroBoleto) msg += `Linha digitável:\n${numeroBoleto}\n\n`;
+    msg += `PDF:\n${linkPdf}`;
+
+    return responderFlow(res, msg, { parcelaId, nossoNumero, pdf: linkPdf, linha_digitavel: numeroBoleto || "" });
   } catch (err) {
     console.error("[FLOW] Erro:", err?.response?.data || err?.message || err);
     return responderFlow(res, "Tive um erro ao buscar seu boleto. Tente novamente em 1 minuto. 🙏");
@@ -181,7 +200,6 @@ app.all("/flow", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`[OK] Server rodando na porta ${PORT}`);
   console.log(`[OK] Health: /health`);
-  console.log(`[OK] Boleto: POST /boleto`);
   console.log(`[OK] Webhook: POST /webhook`);
   console.log(`[OK] Flow: GET/POST /flow`);
 });
