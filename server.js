@@ -24,11 +24,9 @@ const PAGSCHOOL_AUTH_TYPE = (process.env.PAGSCHOOL_AUTH_TYPE || "auto").trim().t
 
 const FACILITAFLOW_SEND_URL =
   (process.env.FACILITAFLOW_SEND_URL || "https://licenca.facilitaflow.com.br/sendWebhook").trim();
-
-// ✅ você já configurou esse no Render (print)
 const FACILITAFLOW_API_TOKEN = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
 
-console.log("[BOOT] VERSION=SENDWEBHOOK-TOKENWEBHOOK-FIX-V3");
+console.log("[BOOT] VERSION=FACILITAFLOW-DEBUG-V4");
 console.log("[OK] PagSchool base:", PAGSCHOOL_BASE_URL);
 console.log("[OK] PagSchool auth type:", PAGSCHOOL_AUTH_TYPE);
 console.log("[OK] FacilitaFlow send url:", FACILITAFLOW_SEND_URL);
@@ -326,37 +324,45 @@ async function getBoletoByCpf({ cpf, basePublic }) {
   };
 }
 
-// ✅ FIX REAL: FacilitaFlow exige tokenWebhook
+// ✅ Agora SEMPRE loga resposta (até quando dá 400/500)
 async function facilitaSend({ phone, message }) {
   if (!FACILITAFLOW_API_TOKEN) throw new Error("FACILITAFLOW_API_TOKEN não configurado");
 
   const payload = {
-    tokenWebhook: FACILITAFLOW_API_TOKEN, // ✅ obrigatório
+    tokenWebhook: FACILITAFLOW_API_TOKEN,
     phone: normalizePhone(phone),
     message: String(message || ""),
     arquivo: null,
     desativarFluxo: false,
-
-    // extra (não atrapalha, mas ajuda compat)
     token: FACILITAFLOW_API_TOKEN
   };
 
   if (!payload.phone) throw new Error("phone vazio/indefinido para envio");
 
-  const r = await axios.post(FACILITAFLOW_SEND_URL, payload, {
+  const resp = await axios.post(FACILITAFLOW_SEND_URL, payload, {
     headers: { "Content-Type": "application/json" },
-    timeout: 20000
+    timeout: 20000,
+    validateStatus: () => true // ✅ não “explode” em 4xx/5xx
   });
 
-  console.log("[FACILITAFLOW] status:", r.status, "data:", typeof r.data === "string" ? r.data.slice(0, 200) : r.data);
+  console.log(
+    "[FACILITAFLOW] status=",
+    resp.status,
+    "data=",
+    typeof resp.data === "string" ? resp.data.slice(0, 500) : resp.data
+  );
 
-  if (r?.data && typeof r.data === "object" && r.data.success === false) {
-    const err = new Error("FacilitaFlow retornou success:false");
-    err.details = r.data;
+  // considera erro se não for 2xx ou se success=false
+  const is2xx = resp.status >= 200 && resp.status < 300;
+  const successFalse = resp?.data && typeof resp.data === "object" && resp.data.success === false;
+
+  if (!is2xx || successFalse) {
+    const err = new Error("FacilitaFlow retornou erro");
+    err.details = { status: resp.status, data: resp.data };
     throw err;
   }
 
-  return { ok: true, status: r.status, data: r.data };
+  return { ok: true, status: resp.status, data: resp.data };
 }
 
 function extractTextAny(obj) {
@@ -418,7 +424,12 @@ app.all("/debug/send", async (req, res) => {
     const r = await facilitaSend({ phone, message });
     res.json({ ok: true, sent: true, result: r });
   } catch (err) {
-    res.status(500).json({ ok: false, error: "Falha ao enviar", details: err.details || err?.response?.data || err?.message || String(err) });
+    console.error("[DEBUG SEND] erro:", err.details || err?.message || err);
+    res.status(500).json({
+      ok: false,
+      error: "Falha ao enviar",
+      details: err.details || err?.response?.data || err?.message || String(err)
+    });
   }
 });
 
