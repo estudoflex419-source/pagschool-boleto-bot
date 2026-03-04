@@ -22,12 +22,14 @@ const PAGSCHOOL_BASE_URL_RAW = (process.env.PAGSCHOOL_BASE_URL || "").trim();
 const PAGSCHOOL_EMAIL = (process.env.PAGSCHOOL_EMAIL || "").trim();
 const PAGSCHOOL_PASSWORD = (process.env.PAGSCHOOL_PASSWORD || "").trim();
 
-// FacilitaFlow (API de saída)
+// FacilitaFlow
 const FACILITAFLOW_SEND_URL = (process.env.FACILITAFLOW_SEND_URL || "https://licenca.facilitaflow.com.br/sendWebhook").trim();
 const FACILITAFLOW_API_TOKEN = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
 
-// Segurança opcional p/ endpoint de teste
+// Opcional (pra liberar /debug/send)
 const ADMIN_SECRET = (process.env.ADMIN_SECRET || "").trim();
+
+const SAFE_LOG_MAX = 3500;
 
 function mustHaveEnv() {
   if (!PAGSCHOOL_BASE_URL_RAW) throw new Error("PAGSCHOOL_BASE_URL não configurado");
@@ -51,11 +53,7 @@ function onlyDigits(v) {
 function toISODate(d) {
   if (!d) return "";
   if (typeof d === "string") return d.slice(0, 10);
-  try {
-    return new Date(d).toISOString().slice(0, 10);
-  } catch {
-    return "";
-  }
+  try { return new Date(d).toISOString().slice(0, 10); } catch { return ""; }
 }
 
 function parseJwtPayload(token) {
@@ -70,13 +68,14 @@ function parseJwtPayload(token) {
   }
 }
 
-// Axios PagSchool
+/**
+ * PagSchool client
+ */
 const pagschool = axios.create({
   baseURL: PAGSCHOOL_BASE_URL,
   timeout: 20000
 });
 
-// Token cache
 let tokenCache = { token: "", expMs: 0 };
 
 async function authenticate() {
@@ -85,7 +84,7 @@ async function authenticate() {
   if (tokenCache.token && Date.now() < tokenCache.expMs - 60_000) return tokenCache.token;
 
   const resp = await pagschool.post(
-    `/api/authenticate`,
+    "/api/authenticate",
     { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD },
     { headers: { "Content-Type": "application/json" } }
   );
@@ -126,7 +125,7 @@ async function pagschoolRequest(config, { retryOn401 = true } = {}) {
 }
 
 /**
- * Helpers flexíveis (PagSchool)
+ * Helpers PagSchool (flexível)
  */
 function extractAlunoFromAlunosAll(data) {
   const rows = data?.rows || data?.data?.rows || data?.result?.rows || data?.alunos || data?.items;
@@ -176,7 +175,6 @@ function pickBestParcela(parcelas) {
   const vencidas = withDates
     .filter(x => x.venc && x.venc < todayStr)
     .sort((a, b) => a.venc.localeCompare(b.venc));
-
   if (vencidas.length) return vencidas[0].p;
 
   const proximas = withDates
@@ -247,6 +245,7 @@ async function getBoletoByCpf({ cpf, basePublic }) {
   }
 
   const pdfUrl = `${basePublic}/boleto/pdf/${parcelaId}/${encodeURIComponent(String(nossoNumero))}`;
+
   const numeroBoleto =
     best?.numeroBoleto || best?.linhaDigitavel || best?.codigoBarras || best?.barcode || null;
 
@@ -254,7 +253,12 @@ async function getBoletoByCpf({ cpf, basePublic }) {
     ok: true,
     aluno: { id: alunoId, nome: aluno?.nome || aluno?.name || null },
     contrato: { id: bestContrato?.id || bestContrato?.contrato_id || null },
-    parcela: { id: parcelaId, status: best?.status || null, valor: best?.valor || null, vencimento: best?.vencimento || null },
+    parcela: {
+      id: parcelaId,
+      status: best?.status || null,
+      valor: best?.valor || null,
+      vencimento: best?.vencimento || null
+    },
     nossoNumero,
     linhaDigitavel: numeroBoleto,
     pdfUrl
@@ -262,40 +266,55 @@ async function getBoletoByCpf({ cpf, basePublic }) {
 }
 
 /**
- * FacilitaFlow - enviar mensagem via API
- * (não existe doc pública, então fazemos payload “tolerante” com chaves alternativas)
+ * FacilitaFlow sendWebhook
+ * (como não temos doc oficial, tentamos formatos comuns e header)
  */
-async function facilitaSend({ to, text, meta }) {
+async function facilitaSend({ to, text }) {
   if (!FACILITAFLOW_API_TOKEN) throw new Error("FACILITAFLOW_API_TOKEN não configurado no Render.");
 
-  const payloads = [
-    { token: FACILITAFLOW_API_TOKEN, to, message: text, meta },
-    { token: FACILITAFLOW_API_TOKEN, phone: to, text, meta },
-    { apiToken: FACILITAFLOW_API_TOKEN, number: to, message: text, meta }
+  const candidates = [
+    { token: FACILITAFLOW_API_TOKEN, to, message: text },
+    { token: FACILITAFLOW_API_TOKEN, phone: to, text },
+    { token: FACILITAFLOW_API_TOKEN, numero: to, mensagem: text },
+    { apiToken: FACILITAFLOW_API_TOKEN, to, message: text }
   ];
 
-  let lastErr;
-  for (const data of payloads) {
+  // tenta sem header
+  for (const body of candidates) {
     try {
-      const r = await axios.post(FACILITAFLOW_SEND_URL, data, {
+      const r = await axios.post(FACILITAFLOW_SEND_URL, body, {
         headers: { "Content-Type": "application/json" },
         timeout: 20000
       });
       return { ok: true, status: r.status, data: r.data };
-    } catch (e) {
-      lastErr = e;
-    }
+    } catch (e) {}
   }
 
-  throw lastErr;
+  // tenta com Authorization
+  try {
+    const r = await axios.post(
+      FACILITAFLOW_SEND_URL,
+      { to, message: text },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${FACILITAFLOW_API_TOKEN}`
+        },
+        timeout: 20000
+      }
+    );
+    return { ok: true, status: r.status, data: r.data };
+  } catch (e) {
+    throw e;
+  }
 }
 
 /**
- * Extrair texto/numero do payload do webhook do FacilitaFlow (flexível)
+ * Extrair do payload do FacilitaFlow (flexível)
  */
 function extractText(body) {
   if (!body) return "";
-  const direct =
+  return (
     body.text ||
     body.message ||
     body.mensagem ||
@@ -303,32 +322,32 @@ function extractText(body) {
     body.content ||
     body?.data?.text ||
     body?.data?.message ||
-    body?.data?.mensagem;
-  if (typeof direct === "string") return direct;
-  return "";
+    body?.data?.mensagem ||
+    ""
+  );
 }
 
-function extractFromNumber(body) {
-  const candidates = [
-    body?.from,
-    body?.phone,
-    body?.numero,
-    body?.number,
-    body?.sender,
-    body?.whatsapp,
-    body?.chatId,
-    body?.contact,
-    body?.data?.from,
-    body?.data?.phone,
-    body?.data?.numero,
-    body?.data?.number
-  ].filter(Boolean);
+function extractTarget(body) {
+  // alguns sistemas mandam chatId, outros mandam "from"
+  const raw =
+    body?.chatId ||
+    body?.from ||
+    body?.phone ||
+    body?.numero ||
+    body?.number ||
+    body?.sender ||
+    body?.data?.chatId ||
+    body?.data?.from ||
+    body?.data?.phone ||
+    body?.data?.numero ||
+    body?.data?.number ||
+    "";
 
-  for (const c of candidates) {
-    const digits = onlyDigits(c);
-    if (digits.length >= 10) return digits; // 10+ pra pegar DDD
-  }
-  return "";
+  // se vier com @s.whatsapp.net, mantém
+  if (String(raw).includes("@")) return String(raw).trim();
+
+  const digits = onlyDigits(raw);
+  return digits;
 }
 
 function extractCpfFromText(text) {
@@ -338,41 +357,65 @@ function extractCpfFromText(text) {
 }
 
 /**
- * ROTAS
+ * Rotas
  */
-app.get("/", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "pagschool-boleto-bot",
-    endpoints: {
-      health: "/health",
-      boleto: "POST /boleto { cpf }",
-      boletoPdf: "GET /boleto/pdf/:parcelaId/:nossoNumero",
-      facilitaInbound: "POST /ff/inbound (FacilitaFlow → Render)",
-      facilitaSendTest: "POST /ff/send (teste manual)"
+app.get("/", (_req, res) => res.json({ ok: true, service: "pagschool-boleto-bot" }));
+app.get("/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+
+// ✅ Debug: confirme se o FacilitaFlow está batendo no seu Render
+app.all("/debug/hit", (req, res) => {
+  const bodyStr = JSON.stringify(req.body || {});
+  console.log("[DEBUG HIT] method:", req.method, "path:", req.path);
+  console.log("[DEBUG HIT] content-type:", req.headers["content-type"]);
+  console.log("[DEBUG HIT] body:", bodyStr.length > SAFE_LOG_MAX ? bodyStr.slice(0, SAFE_LOG_MAX) + "..." : bodyStr);
+  res.status(200).json({ ok: true, hit: true });
+});
+
+// ✅ Debug via navegador: testar PagSchool sem FacilitaFlow
+app.get("/debug/boleto", async (req, res) => {
+  try {
+    const cpf = onlyDigits(req.query?.cpf);
+    if (!cpf || cpf.length !== 11) return res.status(400).json({ ok: false, error: "cpf inválido (11 dígitos)" });
+
+    const basePublic = `${req.protocol}://${req.get("host")}`;
+    const r = await getBoletoByCpf({ cpf, basePublic });
+    return res.status(r.ok ? 200 : 404).json(r);
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: "erro", details: err?.response?.data || err?.message || String(err) });
+  }
+});
+
+// ✅ Debug via navegador: testar envio pelo sendWebhook
+app.get("/debug/send", async (req, res) => {
+  try {
+    if (ADMIN_SECRET) {
+      const got = String(req.query?.secret || "");
+      if (got !== ADMIN_SECRET) return res.status(401).json({ ok: false, error: "secret inválido" });
     }
-  });
+
+    const to = String(req.query?.to || "").trim();
+    const text = String(req.query?.text || "").trim();
+    if (!to) return res.status(400).json({ ok: false, error: "to obrigatório" });
+    if (!text) return res.status(400).json({ ok: false, error: "text obrigatório" });
+
+    const r = await facilitaSend({ to, text });
+    return res.json({ ok: true, result: r });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: "falha ao enviar", details: err?.response?.data || err?.message || String(err) });
+  }
 });
 
-app.get("/health", (_req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
-});
-
-// Teste manual: boleto por CPF (sem FacilitaFlow)
+// Endpoint manual (se quiser usar por HTTP)
 app.post("/boleto", async (req, res) => {
   try {
     const cpf = onlyDigits(req.body?.cpf);
-    if (!cpf || cpf.length !== 11) return res.status(400).json({ ok: false, error: "CPF inválido (11 dígitos)." });
+    if (!cpf || cpf.length !== 11) return res.status(400).json({ ok: false, error: "CPF inválido (11 dígitos)" });
 
     const basePublic = `${req.protocol}://${req.get("host")}`;
-    const result = await getBoletoByCpf({ cpf, basePublic });
-    return res.status(result.ok ? 200 : 404).json(result);
+    const r = await getBoletoByCpf({ cpf, basePublic });
+    return res.status(r.ok ? 200 : 404).json(r);
   } catch (err) {
-    return res.status(err?.response?.status || 500).json({
-      ok: false,
-      error: "Erro ao buscar boleto",
-      details: err?.response?.data || err?.message || String(err)
-    });
+    return res.status(500).json({ ok: false, error: "erro", details: err?.response?.data || err?.message || String(err) });
   }
 });
 
@@ -400,55 +443,51 @@ app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   }
 });
 
-// Webhook PagSchool (mantido)
+// Webhook PagSchool (pagamento/status)
 app.post("/webhook", (req, res) => {
-  console.log("[PAGSCHOOL WEBHOOK] recebido:", JSON.stringify(req.body || {}));
+  console.log("[PAGSCHOOL WEBHOOK] recebido:", JSON.stringify(req.body || {}).slice(0, SAFE_LOG_MAX));
   res.json({ ok: true });
 });
 
-/**
- * ✅ WEBHOOK DO FACILITAFLOW (BOLETO)
- * Configure lá: https://pagschool-boleto-bot-1.onrender.com/ff/inbound
- */
+// ✅ Webhook REAL do FacilitaFlow (depois do debug)
 app.post("/ff/inbound", async (req, res) => {
   // responde rápido pro FacilitaFlow
   res.json({ ok: true, received: true });
 
   try {
-    // log curto pra você ver o formato que o FacilitaFlow manda
-    const raw = JSON.stringify(req.body || {});
-    console.log("[FF INBOUND] body:", raw.length > 3000 ? raw.slice(0, 3000) + "..." : raw);
+    const bodyStr = JSON.stringify(req.body || {});
+    console.log("[FF INBOUND] body:", bodyStr.length > SAFE_LOG_MAX ? bodyStr.slice(0, SAFE_LOG_MAX) + "..." : bodyStr);
 
     const text = extractText(req.body);
     const cpf = extractCpfFromText(text);
-    const to = extractFromNumber(req.body);
+    const to = extractTarget(req.body);
 
     if (!to) {
-      console.log("[FF INBOUND] Não achei número (to) no payload. Preciso do campo de telefone no JSON.");
+      console.log("[FF INBOUND] Não achei o destinatário (to/chatId/from) no payload do FacilitaFlow.");
       return;
     }
 
     if (!cpf) {
       await facilitaSend({
         to,
-        text: "Pra eu enviar a 2ª via, manda assim: BOLETO 12345678901 (boleto + seu CPF, só números) 😊"
+        text: "Pra eu enviar a 2ª via, manda assim: boleto 12345678901 (boleto + seu CPF, só números) 😊"
       });
       return;
     }
 
     const basePublic = `https://${req.get("host")}`;
-    const result = await getBoletoByCpf({ cpf, basePublic });
+    const r = await getBoletoByCpf({ cpf, basePublic });
 
-    if (!result.ok) {
-      await facilitaSend({ to, text: `Não encontrei boleto para esse CPF 😕` });
+    if (!r.ok) {
+      await facilitaSend({ to, text: `Não consegui localizar seu boleto: ${r.error} 😕` });
       return;
     }
 
-    const nome = result?.aluno?.nome ? `, ${result.aluno.nome}` : "";
-    const venc = result?.parcela?.vencimento ? `\nVencimento: ${result.parcela.vencimento}` : "";
-    const valor = result?.parcela?.valor != null ? `\nValor: R$ ${result.parcela.valor}` : "";
-    const linha = result?.linhaDigitavel ? `\nLinha digitável: ${result.linhaDigitavel}` : "";
-    const pdf = result?.pdfUrl ? `\nPDF: ${result.pdfUrl}` : "";
+    const nome = r?.aluno?.nome ? `, ${r.aluno.nome}` : "";
+    const venc = r?.parcela?.vencimento ? `\nVencimento: ${r.parcela.vencimento}` : "";
+    const valor = r?.parcela?.valor != null ? `\nValor: R$ ${r.parcela.valor}` : "";
+    const linha = r?.linhaDigitavel ? `\nLinha digitável: ${r.linhaDigitavel}` : "";
+    const pdf = r?.pdfUrl ? `\nPDF: ${r.pdfUrl}` : "";
 
     await facilitaSend({
       to,
@@ -456,36 +495,6 @@ app.post("/ff/inbound", async (req, res) => {
     });
   } catch (err) {
     console.error("[FF INBOUND] erro:", err?.response?.data || err?.message || err);
-  }
-});
-
-/**
- * ✅ TESTE MANUAL DE ENVIO (pra confirmar se o sendWebhook realmente envia pro WhatsApp)
- * POST /ff/send
- * Body: { "to": "5511999999999", "text": "teste" }
- * Protegido por ADMIN_SECRET (se você configurar)
- */
-app.post("/ff/send", async (req, res) => {
-  try {
-    if (ADMIN_SECRET) {
-      const got = String(req.headers["x-admin-secret"] || "").trim();
-      if (got !== ADMIN_SECRET) return res.status(401).json({ ok: false, error: "admin secret inválido" });
-    }
-
-    const to = onlyDigits(req.body?.to);
-    const text = String(req.body?.text || "").trim();
-
-    if (!to || to.length < 10) return res.status(400).json({ ok: false, error: "to inválido (ex: 55119...)" });
-    if (!text) return res.status(400).json({ ok: false, error: "text obrigatório" });
-
-    const r = await facilitaSend({ to, text });
-    return res.json({ ok: true, sent: true, result: r });
-  } catch (err) {
-    return res.status(500).json({
-      ok: false,
-      error: "Falha ao enviar via FacilitaFlow",
-      details: err?.response?.data || err?.message || String(err)
-    });
   }
 });
 
