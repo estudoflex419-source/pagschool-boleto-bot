@@ -17,9 +17,17 @@ app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
 
+// PagSchool
 const PAGSCHOOL_BASE_URL_RAW = (process.env.PAGSCHOOL_BASE_URL || "").trim();
 const PAGSCHOOL_EMAIL = (process.env.PAGSCHOOL_EMAIL || "").trim();
 const PAGSCHOOL_PASSWORD = (process.env.PAGSCHOOL_PASSWORD || "").trim();
+
+// FacilitaFlow (API de saída)
+const FACILITAFLOW_SEND_URL = (process.env.FACILITAFLOW_SEND_URL || "https://licenca.facilitaflow.com.br/sendWebhook").trim();
+const FACILITAFLOW_API_TOKEN = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
+
+// Segurança opcional p/ endpoint de teste
+const ADMIN_SECRET = (process.env.ADMIN_SECRET || "").trim();
 
 function mustHaveEnv() {
   if (!PAGSCHOOL_BASE_URL_RAW) throw new Error("PAGSCHOOL_BASE_URL não configurado");
@@ -30,7 +38,7 @@ function mustHaveEnv() {
 function normalizeBaseUrl(base) {
   let b = String(base || "").trim();
   b = b.replace(/\/$/, "");
-  b = b.replace(/\/api\/?$/, ""); // se vier .../prod/api, vira .../prod
+  b = b.replace(/\/api\/?$/, "");
   return b;
 }
 
@@ -62,19 +70,19 @@ function parseJwtPayload(token) {
   }
 }
 
+// Axios PagSchool
 const pagschool = axios.create({
   baseURL: PAGSCHOOL_BASE_URL,
   timeout: 20000
 });
 
+// Token cache
 let tokenCache = { token: "", expMs: 0 };
 
 async function authenticate() {
   mustHaveEnv();
 
-  if (tokenCache.token && Date.now() < tokenCache.expMs - 60_000) {
-    return tokenCache.token;
-  }
+  if (tokenCache.token && Date.now() < tokenCache.expMs - 60_000) return tokenCache.token;
 
   const resp = await pagschool.post(
     `/api/authenticate`,
@@ -118,7 +126,7 @@ async function pagschoolRequest(config, { retryOn401 = true } = {}) {
 }
 
 /**
- * Helpers flexíveis
+ * Helpers flexíveis (PagSchool)
  */
 function extractAlunoFromAlunosAll(data) {
   const rows = data?.rows || data?.data?.rows || data?.result?.rows || data?.alunos || data?.items;
@@ -178,9 +186,6 @@ function pickBestParcela(parcelas) {
   return (proximas[0] || withDates[0]).p;
 }
 
-/**
- * Core: pega boleto por CPF e devolve dados + pdfUrl
- */
 async function getBoletoByCpf({ cpf, basePublic }) {
   const alunosResp = await pagschoolRequest({
     method: "GET",
@@ -189,14 +194,10 @@ async function getBoletoByCpf({ cpf, basePublic }) {
   });
 
   const aluno = extractAlunoFromAlunosAll(alunosResp.data);
-  if (!aluno) {
-    return { ok: false, status: 404, error: "Aluno não encontrado para este CPF." };
-  }
+  if (!aluno) return { ok: false, error: "Aluno não encontrado para este CPF." };
 
   const alunoId = aluno?.id || aluno?.aluno_id || aluno?.alunoId;
-  if (!alunoId) {
-    return { ok: false, status: 500, error: "Aluno encontrado, mas sem id." };
-  }
+  if (!alunoId) return { ok: false, error: "Aluno encontrado, mas sem id." };
 
   const contratosResp = await pagschoolRequest({
     method: "GET",
@@ -204,9 +205,7 @@ async function getBoletoByCpf({ cpf, basePublic }) {
   });
 
   const contratos = extractContratos(contratosResp.data);
-  if (!contratos.length) {
-    return { ok: false, status: 404, error: "Nenhum contrato encontrado para este aluno." };
-  }
+  if (!contratos.length) return { ok: false, error: "Nenhum contrato encontrado para este aluno." };
 
   let best = null;
   let bestContrato = null;
@@ -230,14 +229,10 @@ async function getBoletoByCpf({ cpf, basePublic }) {
     }
   }
 
-  if (!best) {
-    return { ok: false, status: 404, error: "Não encontrei parcelas em aberto para este aluno." };
-  }
+  if (!best) return { ok: false, error: "Não encontrei parcelas em aberto para este aluno." };
 
   const parcelaId = best?.id || best?.parcelaId;
-  if (!parcelaId) {
-    return { ok: false, status: 500, error: "Parcela encontrada, mas sem id." };
-  }
+  if (!parcelaId) return { ok: false, error: "Parcela encontrada, mas sem id." };
 
   let nossoNumero = best?.nossoNumero || best?.nosso_numero || best?.numeroNossoNumero;
 
@@ -248,28 +243,18 @@ async function getBoletoByCpf({ cpf, basePublic }) {
     });
 
     nossoNumero = geraResp?.data?.nossoNumero || geraResp?.data?.nosso_numero || geraResp?.data?.data?.nossoNumero;
-
-    if (!nossoNumero) {
-      return { ok: false, status: 500, error: "Falhei ao gerar boleto (nossoNumero não retornou).", details: geraResp?.data };
-    }
+    if (!nossoNumero) return { ok: false, error: "Falhei ao gerar boleto (nossoNumero não retornou)." };
   }
 
   const pdfUrl = `${basePublic}/boleto/pdf/${parcelaId}/${encodeURIComponent(String(nossoNumero))}`;
-
   const numeroBoleto =
     best?.numeroBoleto || best?.linhaDigitavel || best?.codigoBarras || best?.barcode || null;
 
   return {
     ok: true,
-    cpf,
     aluno: { id: alunoId, nome: aluno?.nome || aluno?.name || null },
     contrato: { id: bestContrato?.id || bestContrato?.contrato_id || null },
-    parcela: {
-      id: parcelaId,
-      status: best?.status || null,
-      valor: best?.valor || best?.valorParcela || null,
-      vencimento: best?.vencimento || best?.dataVencimento || null
-    },
+    parcela: { id: parcelaId, status: best?.status || null, valor: best?.valor || null, vencimento: best?.vencimento || null },
     nossoNumero,
     linhaDigitavel: numeroBoleto,
     pdfUrl
@@ -277,13 +262,39 @@ async function getBoletoByCpf({ cpf, basePublic }) {
 }
 
 /**
- * EXTRAIR TEXTO DE ENTRADA (FacilitaFlow)
- * (bem flexível, porque cada plataforma manda num formato)
+ * FacilitaFlow - enviar mensagem via API
+ * (não existe doc pública, então fazemos payload “tolerante” com chaves alternativas)
+ */
+async function facilitaSend({ to, text, meta }) {
+  if (!FACILITAFLOW_API_TOKEN) throw new Error("FACILITAFLOW_API_TOKEN não configurado no Render.");
+
+  const payloads = [
+    { token: FACILITAFLOW_API_TOKEN, to, message: text, meta },
+    { token: FACILITAFLOW_API_TOKEN, phone: to, text, meta },
+    { apiToken: FACILITAFLOW_API_TOKEN, number: to, message: text, meta }
+  ];
+
+  let lastErr;
+  for (const data of payloads) {
+    try {
+      const r = await axios.post(FACILITAFLOW_SEND_URL, data, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 20000
+      });
+      return { ok: true, status: r.status, data: r.data };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  throw lastErr;
+}
+
+/**
+ * Extrair texto/numero do payload do webhook do FacilitaFlow (flexível)
  */
 function extractText(body) {
   if (!body) return "";
-
-  // campos comuns
   const direct =
     body.text ||
     body.message ||
@@ -293,26 +304,30 @@ function extractText(body) {
     body?.data?.text ||
     body?.data?.message ||
     body?.data?.mensagem;
-
   if (typeof direct === "string") return direct;
+  return "";
+}
 
-  // tenta achar strings “parecidas com mensagem”
-  try {
-    const stack = [body];
-    while (stack.length) {
-      const cur = stack.pop();
-      if (!cur || typeof cur !== "object") continue;
+function extractFromNumber(body) {
+  const candidates = [
+    body?.from,
+    body?.phone,
+    body?.numero,
+    body?.number,
+    body?.sender,
+    body?.whatsapp,
+    body?.chatId,
+    body?.contact,
+    body?.data?.from,
+    body?.data?.phone,
+    body?.data?.numero,
+    body?.data?.number
+  ].filter(Boolean);
 
-      for (const [k, v] of Object.entries(cur)) {
-        if (typeof v === "string" && v.trim().length) {
-          if (["text", "message", "mensagem", "body", "content"].includes(k)) return v;
-        } else if (v && typeof v === "object") {
-          stack.push(v);
-        }
-      }
-    }
-  } catch {}
-
+  for (const c of candidates) {
+    const digits = onlyDigits(c);
+    if (digits.length >= 10) return digits; // 10+ pra pegar DDD
+  }
   return "";
 }
 
@@ -333,8 +348,8 @@ app.get("/", (_req, res) => {
       health: "/health",
       boleto: "POST /boleto { cpf }",
       boletoPdf: "GET /boleto/pdf/:parcelaId/:nossoNumero",
-      pagschoolWebhook: "POST /webhook (PagSchool)",
-      facilitaWebhook: "POST /ff/webhook (FacilitaFlow)"
+      facilitaInbound: "POST /ff/inbound (FacilitaFlow → Render)",
+      facilitaSendTest: "POST /ff/send (teste manual)"
     }
   });
 });
@@ -343,9 +358,7 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-/**
- * Endpoint manual (testes)
- */
+// Teste manual: boleto por CPF (sem FacilitaFlow)
 app.post("/boleto", async (req, res) => {
   try {
     const cpf = onlyDigits(req.body?.cpf);
@@ -353,8 +366,7 @@ app.post("/boleto", async (req, res) => {
 
     const basePublic = `${req.protocol}://${req.get("host")}`;
     const result = await getBoletoByCpf({ cpf, basePublic });
-
-    return res.status(result.ok ? 200 : (result.status || 500)).json(result);
+    return res.status(result.ok ? 200 : 404).json(result);
   } catch (err) {
     return res.status(err?.response?.status || 500).json({
       ok: false,
@@ -364,22 +376,11 @@ app.post("/boleto", async (req, res) => {
   }
 });
 
-app.get("/boleto", async (req, res) => {
-  req.body = { cpf: req.query?.cpf };
-  return app._router.handle(req, res, () => {});
-});
-
-/**
- * PDF proxy
- */
+// PDF proxy
 app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   try {
     const parcelaId = String(req.params.parcelaId || "").trim();
     const nossoNumero = String(req.params.nossoNumero || "").trim();
-
-    if (!parcelaId || !nossoNumero) {
-      return res.status(400).json({ ok: false, error: "parcelaId e nossoNumero são obrigatórios" });
-    }
 
     const resp = await pagschoolRequest({
       method: "GET",
@@ -399,45 +400,48 @@ app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   }
 });
 
-/**
- * Webhook da PagSchool (pagamento / atualização de parcela)
- * MANTIDO em /webhook para não quebrar o que você já enviou pra eles.
- */
+// Webhook PagSchool (mantido)
 app.post("/webhook", (req, res) => {
   console.log("[PAGSCHOOL WEBHOOK] recebido:", JSON.stringify(req.body || {}));
-  return res.json({ ok: true, received: true });
+  res.json({ ok: true });
 });
 
 /**
  * ✅ WEBHOOK DO FACILITAFLOW (BOLETO)
- * Configure no FacilitaFlow: https://pagschool-boleto-bot-1.onrender.com/ff/webhook
- *
- * Regra simples e “à prova de falhas”:
- * - Se NÃO veio CPF: pede pra pessoa mandar "BOLETO + CPF"
- * - Se VEIO CPF: busca boleto e devolve linha + pdfUrl
- *
- * A resposta aqui vai em TEXTO PURO (normalmente o FacilitaFlow encaminha isso como mensagem).
+ * Configure lá: https://pagschool-boleto-bot-1.onrender.com/ff/inbound
  */
-app.post("/ff/webhook", async (req, res) => {
+app.post("/ff/inbound", async (req, res) => {
+  // responde rápido pro FacilitaFlow
+  res.json({ ok: true, received: true });
+
   try {
+    // log curto pra você ver o formato que o FacilitaFlow manda
+    const raw = JSON.stringify(req.body || {});
+    console.log("[FF INBOUND] body:", raw.length > 3000 ? raw.slice(0, 3000) + "..." : raw);
+
     const text = extractText(req.body);
     const cpf = extractCpfFromText(text);
+    const to = extractFromNumber(req.body);
 
-    // base para montar links do pdf
-    const basePublic = `${req.protocol}://${req.get("host")}`;
-
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-
-    if (!cpf) {
-      return res
-        .status(200)
-        .send("Pra eu enviar sua 2ª via, manda assim: BOLETO 12345678901 (boleto + seu CPF, só números) 😊");
+    if (!to) {
+      console.log("[FF INBOUND] Não achei número (to) no payload. Preciso do campo de telefone no JSON.");
+      return;
     }
 
+    if (!cpf) {
+      await facilitaSend({
+        to,
+        text: "Pra eu enviar a 2ª via, manda assim: BOLETO 12345678901 (boleto + seu CPF, só números) 😊"
+      });
+      return;
+    }
+
+    const basePublic = `https://${req.get("host")}`;
     const result = await getBoletoByCpf({ cpf, basePublic });
 
     if (!result.ok) {
-      return res.status(200).send(`Não consegui localizar seu boleto: ${result.error || "tente novamente"} 😕`);
+      await facilitaSend({ to, text: `Não encontrei boleto para esse CPF 😕` });
+      return;
     }
 
     const nome = result?.aluno?.nome ? `, ${result.aluno.nome}` : "";
@@ -446,17 +450,47 @@ app.post("/ff/webhook", async (req, res) => {
     const linha = result?.linhaDigitavel ? `\nLinha digitável: ${result.linhaDigitavel}` : "";
     const pdf = result?.pdfUrl ? `\nPDF: ${result.pdfUrl}` : "";
 
-    return res
-      .status(200)
-      .send(`Aqui está a sua 2ª via${nome} ✅${venc}${valor}${linha}${pdf}`);
+    await facilitaSend({
+      to,
+      text: `Aqui está a sua 2ª via${nome} ✅${venc}${valor}${linha}${pdf}`
+    });
   } catch (err) {
-    console.error("[FF WEBHOOK] erro:", err?.response?.data || err?.message || err);
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    return res.status(200).send("Tive um erro aqui pra gerar sua 2ª via. Tenta novamente em instantes 🙏");
+    console.error("[FF INBOUND] erro:", err?.response?.data || err?.message || err);
+  }
+});
+
+/**
+ * ✅ TESTE MANUAL DE ENVIO (pra confirmar se o sendWebhook realmente envia pro WhatsApp)
+ * POST /ff/send
+ * Body: { "to": "5511999999999", "text": "teste" }
+ * Protegido por ADMIN_SECRET (se você configurar)
+ */
+app.post("/ff/send", async (req, res) => {
+  try {
+    if (ADMIN_SECRET) {
+      const got = String(req.headers["x-admin-secret"] || "").trim();
+      if (got !== ADMIN_SECRET) return res.status(401).json({ ok: false, error: "admin secret inválido" });
+    }
+
+    const to = onlyDigits(req.body?.to);
+    const text = String(req.body?.text || "").trim();
+
+    if (!to || to.length < 10) return res.status(400).json({ ok: false, error: "to inválido (ex: 55119...)" });
+    if (!text) return res.status(400).json({ ok: false, error: "text obrigatório" });
+
+    const r = await facilitaSend({ to, text });
+    return res.json({ ok: true, sent: true, result: r });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: "Falha ao enviar via FacilitaFlow",
+      details: err?.response?.data || err?.message || String(err)
+    });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`[OK] Server on :${PORT}`);
   console.log(`[OK] PagSchool base: ${PAGSCHOOL_BASE_URL}`);
+  console.log(`[OK] FacilitaFlow send url: ${FACILITAFLOW_SEND_URL}`);
 });
