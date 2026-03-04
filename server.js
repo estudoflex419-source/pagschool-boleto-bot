@@ -44,7 +44,7 @@ async function authenticate() {
 
   const now = Date.now();
   if (tokenCache.token && tokenCache.exp > now) {
-    return { token: tokenCache.token, codigoEscola: tokenCache.codigoEscola };
+    return { token: tokenCache.token, codigoEscola: tokenCache.codigoEscola, cached: true };
   }
 
   const url = `${PAGSCHOOL_BASE_URL}/api/authenticate`;
@@ -69,31 +69,44 @@ async function authenticate() {
     exp: now + 15 * 60 * 1000,
   };
 
-  return { token, codigoEscola: tokenCache.codigoEscola };
+  return { token, codigoEscola: tokenCache.codigoEscola, cached: false };
 }
 
-// ✅ rotas base
+// base
 app.get("/", (req, res) => res.json({ ok: true, service: "pagschool-boleto-bot", uptime: process.uptime() }));
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-// ✅ webhook PagSchool -> você
+// webhook
 app.post("/webhook", (req, res) => {
   console.log("[WEBHOOK] recebido:", JSON.stringify(req.body || {}));
   res.status(200).json({ received: true });
 });
 
-// ✅ auth de teste
+// ✅ AUTH (POST correto)
 app.post("/pagschool/auth", async (req, res) => {
   try {
     const auth = await authenticate();
     res.json({ ok: true, ...auth });
   } catch (err) {
     const status = err?.response?.status || 500;
+    console.error("[AUTH ERROR]", status, err?.response?.data || err.message);
     res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
 
-// ✅ criar aluno
+// ✅ AUTH (GET pra testar no navegador)
+app.get("/pagschool/auth", async (req, res) => {
+  try {
+    const auth = await authenticate();
+    res.json({ ok: true, ...auth });
+  } catch (err) {
+    const status = err?.response?.status || 500;
+    console.error("[AUTH ERROR]", status, err?.response?.data || err.message);
+    res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
+  }
+});
+
+// criar aluno
 app.post("/pagschool/aluno/new", async (req, res) => {
   try {
     const { token } = await authenticate();
@@ -110,11 +123,12 @@ app.post("/pagschool/aluno/new", async (req, res) => {
     res.json({ ok: true, data: resp.data });
   } catch (err) {
     const status = err?.response?.status || 500;
+    console.error("[ALUNO ERROR]", status, err?.response?.data || err.message);
     res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
 
-// ✅ criar contrato
+// criar contrato
 app.post("/pagschool/contrato/create", async (req, res) => {
   try {
     const { token } = await authenticate();
@@ -123,11 +137,12 @@ app.post("/pagschool/contrato/create", async (req, res) => {
     res.json({ ok: true, data: resp.data });
   } catch (err) {
     const status = err?.response?.status || 500;
+    console.error("[CONTRATO ERROR]", status, err?.response?.data || err.message);
     res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
 
-// ✅ conta virtual
+// conta virtual
 app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
   try {
     const { token, codigoEscola } = await authenticate();
@@ -138,6 +153,7 @@ app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
     res.json({ ok: true, codigoEscola, data: resp.data });
   } catch (err) {
     const status = err?.response?.status || 500;
+    console.error("[CONTA VIRTUAL ERROR]", status, err?.response?.data || err.message);
     res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
