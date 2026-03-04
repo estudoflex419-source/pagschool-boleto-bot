@@ -14,13 +14,6 @@ app.use(morgan("combined"));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-/**
- * ENV (Render)
- * PAGSCHOOL_BASE_URL=https://sistema.pagschool.com.br/prod
- * PAGSCHOOL_EMAIL=seu_email
- * PAGSCHOOL_PASSWORD=sua_senha
- * PAGSCHOOL_AUTH_TYPE=bearer
- */
 const PORT = process.env.PORT || 3000;
 
 const PAGSCHOOL_BASE_URL = (process.env.PAGSCHOOL_BASE_URL || "").replace(/\/$/, "");
@@ -39,23 +32,47 @@ function onlyDigits(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
-// Cache simples do token
 let tokenCache = { token: "", codigoEscola: "", exp: 0 };
 
 const api = axios.create({ timeout: 20000 });
 
-// Monta header de auth
 function authHeaders(token) {
   if (!token) return {};
   if (PAGSCHOOL_AUTH_TYPE === "bearer") return { Authorization: `Bearer ${token}` };
   return { Authorization: token };
 }
 
-async function authenticate() {
+// Trunca tokens nos logs (segurança)
+function safeLogAuthResponse(data) {
+  const clone = JSON.parse(JSON.stringify(data || {}));
+
+  const truncate = (v) => {
+    const s = String(v || "");
+    return s.length <= 30 ? s : s.slice(0, 30) + "...(trunc)";
+  };
+
+  const redactTokenFields = (obj) => {
+    if (!obj || typeof obj !== "object") return;
+    for (const k of ["token", "accessToken", "access_token"]) {
+      if (obj[k]) obj[k] = truncate(obj[k]);
+    }
+  };
+
+  redactTokenFields(clone);
+  if (clone.data) redactTokenFields(clone.data);
+
+  console.log("[PAGSCHOOL AUTH RAW SAFE]", JSON.stringify(clone));
+  console.log("[PAGSCHOOL AUTH KEYS]", Object.keys(data || {}));
+  if (data?.data && typeof data.data === "object") {
+    console.log("[PAGSCHOOL AUTH KEYS data]", Object.keys(data.data));
+  }
+}
+
+async function authenticate({ force = false } = {}) {
   mustHaveEnv();
 
   const now = Date.now();
-  if (tokenCache.token && tokenCache.exp > now) {
+  if (!force && tokenCache.token && tokenCache.exp > now) {
     return { token: tokenCache.token, codigoEscola: tokenCache.codigoEscola, cached: true };
   }
 
@@ -65,8 +82,8 @@ async function authenticate() {
   const resp = await api.post(url, payload);
   const data = resp.data || {};
 
-  // ✅ LOG PRA DESCOBRIR O CAMPO DO codigoEscola
-  console.log("[PAGSCHOOL AUTH RAW RESPONSE]", JSON.stringify(data));
+  // ✅ logs pra achar o campo certo do codigoEscola
+  safeLogAuthResponse(data);
 
   const token =
     data.token ||
@@ -76,7 +93,7 @@ async function authenticate() {
     data?.data?.accessToken ||
     data?.data?.access_token;
 
-  // ✅ Tentativas extras pra pegar codigoEscola com nomes diferentes
+  // ✅ tentativas pra achar o codigoEscola em vários formatos
   const codigoEscola =
     data.codigoEscola ||
     data.codigo_escola ||
@@ -99,25 +116,22 @@ async function authenticate() {
   tokenCache = {
     token,
     codigoEscola: codigoEscola ? String(codigoEscola) : "",
-    exp: now + 15 * 60 * 1000, // 15 min
+    exp: now + 15 * 60 * 1000,
   };
 
   return { token, codigoEscola: tokenCache.codigoEscola, cached: false };
 }
 
 /**
- * ROTAS BASE
+ * BASE
  */
 app.get("/", (req, res) => {
   res.json({ ok: true, service: "pagschool-boleto-bot", uptime: process.uptime() });
 });
-
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 /**
- * WEBHOOK (PagSchool -> você)
- * Cadastre essa URL no suporte da i9:
- * https://SEU-SERVICO.onrender.com/webhook
+ * WEBHOOK
  */
 app.post("/webhook", (req, res) => {
   console.log("[WEBHOOK] recebido:", JSON.stringify(req.body || {}));
@@ -125,51 +139,44 @@ app.post("/webhook", (req, res) => {
 });
 
 /**
- * AUTH (POST - correto)
+ * AUTH (POST)
  */
 app.post("/pagschool/auth", async (req, res) => {
   try {
-    const auth = await authenticate();
-    return res.json({ ok: true, ...auth });
+    const force = req.query.force === "1";
+    const auth = await authenticate({ force });
+    return res.json({ ok: true, ...auth, forced: force });
   } catch (err) {
     const status = err?.response?.status || 500;
     console.error("[AUTH ERROR]", status, err?.response?.data || err.message);
-    return res.status(status).json({
-      ok: false,
-      error: err.message,
-      details: err?.response?.data ?? null,
-    });
+    return res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
 
 /**
- * AUTH (GET - pra testar no navegador)
+ * AUTH (GET - navegador)
  */
 app.get("/pagschool/auth", async (req, res) => {
   try {
-    const auth = await authenticate();
-    return res.json({ ok: true, ...auth });
+    const force = req.query.force === "1";
+    const auth = await authenticate({ force });
+    return res.json({ ok: true, ...auth, forced: force });
   } catch (err) {
     const status = err?.response?.status || 500;
     console.error("[AUTH ERROR]", status, err?.response?.data || err.message);
-    return res.status(status).json({
-      ok: false,
-      error: err.message,
-      details: err?.response?.data ?? null,
-    });
+    return res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
 
 /**
  * CRIAR ALUNO
- * POST /pagschool/aluno/new
  */
 app.post("/pagschool/aluno/new", async (req, res) => {
   try {
     const { token } = await authenticate();
     const url = `${PAGSCHOOL_BASE_URL}/api/aluno/new`;
-
     const body = req.body || {};
+
     if (body.cpf) body.cpf = onlyDigits(body.cpf);
     if (body.telefoneCelular) body.telefoneCelular = onlyDigits(body.telefoneCelular);
     if (body.telefoneCelularResponsavel) body.telefoneCelularResponsavel = onlyDigits(body.telefoneCelularResponsavel);
@@ -181,39 +188,28 @@ app.post("/pagschool/aluno/new", async (req, res) => {
   } catch (err) {
     const status = err?.response?.status || 500;
     console.error("[ALUNO ERROR]", status, err?.response?.data || err.message);
-    return res.status(status).json({
-      ok: false,
-      error: err.message,
-      details: err?.response?.data ?? null,
-    });
+    return res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
 
 /**
  * CRIAR CONTRATO
- * POST /pagschool/contrato/create
  */
 app.post("/pagschool/contrato/create", async (req, res) => {
   try {
     const { token } = await authenticate();
     const url = `${PAGSCHOOL_BASE_URL}/api/contrato/create`;
-
     const resp = await api.post(url, req.body || {}, { headers: authHeaders(token) });
     return res.json({ ok: true, data: resp.data });
   } catch (err) {
     const status = err?.response?.status || 500;
     console.error("[CONTRATO ERROR]", status, err?.response?.data || err.message);
-    return res.status(status).json({
-      ok: false,
-      error: err.message,
-      details: err?.response?.data ?? null,
-    });
+    return res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
 
 /**
- * CONTA VIRTUAL (INFO)
- * GET /pagschool/conta-virtual/account-info
+ * CONTA VIRTUAL
  */
 app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
   try {
@@ -222,8 +218,7 @@ app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
     if (!codigoEscola) {
       return res.status(400).json({
         ok: false,
-        error:
-          "codigoEscola veio vazio na autenticação. Veja os logs: [PAGSCHOOL AUTH RAW RESPONSE] para identificar o campo correto.",
+        error: "codigoEscola veio vazio. Abra /pagschool/auth?force=1 e veja os logs [PAGSCHOOL AUTH KEYS].",
       });
     }
 
@@ -234,16 +229,12 @@ app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
   } catch (err) {
     const status = err?.response?.status || 500;
     console.error("[CONTA VIRTUAL ERROR]", status, err?.response?.data || err.message);
-    return res.status(status).json({
-      ok: false,
-      error: err.message,
-      details: err?.response?.data ?? null,
-    });
+    return res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`✅ Server on :${PORT}`);
   console.log(`PAGSCHOOL_BASE_URL = ${PAGSCHOOL_BASE_URL}`);
-  console.log("🚀 BUILD_MARKER = GET_AUTH_ENABLED_v3");
+  console.log("🚀 BUILD_MARKER = GET_AUTH_ENABLED_v4");
 });
