@@ -25,82 +25,106 @@ function mustHaveEnv() {
   if (!PAGSCHOOL_PASSWORD) throw new Error("PAGSCHOOL_PASSWORD não configurado");
 }
 
-let tokenCache = { token: "", codigoEscola: "", exp: 0 };
-
 const api = axios.create({ timeout: 20000 });
 
-function trunc(s, n = 28) {
+let tokenCache = { token: "", codigoEscola: "", exp: 0 };
+
+function trunc(s, n = 26) {
   s = String(s || "");
   return s.length <= n ? s : s.slice(0, n) + "...(trunc)";
 }
 
-/** várias formas comuns que APIs aceitam */
-function buildAuthCandidates(token) {
-  return [
-    { label: "Authorization: Bearer", headers: { Authorization: `Bearer ${token}` } },
-    { label: "authorization: Bearer", headers: { authorization: `Bearer ${token}` } },
-
-    { label: "Authorization: JWT", headers: { Authorization: `JWT ${token}` } },
-    { label: "authorization: JWT", headers: { authorization: `JWT ${token}` } },
-
-    { label: "Authorization: Token", headers: { Authorization: `Token ${token}` } },
-    { label: "authorization: Token", headers: { authorization: `Token ${token}` } },
-
-    { label: "Authorization: token_only", headers: { Authorization: `${token}` } },
-    { label: "authorization: token_only", headers: { authorization: `${token}` } },
-
-    { label: "x-access-token", headers: { "x-access-token": token } },
-    { label: "X-Access-Token", headers: { "X-Access-Token": token } },
-
-    { label: "x-token", headers: { "x-token": token } },
-    { label: "token", headers: { token } },
-    { label: "X-Auth-Token", headers: { "X-Auth-Token": token } },
-  ];
+function addQuery(url, params) {
+  const u = new URL(url);
+  for (const [k, v] of Object.entries(params)) {
+    u.searchParams.set(k, v);
+  }
+  return u.toString();
 }
 
 /**
- * tenta request com vários headers.
- * se todos falharem com 401/403, devolve authAttempts
+ * Candidatos de autenticação:
+ * - headers (Authorization Bearer/JWT/Token, x-access-token, token, etc)
+ * - token via query (?token=, ?access_token=) só pra testar (às vezes APIs antigas usam)
+ * - com/sem header adicional codigoEscola (algumas APIs exigem)
  */
-async function requestWithAnyAuth({ method, url, token, data }) {
-  const candidates = buildAuthCandidates(token);
+function buildAuthCandidates(token, codigoEscola) {
+  const baseHeaders = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+
+  const withCodigo = (h) =>
+    codigoEscola ? { ...h, codigoEscola: String(codigoEscola) } : h;
+
+  return [
+    // Authorization padrões
+    { label: "Authorization: Bearer", headers: withCodigo({ ...baseHeaders, Authorization: `Bearer ${token}` }) },
+    { label: "authorization: Bearer", headers: withCodigo({ ...baseHeaders, authorization: `Bearer ${token}` }) },
+    { label: "Authorization: JWT", headers: withCodigo({ ...baseHeaders, Authorization: `JWT ${token}` }) },
+    { label: "Authorization: Token", headers: withCodigo({ ...baseHeaders, Authorization: `Token ${token}` }) },
+    { label: "Authorization: token_only", headers: withCodigo({ ...baseHeaders, Authorization: `${token}` }) },
+
+    // Outros headers comuns
+    { label: "x-access-token", headers: withCodigo({ ...baseHeaders, "x-access-token": token }) },
+    { label: "X-Access-Token", headers: withCodigo({ ...baseHeaders, "X-Access-Token": token }) },
+    { label: "x-token", headers: withCodigo({ ...baseHeaders, "x-token": token }) },
+    { label: "token", headers: withCodigo({ ...baseHeaders, token }) },
+    { label: "X-Auth-Token", headers: withCodigo({ ...baseHeaders, "X-Auth-Token": token }) },
+
+    // Token via query (só teste)
+    {
+      label: "query ?token=",
+      headers: withCodigo(baseHeaders),
+      urlMutate: (url) => addQuery(url, { token }),
+    },
+    {
+      label: "query ?access_token=",
+      headers: withCodigo(baseHeaders),
+      urlMutate: (url) => addQuery(url, { access_token: token }),
+    },
+  ];
+}
+
+async function requestWithAnyAuth({ method, url, token, codigoEscola, data }) {
+  const candidates = buildAuthCandidates(token, codigoEscola);
   const attempts = [];
 
   for (const c of candidates) {
+    const finalUrl = c.urlMutate ? c.urlMutate(url) : url;
+
     try {
       const resp = await api.request({
         method,
-        url,
+        url: finalUrl,
         data,
-        headers: {
-          ...c.headers,
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
+        headers: c.headers,
+        validateStatus: () => true, // não explode, a gente trata
       });
-
-      console.log(`[AUTH OK] ${method.toUpperCase()} usando "${c.label}" token=${trunc(token)} url=${url}`);
-      return { resp, used: c.label, attempts };
-    } catch (err) {
-      const status = err?.response?.status || 0;
 
       attempts.push({
         label: c.label,
-        status,
-        body: err?.response?.data ?? null,
+        status: resp.status,
+        // cuidado: não devolvo response gigante
+        bodyPreview: typeof resp.data === "string" ? resp.data.slice(0, 200) : resp.data,
       });
 
-      // 401/403: tenta o próximo formato
-      if (status === 401 || status === 403) continue;
+      if (resp.status >= 200 && resp.status < 300) {
+        console.log(`[AUTH OK] ${method.toUpperCase()} "${c.label}" token=${trunc(token)} url=${finalUrl}`);
+        return { ok: true, used: c.label, url: finalUrl, status: resp.status, data: resp.data, attempts };
+      }
 
-      // outros erros não são "formato de token", então já retorna
-      throw err;
+      // se for 401/403, continua tentando
+      if (resp.status === 401 || resp.status === 403) continue;
+
+      // outros erros não são "auth formato", devolve já
+      return { ok: false, used: c.label, url: finalUrl, status: resp.status, data: resp.data, attempts };
+    } catch (err) {
+      attempts.push({ label: c.label, status: 0, bodyPreview: err.message });
     }
   }
 
-  const e = new Error("401/403 em todos os formatos de autenticação testados.");
-  e._attempts = attempts;
-  throw e;
+  return { ok: false, status: 401, data: { message: "401/403 em todos os formatos testados" }, attempts };
 }
 
 async function authenticate({ force = false } = {}) {
@@ -117,7 +141,6 @@ async function authenticate({ force = false } = {}) {
   const resp = await api.post(url, payload);
   const data = resp.data || {};
 
-  // ✅ conforme seu log e a doc: token em "token", codigoEscola em "user.codigoEscola"
   const token =
     data.token ||
     data.accessToken ||
@@ -126,16 +149,15 @@ async function authenticate({ force = false } = {}) {
     data?.data?.accessToken ||
     data?.data?.access_token;
 
+  // ✅ confirmado no seu log e na doc
   const codigoEscola =
-    data?.user?.codigoEscola ||        // ✅ principal (confirmado)
-    data?.user?.escola?.codigo ||      // fallback
-    data?.escola?.codigo ||            // fallback
-    data?.codigoEscola ||              // fallback
-    data?.codigo;                      // fallback
+    data?.user?.codigoEscola ||
+    data?.user?.escola?.codigo ||
+    data?.escola?.codigo ||
+    data?.codigoEscola ||
+    data?.codigo;
 
-  if (!token) {
-    throw new Error(`Authenticate OK, mas não achei o token. Resposta: ${JSON.stringify(data)}`);
-  }
+  if (!token) throw new Error(`Authenticate OK, mas não achei o token. Resposta: ${JSON.stringify(data)}`);
 
   tokenCache = {
     token,
@@ -157,15 +179,14 @@ app.post("/webhook", (req, res) => {
   return res.status(200).json({ received: true });
 });
 
-/** AUTH (GET e POST) */
+/** AUTH (GET/POST) */
 app.get("/pagschool/auth", async (req, res) => {
   try {
     const force = req.query.force === "1";
     const auth = await authenticate({ force });
     return res.json({ ok: true, ...auth, forced: force });
   } catch (err) {
-    const status = err?.response?.status || 500;
-    return res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -175,15 +196,14 @@ app.post("/pagschool/auth", async (req, res) => {
     const auth = await authenticate({ force });
     return res.json({ ok: true, ...auth, forced: force });
   } catch (err) {
-    const status = err?.response?.status || 500;
-    return res.status(status).json({ ok: false, error: err.message, details: err?.response?.data ?? null });
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 /**
- * CONTA VIRTUAL (INFO)
- * - ?force=1 força autenticar antes
- * - ?codigo=6538 (se quiser passar manual)
+ * CONTA VIRTUAL
+ * /pagschool/conta-virtual/account-info?force=1
+ * (se quiser forçar codigo manual: ?codigo=6538)
  */
 app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
   try {
@@ -195,22 +215,39 @@ app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
 
     const url = `${PAGSCHOOL_BASE_URL}/api/conta-virtual/account-info/${encodeURIComponent(codigo)}`;
 
-    const { resp, used, attempts } = await requestWithAnyAuth({ method: "get", url, token });
-
-    return res.json({ ok: true, codigoEscola: codigo, authHeaderUsed: used, data: resp.data, attempts });
-  } catch (err) {
-    const status = err?.response?.status || 500;
-    return res.status(status).json({
-      ok: false,
-      error: err.message,
-      details: err?.response?.data ?? null,
-      authAttempts: err._attempts ?? null,
+    const result = await requestWithAnyAuth({
+      method: "get",
+      url,
+      token,
+      codigoEscola: codigo,
     });
+
+    // se falhar, devolve TUDO que tentou pra gente ver
+    if (!result.ok) {
+      console.error("[CONTA VIRTUAL FAIL]", result.status, JSON.stringify(result.data));
+      return res.status(result.status || 500).json({
+        ok: false,
+        codigoEscola: codigo,
+        status: result.status,
+        details: result.data,
+        authAttempts: result.attempts,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      codigoEscola: codigo,
+      authUsed: result.used,
+      data: result.data,
+    });
+  } catch (err) {
+    console.error("[CONTA VIRTUAL ERROR]", err.message);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`✅ Server on :${PORT}`);
   console.log(`PAGSCHOOL_BASE_URL = ${PAGSCHOOL_BASE_URL}`);
-  console.log("🚀 BUILD_MARKER = conta_virtual_multi_auth_v1");
+  console.log("🚀 BUILD_MARKER = conta_virtual_debug_auth_v2");
 });
