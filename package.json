@@ -1,7 +1,7 @@
 {
   "name": "pagschool-boleto-bot",
   "version": "1.0.0",
-  "description": "Integração PagSchool webhook + FacilitaFlow sendWebhook (2ª via de boletos)",
+  "description": "Integração PagSchool webhook + FacilitaFlow sendWebhook",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
