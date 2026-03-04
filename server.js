@@ -32,6 +32,7 @@ function onlyDigits(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
+// Cache do token
 let tokenCache = { token: "", codigoEscola: "", exp: 0 };
 
 const api = axios.create({ timeout: 20000 });
@@ -42,30 +43,23 @@ function authHeaders(token) {
   return { Authorization: token };
 }
 
-// Trunca tokens nos logs (segurança)
-function safeLogAuthResponse(data) {
+// Log seguro (não expõe token inteiro)
+function safeAuthLog(data) {
   const clone = JSON.parse(JSON.stringify(data || {}));
-
-  const truncate = (v) => {
-    const s = String(v || "");
-    return s.length <= 30 ? s : s.slice(0, 30) + "...(trunc)";
+  const trunc = (s) => {
+    s = String(s || "");
+    return s.length <= 35 ? s : s.slice(0, 35) + "...(trunc)";
   };
 
-  const redactTokenFields = (obj) => {
-    if (!obj || typeof obj !== "object") return;
-    for (const k of ["token", "accessToken", "access_token"]) {
-      if (obj[k]) obj[k] = truncate(obj[k]);
-    }
-  };
+  if (clone.token) clone.token = trunc(clone.token);
+  if (clone.accessToken) clone.accessToken = trunc(clone.accessToken);
+  if (clone.access_token) clone.access_token = trunc(clone.access_token);
 
-  redactTokenFields(clone);
-  if (clone.data) redactTokenFields(clone.data);
+  if (clone?.data?.token) clone.data.token = trunc(clone.data.token);
+  if (clone?.data?.accessToken) clone.data.accessToken = trunc(clone.data.accessToken);
+  if (clone?.data?.access_token) clone.data.access_token = trunc(clone.data.access_token);
 
   console.log("[PAGSCHOOL AUTH RAW SAFE]", JSON.stringify(clone));
-  console.log("[PAGSCHOOL AUTH KEYS]", Object.keys(data || {}));
-  if (data?.data && typeof data.data === "object") {
-    console.log("[PAGSCHOOL AUTH KEYS data]", Object.keys(data.data));
-  }
 }
 
 async function authenticate({ force = false } = {}) {
@@ -82,9 +76,10 @@ async function authenticate({ force = false } = {}) {
   const resp = await api.post(url, payload);
   const data = resp.data || {};
 
-  // ✅ logs pra achar o campo certo do codigoEscola
-  safeLogAuthResponse(data);
+  // logs úteis
+  safeAuthLog(data);
 
+  // token
   const token =
     data.token ||
     data.accessToken ||
@@ -93,21 +88,20 @@ async function authenticate({ force = false } = {}) {
     data?.data?.accessToken ||
     data?.data?.access_token;
 
-  // ✅ tentativas pra achar o codigoEscola em vários formatos
+  // ✅ AQUI está a correção principal:
+  // Pelo seu log, o codigoEscola vem em data.user.codigoEscola (ex: 6538)
   const codigoEscola =
-    data.codigoEscola ||
-    data.codigo_escola ||
-    data.codigo ||
-    data.schoolCode ||
-    data.codigoCliente ||
-    data?.data?.codigoEscola ||
-    data?.data?.codigo_escola ||
-    data?.data?.codigo ||
-    data?.data?.schoolCode ||
-    data?.user?.codigoEscola ||
-    data?.user?.codigo ||
-    data?.usuario?.codigoEscola ||
-    data?.usuario?.codigo;
+    data?.user?.codigoEscola ||               // ✅ principal (confirmado)
+    data?.user?.escola?.codigo ||             // fallback (também aparece no seu log, dentro de user.escola)
+    data?.escola?.codigo ||                   // fallback
+    data?.codigoEscola ||                     // fallback
+    data?.codigo_escola ||                    // fallback
+    data?.codigo ||                           // fallback
+    data?.data?.codigoEscola ||               // fallback
+    data?.data?.codigo_escola ||              // fallback
+    data?.data?.codigo ||                     // fallback
+    data?.usuario?.codigoEscola ||            // fallback
+    data?.usuario?.codigo;                    // fallback
 
   if (!token) {
     throw new Error(`Authenticate OK, mas não achei o token na resposta. Resposta: ${JSON.stringify(data)}`);
@@ -116,8 +110,10 @@ async function authenticate({ force = false } = {}) {
   tokenCache = {
     token,
     codigoEscola: codigoEscola ? String(codigoEscola) : "",
-    exp: now + 15 * 60 * 1000,
+    exp: now + 15 * 60 * 1000, // 15 min
   };
+
+  console.log("[AUTH] codigoEscola resolvido =", tokenCache.codigoEscola || "(vazio)");
 
   return { token, codigoEscola: tokenCache.codigoEscola, cached: false };
 }
@@ -128,7 +124,16 @@ async function authenticate({ force = false } = {}) {
 app.get("/", (req, res) => {
   res.json({ ok: true, service: "pagschool-boleto-bot", uptime: process.uptime() });
 });
+
 app.get("/health", (req, res) => res.json({ ok: true }));
+
+/**
+ * LIMPAR CACHE (pra não ficar preso em codigoEscola antigo/vazio)
+ */
+app.get("/pagschool/cache/clear", (req, res) => {
+  tokenCache = { token: "", codigoEscola: "", exp: 0 };
+  res.json({ ok: true, cleared: true });
+});
 
 /**
  * WEBHOOK
@@ -139,9 +144,10 @@ app.post("/webhook", (req, res) => {
 });
 
 /**
- * AUTH (POST)
+ * AUTH (GET e POST)
+ * Use ?force=1 pra forçar autenticar (ignorar cache)
  */
-app.post("/pagschool/auth", async (req, res) => {
+app.get("/pagschool/auth", async (req, res) => {
   try {
     const force = req.query.force === "1";
     const auth = await authenticate({ force });
@@ -153,10 +159,7 @@ app.post("/pagschool/auth", async (req, res) => {
   }
 });
 
-/**
- * AUTH (GET - navegador)
- */
-app.get("/pagschool/auth", async (req, res) => {
+app.post("/pagschool/auth", async (req, res) => {
   try {
     const force = req.query.force === "1";
     const auth = await authenticate({ force });
@@ -175,8 +178,8 @@ app.post("/pagschool/aluno/new", async (req, res) => {
   try {
     const { token } = await authenticate();
     const url = `${PAGSCHOOL_BASE_URL}/api/aluno/new`;
-    const body = req.body || {};
 
+    const body = req.body || {};
     if (body.cpf) body.cpf = onlyDigits(body.cpf);
     if (body.telefoneCelular) body.telefoneCelular = onlyDigits(body.telefoneCelular);
     if (body.telefoneCelularResponsavel) body.telefoneCelularResponsavel = onlyDigits(body.telefoneCelularResponsavel);
@@ -199,6 +202,7 @@ app.post("/pagschool/contrato/create", async (req, res) => {
   try {
     const { token } = await authenticate();
     const url = `${PAGSCHOOL_BASE_URL}/api/contrato/create`;
+
     const resp = await api.post(url, req.body || {}, { headers: authHeaders(token) });
     return res.json({ ok: true, data: resp.data });
   } catch (err) {
@@ -210,22 +214,24 @@ app.post("/pagschool/contrato/create", async (req, res) => {
 
 /**
  * CONTA VIRTUAL
+ * (se codigoEscola vier vazio por algum motivo, dá pra passar ?codigo=6538 manualmente)
  */
 app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
   try {
     const { token, codigoEscola } = await authenticate();
+    const codigo = req.query.codigo || codigoEscola;
 
-    if (!codigoEscola) {
+    if (!codigo) {
       return res.status(400).json({
         ok: false,
-        error: "codigoEscola veio vazio. Abra /pagschool/auth?force=1 e veja os logs [PAGSCHOOL AUTH KEYS].",
+        error: "codigoEscola veio vazio. Use /pagschool/auth?force=1 ou passe ?codigo=6538",
       });
     }
 
-    const url = `${PAGSCHOOL_BASE_URL}/api/conta-virtual/account-info/${encodeURIComponent(codigoEscola)}`;
+    const url = `${PAGSCHOOL_BASE_URL}/api/conta-virtual/account-info/${encodeURIComponent(codigo)}`;
     const resp = await api.get(url, { headers: authHeaders(token) });
 
-    return res.json({ ok: true, codigoEscola, data: resp.data });
+    return res.json({ ok: true, codigoEscola: codigo, data: resp.data });
   } catch (err) {
     const status = err?.response?.status || 500;
     console.error("[CONTA VIRTUAL ERROR]", status, err?.response?.data || err.message);
@@ -236,5 +242,5 @@ app.get("/pagschool/conta-virtual/account-info", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`✅ Server on :${PORT}`);
   console.log(`PAGSCHOOL_BASE_URL = ${PAGSCHOOL_BASE_URL}`);
-  console.log("🚀 BUILD_MARKER = GET_AUTH_ENABLED_v4");
+  console.log("🚀 BUILD_MARKER = codigoEscola_from_user_v1");
 });
