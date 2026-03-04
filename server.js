@@ -20,15 +20,13 @@ const PORT = process.env.PORT || 3000;
 let PAGSCHOOL_BASE_URL = (process.env.PAGSCHOOL_BASE_URL || "").trim().replace(/\/$/, "");
 const PAGSCHOOL_EMAIL = (process.env.PAGSCHOOL_EMAIL || "").trim();
 const PAGSCHOOL_PASSWORD = (process.env.PAGSCHOOL_PASSWORD || "").trim();
-
-// auto | jwt | bearer | raw
-const PAGSCHOOL_AUTH_TYPE = (process.env.PAGSCHOOL_AUTH_TYPE || "auto").trim().toLowerCase();
+const PAGSCHOOL_AUTH_TYPE = (process.env.PAGSCHOOL_AUTH_TYPE || "auto").trim().toLowerCase(); // auto|jwt|bearer|raw
 
 const FACILITAFLOW_SEND_URL =
   (process.env.FACILITAFLOW_SEND_URL || "https://licenca.facilitaflow.com.br/sendWebhook").trim();
 const FACILITAFLOW_API_TOKEN = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
 
-console.log("[BOOT] VERSION=SENDWEBHOOK-PHONE-FIX");
+console.log("[BOOT] VERSION=SENDWEBHOOK-PHONE-FIX-V2");
 console.log("[OK] PagSchool base:", PAGSCHOOL_BASE_URL);
 console.log("[OK] PagSchool auth type:", PAGSCHOOL_AUTH_TYPE);
 console.log("[OK] FacilitaFlow send url:", FACILITAFLOW_SEND_URL);
@@ -82,10 +80,7 @@ if (/\/api$/i.test(PAGSCHOOL_BASE_URL)) {
   PAGSCHOOL_BASE_URL = PAGSCHOOL_BASE_URL.replace(/\/api$/i, "");
 }
 
-const pagschool = axios.create({
-  baseURL: PAGSCHOOL_BASE_URL,
-  timeout: 20000
-});
+const pagschool = axios.create({ baseURL: PAGSCHOOL_BASE_URL, timeout: 20000 });
 
 let apiPrefix = null; // "/api" ou ""
 let tokenCache = { token: "", expMs: 0 };
@@ -101,7 +96,6 @@ async function tryAuth(prefix) {
 
 async function ensureApiPrefix() {
   if (apiPrefix !== null) return apiPrefix;
-
   mustHaveEnv();
 
   for (const pref of ["/api", ""]) {
@@ -134,7 +128,6 @@ async function ensureApiPrefix() {
 
 async function authenticate() {
   await ensureApiPrefix();
-
   if (tokenCache.token && Date.now() < tokenCache.expMs - 60_000) return tokenCache.token;
 
   const resp = await tryAuth(apiPrefix);
@@ -188,7 +181,6 @@ async function pagschoolRequest({ method, url, params, data, responseType }) {
       throw err;
     }
   }
-
   throw lastErr;
 }
 
@@ -253,9 +245,7 @@ function pickBestParcela(parcelas) {
     .sort((a, b) => a.venc.localeCompare(b.venc));
   if (vencidas.length) return vencidas[0].p;
 
-  const proximas = withDates
-    .filter(x => x.venc)
-    .sort((a, b) => a.venc.localeCompare(b.venc));
+  const proximas = withDates.filter(x => x.venc).sort((a, b) => a.venc.localeCompare(b.venc));
   return (proximas[0] || withDates[0]).p;
 }
 
@@ -288,7 +278,11 @@ async function getBoletoByCpf({ cpf, basePublic }) {
     const candidate = pickBestParcela(parcelas);
     if (!candidate) continue;
 
-    if (!best) { best = candidate; bestContrato = c; continue; }
+    if (!best) {
+      best = candidate;
+      bestContrato = c;
+      continue;
+    }
 
     const vencA = toISODate(best?.vencimento || best?.dataVencimento);
     const vencB = toISODate(candidate?.vencimento || candidate?.dataVencimento);
@@ -330,7 +324,7 @@ async function getBoletoByCpf({ cpf, basePublic }) {
   };
 }
 
-// ✅ AQUI está a correção: enviar SEMPRE phone + message
+// ✅ FIX: enviar SEMPRE phone + message
 async function facilitaSend({ phone, message }) {
   if (!FACILITAFLOW_API_TOKEN) throw new Error("FACILITAFLOW_API_TOKEN não configurado");
 
@@ -340,12 +334,15 @@ async function facilitaSend({ phone, message }) {
     message: String(message || "")
   };
 
+  if (!payload.phone) throw new Error("phone vazio/indefinido para envio (verifique o payload do FacilitaFlow)");
+
   const r = await axios.post(FACILITAFLOW_SEND_URL, payload, {
     headers: { "Content-Type": "application/json" },
     timeout: 20000
   });
 
-  // Se a API responder 200 mas success:false, tratamos como erro
+  console.log("[FACILITAFLOW] response:", r.status, typeof r.data === "string" ? r.data.slice(0, 200) : r.data);
+
   if (r?.data && typeof r.data === "object" && r.data.success === false) {
     const err = new Error("FacilitaFlow retornou success:false");
     err.details = r.data;
@@ -406,43 +403,28 @@ app.get("/debug/boleto", async (req, res) => {
   }
 });
 
-// ✅ debug pra testar envio direto (sem FacilitaFlow)
-app.get("/debug/send", async (req, res) => {
-  try {
-    const phone = normalizePhone(req.query?.phone);
-    const message = String(req.query?.message || "Teste do envio ✅");
-    if (!phone) return res.status(400).json({ ok: false, error: "phone inválido" });
+// ✅ lista rotas (pra você provar o que existe no ar)
+app.get("/debug/routes", (_req, res) => {
+  const routes = [];
+  const stack = app?._router?.stack || [];
+  for (const layer of stack) {
+    if (layer?.route?.path) {
+      const methods = Object.keys(layer.route.methods || {}).map(m => m.toUpperCase());
+      routes.push({ path: layer.route.path, methods });
+    }
+  }
+  res.json({ ok: true, routes });
+});
 
+// ✅ envio direto (sem precisar do fluxo)
+app.all("/debug/send", async (req, res) => {
+  try {
+    const phone = normalizePhone(req.query?.phone || req.body?.phone);
+    const message = String(req.query?.message || req.body?.message || "Teste do envio ✅");
     const r = await facilitaSend({ phone, message });
     res.json({ ok: true, sent: true, result: r });
   } catch (err) {
     res.status(500).json({ ok: false, error: "Falha ao enviar", details: err.details || err?.response?.data || err?.message || String(err) });
-  }
-});
-
-// PDF proxy
-app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
-  try {
-    const { parcelaId, nossoNumero } = req.params;
-
-    const resp = await requestWithFallback({
-      method: "GET",
-      urls: [
-        `/parcela-contrato/pdf/${encodeURIComponent(parcelaId)}/${encodeURIComponent(nossoNumero)}`,
-        `/parcelas-contrato/pdf/${encodeURIComponent(parcelaId)}/${encodeURIComponent(nossoNumero)}`
-      ],
-      responseType: "stream"
-    });
-
-    res.setHeader("Content-Type", resp.headers["content-type"] || "application/pdf");
-    res.setHeader("Cache-Control", "no-store");
-    resp.data.pipe(res);
-  } catch (err) {
-    res.status(err?.response?.status || 500).json({
-      ok: false,
-      error: "Erro ao gerar PDF do boleto",
-      details: err?.response?.data || err?.message || String(err)
-    });
   }
 });
 
@@ -452,7 +434,7 @@ app.post("/webhook", (req, res) => {
   res.json({ ok: true });
 });
 
-// ✅ FacilitaFlow inbound
+// ✅ FacilitaFlow inbound (URL do fluxo)
 app.all("/ff/inbound", async (req, res) => {
   res.json({ ok: true, received: true });
 
@@ -479,10 +461,7 @@ app.all("/ff/inbound", async (req, res) => {
       return;
     }
 
-    await facilitaSend({
-      phone,
-      message: `Aqui está a sua 2ª via ✅\nPDF: ${r.pdfUrl}`
-    });
+    await facilitaSend({ phone, message: `Aqui está a sua 2ª via ✅\nPDF: ${r.pdfUrl}` });
   } catch (err) {
     console.error("[FF INBOUND] erro:", err.details || err?.response?.data || err?.message || err);
   }
