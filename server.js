@@ -24,9 +24,11 @@ const PAGSCHOOL_AUTH_TYPE = (process.env.PAGSCHOOL_AUTH_TYPE || "auto").trim().t
 
 const FACILITAFLOW_SEND_URL =
   (process.env.FACILITAFLOW_SEND_URL || "https://licenca.facilitaflow.com.br/sendWebhook").trim();
+
+// ✅ você já configurou esse no Render (print)
 const FACILITAFLOW_API_TOKEN = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
 
-console.log("[BOOT] VERSION=SENDWEBHOOK-PHONE-FIX-V2");
+console.log("[BOOT] VERSION=SENDWEBHOOK-TOKENWEBHOOK-FIX-V3");
 console.log("[OK] PagSchool base:", PAGSCHOOL_BASE_URL);
 console.log("[OK] PagSchool auth type:", PAGSCHOOL_AUTH_TYPE);
 console.log("[OK] FacilitaFlow send url:", FACILITAFLOW_SEND_URL);
@@ -324,24 +326,29 @@ async function getBoletoByCpf({ cpf, basePublic }) {
   };
 }
 
-// ✅ FIX: enviar SEMPRE phone + message
+// ✅ FIX REAL: FacilitaFlow exige tokenWebhook
 async function facilitaSend({ phone, message }) {
   if (!FACILITAFLOW_API_TOKEN) throw new Error("FACILITAFLOW_API_TOKEN não configurado");
 
   const payload = {
-    token: FACILITAFLOW_API_TOKEN,
+    tokenWebhook: FACILITAFLOW_API_TOKEN, // ✅ obrigatório
     phone: normalizePhone(phone),
-    message: String(message || "")
+    message: String(message || ""),
+    arquivo: null,
+    desativarFluxo: false,
+
+    // extra (não atrapalha, mas ajuda compat)
+    token: FACILITAFLOW_API_TOKEN
   };
 
-  if (!payload.phone) throw new Error("phone vazio/indefinido para envio (verifique o payload do FacilitaFlow)");
+  if (!payload.phone) throw new Error("phone vazio/indefinido para envio");
 
   const r = await axios.post(FACILITAFLOW_SEND_URL, payload, {
     headers: { "Content-Type": "application/json" },
     timeout: 20000
   });
 
-  console.log("[FACILITAFLOW] response:", r.status, typeof r.data === "string" ? r.data.slice(0, 200) : r.data);
+  console.log("[FACILITAFLOW] status:", r.status, "data:", typeof r.data === "string" ? r.data.slice(0, 200) : r.data);
 
   if (r?.data && typeof r.data === "object" && r.data.success === false) {
     const err = new Error("FacilitaFlow retornou success:false");
@@ -403,20 +410,7 @@ app.get("/debug/boleto", async (req, res) => {
   }
 });
 
-// ✅ lista rotas (pra você provar o que existe no ar)
-app.get("/debug/routes", (_req, res) => {
-  const routes = [];
-  const stack = app?._router?.stack || [];
-  for (const layer of stack) {
-    if (layer?.route?.path) {
-      const methods = Object.keys(layer.route.methods || {}).map(m => m.toUpperCase());
-      routes.push({ path: layer.route.path, methods });
-    }
-  }
-  res.json({ ok: true, routes });
-});
-
-// ✅ envio direto (sem precisar do fluxo)
+// ✅ envio direto (sem fluxo)
 app.all("/debug/send", async (req, res) => {
   try {
     const phone = normalizePhone(req.query?.phone || req.body?.phone);
