@@ -145,7 +145,18 @@ app.all("/flow", async (req, res) => {
     const payload = req.method === "GET" ? req.query : req.body;
 
     // o mais confiável: CPF
-    const cpf = payload?.cpf || payload?.documento || payload?.document || "";
+   const texto =
+  payload?.text ||
+  payload?.message ||
+  payload?.mensagem ||
+  payload?.input ||
+  "";
+
+const cpf =
+  payload?.cpf ||
+  payload?.documento ||
+  payload?.document ||
+  onlyDigits(texto); // <- se o aluno mandar só números, pega daqui
 
     if (!cpf) {
       return responderFlow(res, "Para eu te enviar a 2ª via, me mande seu CPF (somente números). 😊");
