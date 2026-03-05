@@ -72,11 +72,21 @@ async function sendToFacilitaFlow(phone, message, opts = {}) {
     desativarFluxo: typeof opts.desativarFluxo === "boolean" ? opts.desativarFluxo : undefined,
   };
 
+  console.log("[FF] enviando payload:", safeStr(JSON.stringify({
+    hasApiKey: Boolean(apiKey),
+    hasTokenWebhook: Boolean(payload.tokenWebhook),
+    phone: payload.phone,
+    message: payload.message,
+  })));
+
   const resp = await axios.post(sendUrl, payload, {
     timeout: 20000,
     validateStatus: () => true,
     headers: { "Content-Type": "application/json" },
   });
+
+  console.log("[FF] status:", resp.status);
+  console.log("[FF] data:", safeStr(JSON.stringify(resp.data)));
 
   if (resp.status >= 400) {
     throw new Error(`FacilitaFlow erro ${resp.status}: ${safeStr(JSON.stringify(resp.data))}`);
@@ -92,10 +102,8 @@ function normalizePagSchoolBase(raw) {
   let base = (raw || "").trim().replace(/\/$/, "");
   if (!base) base = "https://sistema.pagschool.com.br/prod/api";
 
-  // Se vier /prod sem /api, adiciona /api (o seu caso no print)
+  // garante /prod/api
   if (base.endsWith("/prod")) base = base + "/api";
-
-  // Se não termina com /api e parece que é do prod, adiciona /api
   if (!base.endsWith("/api") && base.includes("/prod")) base = base + "/api";
 
   return base.replace(/\/$/, "");
@@ -446,7 +454,9 @@ app.post("/boleto", async (req, res) => {
     if (!cpf) return res.status(400).json({ ok: false, error: "Envie cpf." });
 
     const cod = String(codigoEscola || codigoPadrao || "").trim();
-    if (!cod) return res.status(400).json({ ok: false, error: "Envie codigoEscola ou configure PAGSCHOOL_CODIGO_ESCOLA_PADRAO." });
+    if (!cod) {
+      return res.status(400).json({ ok: false, error: "Envie codigoEscola ou configure PAGSCHOOL_CODIGO_ESCOLA_PADRAO." });
+    }
 
     const data = await pagschoolGetBoleto({ cpf, codigoEscola: cod });
     res.json({ ok: true, mode: tokenCache.mode || "auto", data });
