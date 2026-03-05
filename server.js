@@ -7,359 +7,333 @@ const morgan = require("morgan");
 const axios = require("axios");
 
 const app = express();
-app.set("etag", false); // ✅ desliga ETag (evita 304)
+app.set("trust proxy", true);
+app.disable("etag");
 
+app.use(cors());
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: false
   })
 );
-app.use(cors());
 app.use(morgan("combined"));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
-const BUILD = "BOT-2026-03-05-PAGSCHOOL-PROBE-V4";
 
-/* =========================
-   Helpers
-========================= */
+/**
+ * ENV (Render)
+ */
+const PAGSCHOOL_ENDPOINT = (process.env.PAGSCHOOL_ENDPOINT || "").replace(/\/$/, "");
+const PAGSCHOOL_EMAIL = process.env.PAGSCHOOL_EMAIL || "";
+const PAGSCHOOL_PASSWORD = process.env.PAGSCHOOL_PASSWORD || "";
+const PAGSCHOOL_TOKEN_FIXO = process.env.PAGSCHOOL_TOKEN || "";
+
+const FACILITAFLOW_SENDWEBHOOK_URL =
+  (process.env.FACILITAFLOW_SENDWEBHOOK_URL || "https://licenca.facilitaflow.com.br/sendWebhook").replace(/\/$/, "");
+const FACILITAFLOW_API_TOKEN = process.env.FACILITAFLOW_API_TOKEN || "";
+const FACILITAFLOW_TOKENWEBHOOK = process.env.FACILITAFLOW_TOKENWEBHOOK || "";
+const INBOUND_SECRET = process.env.INBOUND_SECRET || "";
+
 function onlyDigits(v) {
   return String(v || "").replace(/\D/g, "");
 }
-function safeStr(v, max = 2500) {
-  const s = String(v ?? "");
-  return s.length > max ? s.slice(0, max) + "..." : s;
-}
-function base64(s) {
-  return Buffer.from(String(s || ""), "utf8").toString("base64");
-}
-function maskCpf(cpf) {
-  const d = onlyDigits(cpf);
-  if (d.length !== 11) return "***";
-  return `${d.slice(0, 3)}***${d.slice(8, 11)}`;
+
+function mustHaveEnv() {
+  if (!PAGSCHOOL_ENDPOINT) throw new Error("PAGSCHOOL_ENDPOINT não configurado");
+  if (!PAGSCHOOL_EMAIL || !PAGSCHOOL_PASSWORD) {
+    if (!PAGSCHOOL_TOKEN_FIXO) throw new Error("Configure PAGSCHOOL_EMAIL/PAGSCHOOL_PASSWORD (ou PAGSCHOOL_TOKEN)");
+  }
+  if (!FACILITAFLOW_API_TOKEN) throw new Error("FACILITAFLOW_API_TOKEN não configurado");
+  if (!FACILITAFLOW_TOKENWEBHOOK) throw new Error("FACILITAFLOW_TOKENWEBHOOK não configurado");
 }
 
-/* =========================
-   PagSchool config + auth
-========================= */
-function normalizePagSchoolBase(raw) {
-  let base = (raw || "").trim().replace(/\/$/, "");
-  if (!base) base = "https://sistema.pagschool.com.br/prod/api";
-
-  // garante /prod/api
-  if (base.endsWith("/prod")) base = base + "/api";
-  if (!base.endsWith("/api") && base.includes("/prod")) base = base + "/api";
-
-  return base.replace(/\/$/, "");
+function buildPagSchoolUrl(path) {
+  const base = PAGSCHOOL_ENDPOINT.replace(/\/$/, "");
+  const p = path.startsWith("/") ? path : `/${path}`;
+  if (base.endsWith("/api") && p.startsWith("/api/")) {
+    return base + p.replace("/api", "");
+  }
+  return base + p;
 }
 
-function getPagSchoolConfig() {
-  const base = normalizePagSchoolBase(process.env.PAGSCHOOL_BASE_URL);
-  const email = (process.env.PAGSCHOOL_EMAIL || "").trim();
-  const password = (process.env.PAGSCHOOL_PASSWORD || "").trim();
-  const authType = (process.env.PAGSCHOOL_AUTH_TYPE || "auto").trim().toLowerCase(); // auto|basic|jwt|bearer
-  const fixedJwt = (process.env.PAGSCHOOL_JWT_TOKEN || "").trim(); // opcional
-
-  return { base, email, password, authType, fixedJwt };
+function decodeJwtExpMs(token) {
+  try {
+    const parts = String(token).split(".");
+    if (parts.length < 2) return 0;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+    if (!payload || !payload.exp) return 0;
+    return payload.exp * 1000;
+  } catch {
+    return 0;
+  }
 }
 
-function authHeaderJWT(token) {
-  return { Authorization: `JWT ${String(token || "").trim()}` };
-}
-function authHeaderBearer(token) {
-  return { Authorization: `Bearer ${String(token || "").trim()}` };
-}
-function authHeaderBasic(email, password) {
-  return { Authorization: `Basic ${base64(`${email}:${password}`)}` };
-}
+let tokenCache = { token: "", expMs: 0 };
 
-async function getAuthHeaders() {
-  const { authType, fixedJwt, email, password } = getPagSchoolConfig();
+async function getPagSchoolToken() {
+  if (PAGSCHOOL_TOKEN_FIXO) return PAGSCHOOL_TOKEN_FIXO;
 
-  // se você algum dia receber um token JWT do PagSchool, pode pôr em PAGSCHOOL_JWT_TOKEN
-  if (fixedJwt) {
-    return authType === "bearer" ? authHeaderBearer(fixedJwt) : authHeaderJWT(fixedJwt);
+  const now = Date.now();
+  if (tokenCache.token && tokenCache.expMs && now < tokenCache.expMs - 60_000) {
+    return tokenCache.token;
   }
 
-  // hoje: vai BASIC (porque login endpoint não existe / não foi informado)
-  return authHeaderBasic(email, password);
+  const url = buildPagSchoolUrl("/auth/authenticate");
+
+  const resp = await axios.post(
+    url,
+    { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD },
+    {
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      timeout: 15000,
+      validateStatus: () => true
+    }
+  );
+
+  if (resp.status < 200 || resp.status >= 300 || !resp.data || !resp.data.token) {
+    const details = typeof resp.data === "string" ? resp.data.slice(0, 500) : resp.data;
+    throw new Error(`Falha ao autenticar no PagSchool. status=${resp.status} details=${JSON.stringify(details)}`);
+  }
+
+  const token = resp.data.token;
+  const expMs = decodeJwtExpMs(token) || Date.now() + 50 * 60 * 1000;
+  tokenCache = { token, expMs };
+
+  return token;
 }
 
-function baseVariants(base) {
-  const variants = [
-    base,
-    base.replace(/\/api$/, "/api/v1"),
-    base.replace(/\/api$/, "/api/v2"),
-    base.replace(/\/api$/, "/v1"),
-    base.replace(/\/api$/, "/v2"),
-    base.replace(/\/api$/, ""), // /prod
-  ];
-  return Array.from(new Set(variants.map((b) => b.replace(/\/$/, "")).filter(Boolean)));
-}
+async function pagschoolRequest(method, path, { params, data, responseType } = {}) {
+  const token = await getPagSchoolToken();
+  const url = buildPagSchoolUrl(path);
 
-/* =========================
-   PROBE paths
-========================= */
-function buildProbePaths(cpf, codigoEscola) {
-  const c = onlyDigits(cpf);
-  const e = onlyDigits(codigoEscola);
-
-  const baseList = [
-    "/boleto",
-    "/boletos",
-    "/boleto/2via",
-    "/boleto/segunda-via",
-    "/boletos/2via",
-    "/boletos/segunda-via",
-    "/segunda-via/boleto",
-    "/consulta/boleto",
-    "/consulta/boletos",
-    "/boleto/consultar",
-    "/boletos/consultar",
-    "/financeiro/boleto",
-    "/financeiro/boletos",
-    "/aluno/boleto",
-    "/aluno/boletos",
-
-    // variações com CPF na URL
-    `/boleto/${c}`,
-    `/boletos/${c}`,
-    `/boleto/cpf/${c}`,
-    `/boletos/cpf/${c}`,
-    `/aluno/${c}/boleto`,
-    `/aluno/${c}/boletos`,
-    `/aluno/boleto/${c}`,
-    `/aluno/boletos/${c}`,
-
-    // variações com escola + cpf
-    `/boleto/${e}/${c}`,
-    `/boletos/${e}/${c}`,
-    `/escola/${e}/boleto/${c}`,
-    `/escola/${e}/boletos/${c}`,
-  ];
-
-  return Array.from(new Set(baseList));
-}
-
-function buildBodies(cpf, codigoEscola) {
-  const c = onlyDigits(cpf);
-  const e = onlyDigits(codigoEscola);
-
-  // tentamos poucas variações (sem “explodir” requests)
-  return [
-    { cpf: c, codigoEscola: e },
-    { cpf: c, codigo_escola: e },
-    { documento: c, codigoEscola: e },
-  ];
-}
-
-async function pagschoolRequestWithBase({ base, method, path, data, params }) {
-  const url = base + (path.startsWith("/") ? path : `/${path}`);
-  const authHeaders = await getAuthHeaders();
-
-  console.log("[PAGSCHOOL] REQUEST:", method.toUpperCase(), url);
-
-  return axios({
+  const resp = await axios({
     method,
     url,
-    data,
     params,
-    timeout: 20000,
-    validateStatus: () => true,
+    data,
+    responseType: responseType || "json",
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders,
+      Accept: responseType === "arraybuffer" ? "application/pdf" : "application/json",
+      Authorization: `JWT ${token}`
     },
+    timeout: 20000,
+    validateStatus: () => true
   });
+
+  return resp;
 }
 
-async function runProbe({ cpf, codigoEscola }) {
-  const { base } = getPagSchoolConfig();
-  const bases = baseVariants(base);
-  const paths = buildProbePaths(cpf, codigoEscola);
-  const bodies = buildBodies(cpf, codigoEscola);
+async function sendToFacilitaFlow({ phone, message, desativarFluxo = false }) {
+  const body = {
+    phone: onlyDigits(phone),
+    message: String(message || ""),
+    apiKey: FACILITAFLOW_API_TOKEN,
+    tokenWebhook: FACILITAFLOW_TOKENWEBHOOK,
+    token: FACILITAFLOW_TOKENWEBHOOK,
+    desativarFluxo: !!desativarFluxo
+  };
 
-  const results = [];
-  for (const b of bases) {
-    for (const p of paths) {
-      // POST com alguns bodies
-      for (const body of bodies) {
-        const r = await pagschoolRequestWithBase({ base: b, method: "post", path: p, data: body });
-        results.push({
-          base: b,
-          endpoint: p,
-          method: "POST",
-          status: r.status,
-          sample: safeStr(typeof r.data === "string" ? r.data : JSON.stringify(r.data), 300),
-        });
+  const resp = await axios.post(FACILITAFLOW_SENDWEBHOOK_URL, body, {
+    timeout: 20000,
+    validateStatus: () => true
+  });
 
-        // se já achou algo que NÃO é 404/405, não precisa testar todos bodies desse mesmo endpoint
-        if (r.status !== 404 && r.status !== 405) break;
-      }
+  return { status: resp.status, data: resp.data };
+}
 
-      // GET com params
-      const r2 = await pagschoolRequestWithBase({
-        base: b,
-        method: "get",
-        path: p,
-        params: { cpf: onlyDigits(cpf), codigoEscola: onlyDigits(codigoEscola) },
-      });
+async function buscarAlunoPorCpf(cpf) {
+  const resp = await pagschoolRequest("GET", "/api/aluno/all", { params: { cpf: onlyDigits(cpf) } });
 
-      results.push({
-        base: b,
-        endpoint: p,
-        method: "GET",
-        status: r2.status,
-        sample: safeStr(typeof r2.data === "string" ? r2.data : JSON.stringify(r2.data), 300),
-      });
-    }
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Erro ao consultar aluno. status=${resp.status} body=${JSON.stringify(resp.data)}`);
   }
 
-  // ordena: primeiro os que NÃO são 404/405
-  const sorted = [...results].sort((a, b) => {
-    const aBad = a.status === 404 || a.status === 405;
-    const bBad = b.status === 404 || b.status === 405;
-    return Number(aBad) - Number(bBad);
-  });
-
-  return sorted;
+  const rows = resp.data && Array.isArray(resp.data.rows) ? resp.data.rows : [];
+  if (!rows.length) return null;
+  return rows[0];
 }
 
-/* =========================
-   Headers anti-cache nos debug
-========================= */
-function noCache(res) {
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
+async function buscarContratosPorAluno(alunoId) {
+  const resp = await pagschoolRequest("GET", `/api/contrato/by-aluno/${alunoId}`);
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Erro ao consultar contratos. status=${resp.status} body=${JSON.stringify(resp.data)}`);
+  }
+
+  const contratos = Array.isArray(resp.data) ? resp.data : (resp.data && resp.data.rows) ? resp.data.rows : [];
+  return contratos;
 }
 
-/* =========================
-   Rotas
-========================= */
-app.get("/", (req, res) => {
-  noCache(res);
-  const { base, email, authType } = getPagSchoolConfig();
-  res.json({
-    ok: true,
-    build: BUILD,
-    pagschool: {
-      base,
-      authType,
-      emailConfigured: Boolean(email),
-    },
-    routes: ["/debug/routes", "/pagschool/boleto/test", "/debug/pagschool/probe-boleto"],
-  });
+function escolherParcelaParaBoleto(contrato) {
+  const parcelas = Array.isArray(contrato.parcelas) ? contrato.parcelas : [];
+
+  for (const p of parcelas) {
+    const valorPago = Number(p.valorPago || 0);
+    const dataPagamento = p.dataPagamento || p.pagamentoEm || null;
+    const status = String(p.status || "").toLowerCase();
+    const pago = valorPago > 0 || !!dataPagamento || status.includes("pago");
+    if (!pago) return p;
+  }
+
+  return parcelas[0] || null;
+}
+
+async function gerarBoletoDaParcela(parcelaId) {
+  const resp = await pagschoolRequest("POST", `/api/parcelas-contrato/gera-boleto-parcela/${parcelaId}`);
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Erro ao gerar boleto. status=${resp.status} body=${JSON.stringify(resp.data)}`);
+  }
+
+  return resp.data;
+}
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true, service: "pagschool-boleto-bot" });
 });
 
-app.get("/debug/routes", (req, res) => {
-  noCache(res);
-  const routes = [];
-  app._router?.stack?.forEach((m) => {
-    if (m.route?.path) {
-      const methods = Object.keys(m.route.methods || {}).map((x) => x.toUpperCase());
-      routes.push({ path: m.route.path, methods });
+app.post("/webhook", (req, res) => {
+  res.json({ ok: true });
+
+  setImmediate(async () => {
+    try {
+      const payload = req.body || {};
+      console.log("[WEBHOOK PAGSCHOOL]", JSON.stringify(payload));
+    } catch (e) {
+      console.error("[WEBHOOK PAGSCHOOL] erro:", e.message);
     }
   });
-  res.json({ ok: true, build: BUILD, routes });
 });
 
-app.get("/pagschool/boleto/test", (req, res) => {
-  noCache(res);
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.end(`
-<!doctype html>
-<html lang="pt-br">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Teste Boleto</title>
-  <style>
-    body{font-family:Arial,sans-serif;padding:20px;max-width:760px;margin:0 auto;}
-    input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box;}
-    button{cursor:pointer;}
-    .small{font-size:12px;color:#444;}
-  </style>
-</head>
-<body>
-  <h2>Teste PagSchool (PROBE)</h2>
-  <p class="small">Build: ${BUILD}</p>
-
-  <form method="GET" action="/debug/pagschool/probe-boleto">
-    <label>CPF (11 números)</label>
-    <input name="cpf" placeholder="00000000000" />
-    <label>Código da escola (codigoEscola)</label>
-    <input name="codigoEscola" placeholder="6538" />
-    <button type="submit">Rodar PROBE</button>
-  </form>
-
-  <p class="small">Dica: se abrir um JSON enorme, não precisa copiar. Veja o LOG do Render e procure por <b>PROBE HIT</b>.</p>
-</body>
-</html>
-`);
-});
-
-app.get("/debug/pagschool/probe-boleto", async (req, res) => {
-  noCache(res);
+app.post("/ff/inbound", async (req, res) => {
   try {
-    const cpf = String(req.query.cpf || "");
-    const codigoEscola = String(req.query.codigoEscola || "");
-    const c = onlyDigits(cpf);
-    const e = onlyDigits(codigoEscola);
+    mustHaveEnv();
 
-    if (c.length !== 11) return res.status(400).json({ ok: false, error: "cpf inválido (precisa 11 números)" });
-    if (!e) return res.status(400).json({ ok: false, error: "codigoEscola inválido" });
-
-    console.log("========== PROBE START ==========");
-    console.log("cpf:", maskCpf(cpf), "codigoEscola:", e);
-
-    const results = await runProbe({ cpf: c, codigoEscola: e });
-
-    const hits = results.filter((r) => r.status !== 404 && r.status !== 405);
-
-    if (hits.length) {
-      console.log("✅ PROBE HIT (rotas que EXISTEM / responderam diferente de 404/405):");
-      hits.slice(0, 30).forEach((h) => {
-        console.log(
-          `PROBE HIT -> ${h.status} ${h.method} base=${h.base} endpoint=${h.endpoint} sample=${safeStr(h.sample, 160)}`
-        );
-      });
-    } else {
-      console.log("❌ PROBE: nenhuma rota respondeu diferente de 404/405.");
-      console.log("Isso normalmente significa: (1) endpoint é outro nome, OU (2) a API não expõe esse recurso publicamente, OU (3) o auth/rota correta precisa vir do suporte PagSchool.");
+    if (INBOUND_SECRET) {
+      const secret = req.headers["x-inbound-secret"];
+      if (secret !== INBOUND_SECRET) return res.status(401).json({ ok: false, error: "unauthorized" });
     }
 
-    console.log("========== PROBE END ==========");
+    const phone = req.body.phone || req.body.telefone || "";
+    const cpf = req.body.cpf || "";
 
-    // também devolve JSON pra quem quiser ver
-    res.json({
+    if (!phone) return res.status(400).json({ ok: false, error: "Faltou phone" });
+    if (!cpf) {
+      return res.status(400).json({
+        ok: false,
+        error: "Faltou cpf",
+        dica: "No FacilitaFlow, pergunte o CPF e envie no body como { cpf: \"...\" }"
+      });
+    }
+
+    const aluno = await buscarAlunoPorCpf(cpf);
+    if (!aluno) {
+      const msg = "Não encontrei seu CPF na base. Confere se digitou certinho? 😊";
+      await sendToFacilitaFlow({ phone, message: msg });
+      return res.json({ ok: true, found: false, sent: true, reply: msg });
+    }
+
+    const contratos = await buscarContratosPorAluno(aluno.id);
+    if (!contratos.length) {
+      const msg = "Achei seu cadastro, mas não encontrei contrato ativo. Se quiser, me chama aqui que eu verifico. 😊";
+      await sendToFacilitaFlow({ phone, message: msg });
+      return res.json({ ok: true, found: true, contratos: 0, sent: true, reply: msg });
+    }
+
+    const contrato = contratos[0];
+    const parcela = escolherParcelaParaBoleto(contrato);
+
+    if (!parcela || !parcela.id) {
+      const msg = "Não encontrei uma parcela válida pra gerar o boleto. Me chama aqui que eu verifico. 😊";
+      await sendToFacilitaFlow({ phone, message: msg });
+      return res.json({ ok: true, found: true, sent: true, reply: msg });
+    }
+
+    const gerada = await gerarBoletoDaParcela(parcela.id);
+    const nossoNumero = gerada.nossoNumero || parcela.nossoNumero;
+    const numeroBoleto = gerada.numeroBoleto || parcela.numeroBoleto || "";
+
+    if (!nossoNumero) {
+      const msg = "Gerei a solicitação, mas não recebi o nosso número do boleto. Vou precisar verificar aqui. 😊";
+      await sendToFacilitaFlow({ phone, message: msg });
+      return res.json({ ok: true, found: true, sent: true, reply: msg });
+    }
+
+    const publicBase =
+      (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+    const pdfUrl = `${publicBase}/boleto/pdf/${parcela.id}/${encodeURIComponent(nossoNumero)}`;
+
+    const texto =
+      `Aqui está a 2ª via do seu boleto:\n${pdfUrl}` +
+      (numeroBoleto ? `\n\nLinha digitável:\n${numeroBoleto}` : "");
+
+    const ff = await sendToFacilitaFlow({ phone, message: texto });
+
+    return res.json({
       ok: true,
-      build: BUILD,
-      cpfMasked: maskCpf(cpf),
-      codigoEscola: e,
-      hitsCount: hits.length,
-      hitsTop: hits.slice(0, 20),
-      results, // completo
+      alunoId: aluno.id,
+      contratoId: contrato.id,
+      parcelaId: parcela.id,
+      nossoNumero,
+      numeroBoleto,
+      pdfUrl,
+      facilitaFlow: ff
     });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: "Erro interno", details: String(err?.message || err) });
+  } catch (e) {
+    console.error("[FF INBOUND] erro:", e.message);
+    return res.status(500).json({ ok: false, error: "Erro interno do servidor", details: e.message });
   }
 });
 
-app.use((req, res) => {
-  noCache(res);
-  console.log("[404] rota não existe:", req.method, req.path);
-  res.status(404).json({ ok: false, build: BUILD, error: "Rota não encontrada", path: req.path });
+app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
+  try {
+    mustHaveEnv();
+
+    const { parcelaId, nossoNumero } = req.params;
+
+    const resp = await pagschoolRequest("GET", `/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`, {
+      responseType: "arraybuffer"
+    });
+
+    if (resp.status < 200 || resp.status >= 300) {
+      const fallback = Buffer.from(resp.data || "");
+      return res.status(resp.status).send(fallback);
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline; filename=boleto.pdf");
+    return res.status(200).send(Buffer.from(resp.data));
+  } catch (e) {
+    console.error("[PDF] erro:", e.message);
+    return res.status(500).send("Erro ao gerar PDF");
+  }
+});
+
+app.get("/debug/pagschool/auth", async (req, res) => {
+  try {
+    mustHaveEnv();
+    const token = await getPagSchoolToken();
+    res.json({ ok: true, tokenPreview: token ? `${token.slice(0, 12)}...` : "" });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/debug/send", async (req, res) => {
+  try {
+    mustHaveEnv();
+    const phone = req.body.phone || "";
+    const message = req.body.message || "Teste OK ✅";
+    const out = await sendToFacilitaFlow({ phone, message });
+    res.json({ ok: true, out });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.listen(PORT, () => {
-  const { base, email, authType } = getPagSchoolConfig();
-  console.log("=== BOOT", BUILD, "===");
-  console.log("Server ON na porta", PORT);
-  console.log("PagSchool BASE:", base);
-  console.log("PagSchool EMAIL configurado?", Boolean(email));
-  console.log("PagSchool AUTH TYPE:", authType);
-  console.log("Rota teste:", "/pagschool/boleto/test");
+  console.log(`[OK] Online na porta ${PORT}`);
 });
