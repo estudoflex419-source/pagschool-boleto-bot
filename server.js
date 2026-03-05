@@ -20,16 +20,19 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
-const BUILD = "BOT-2026-03-04C";
+const BUILD = "BOT-2026-03-04D";
 
+// =====================
+// Helpers
+// =====================
 function onlyDigits(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
 function normalizePhoneBR(phone) {
   const d = onlyDigits(phone);
-  if (d.length === 11) return "55" + d;
-  if (d.length === 13 && d.startsWith("55")) return d;
+  if (d.length === 11) return "55" + d; // 11 dígitos -> adiciona 55
+  if (d.length === 13 && d.startsWith("55")) return d; // já vem com 55
   return d;
 }
 
@@ -38,39 +41,49 @@ function safeStr(v, max = 2500) {
   return s.length > max ? s.slice(0, max) + "..." : s;
 }
 
-function pickTokenWebhook() {
-  // ✅ aceita os dois nomes (o seu e um alternativo)
-  const a = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
-  const b = (process.env.FF_TOKEN_WEBHOOK || "").trim();
-  return a || b;
-}
-
 function getFacilitaFlowConfig() {
   const sendUrl =
     (process.env.FACILITAFLOW_SEND_URL || "").trim() ||
-    (process.env.FF_SENDWEBHOOK_URL || "").trim() ||
     "https://licenca.facilitaflow.com.br/sendWebhook";
 
-  const tokenWebhook = pickTokenWebhook();
+  // Você já usa esse nome no Render (print): FACILITAFLOW_API_TOKEN
+  const apiKey = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
 
-  return { sendUrl, tokenWebhook };
+  return { sendUrl, apiKey };
 }
 
-async function sendToFacilitaFlow(phone, message) {
-  const { sendUrl, tokenWebhook } = getFacilitaFlowConfig();
+// =====================
+// FACILITAFLOW SEND (AGORA MANDA apiKey + tokenWebhook)
+// =====================
+async function sendToFacilitaFlow(phone, message, opts = {}) {
+  const { sendUrl, apiKey } = getFacilitaFlowConfig();
 
-  if (!tokenWebhook) {
-    // ✅ mensagem ainda mais clara
-    throw new Error(
-      "Faltou token. Configure no Render: FACILITAFLOW_API_TOKEN (ou FF_TOKEN_WEBHOOK) e faça Deploy."
-    );
+  if (!apiKey) {
+    throw new Error("Faltou FACILITAFLOW_API_TOKEN no Render > Environment.");
   }
 
   const payload = {
+    // ✅ conforme o painel do FacilitaFlow
+    apiKey,
+
+    // ✅ backup pro bug deles (Prisma reclama tokenWebhook)
+    tokenWebhook: apiKey,
+
     phone: normalizePhoneBR(phone),
     message: String(message || ""),
-    tokenWebhook
+
+    // opcionais
+    arquivo: opts.arquivo || undefined,
+    desativarFluxo: typeof opts.desativarFluxo === "boolean" ? opts.desativarFluxo : undefined
   };
+
+  // log sem expor o token
+  console.log("[FF] enviando payload:", safeStr(JSON.stringify({
+    hasApiKey: Boolean(apiKey),
+    phone: payload.phone,
+    message: payload.message,
+    hasTokenWebhook: Boolean(payload.tokenWebhook)
+  })));
 
   const resp = await axios.post(sendUrl, payload, {
     timeout: 20000,
@@ -88,16 +101,19 @@ async function sendToFacilitaFlow(phone, message) {
   return resp.data;
 }
 
+// =====================
+// ROTAS
+// =====================
 app.get("/", (req, res) => {
-  const { sendUrl, tokenWebhook } = getFacilitaFlowConfig();
+  const { sendUrl, apiKey } = getFacilitaFlowConfig();
   res.json({
     ok: true,
     build: BUILD,
     facilitaFlow: {
       sendUrl,
-      tokenConfigured: Boolean(tokenWebhook) // ✅ mostra se o token está pegando (sem expor)
+      apiKeyConfigured: Boolean(apiKey)
     },
-    routes: ["/pagschool/aluno/new", "/debug/send", "/debug/routes"]
+    routes: ["/pagschool/aluno/new", "/debug/send", "/debug/routes", "/ff/inbound", "/webhook"]
   });
 });
 
@@ -133,13 +149,12 @@ app.get(["/pagschool/aluno/new", "/pagschool/aluno/new/"], (req, res) => {
 <body>
   <h2>Teste de envio (FacilitaFlow)</h2>
   <p class="small">Build: <code>${BUILD}</code></p>
-  <p class="small">Use o Modo 2 se o botão não funcionar.</p>
 
   <h3>Modo 1</h3>
   <label>Telefone</label>
   <input id="phone" placeholder="13981484410" />
   <label>Mensagem</label>
-  <textarea id="message" rows="4" placeholder="teste envio ok"></textarea>
+  <textarea id="message" rows="4" placeholder="ok"></textarea>
   <button id="btn">Enviar (modo 1)</button>
   <h4>Resposta</h4>
   <pre id="out">---</pre>
@@ -151,7 +166,7 @@ app.get(["/pagschool/aluno/new", "/pagschool/aluno/new/"], (req, res) => {
     <label>Telefone</label>
     <input name="phone" placeholder="13981484410" />
     <label>Mensagem</label>
-    <textarea name="message" rows="3" placeholder="teste envio ok"></textarea>
+    <textarea name="message" rows="3" placeholder="ok"></textarea>
     <button type="submit">Enviar (modo 2)</button>
   </form>
 
@@ -202,11 +217,51 @@ app.post("/debug/send", async (req, res) => {
   }
 });
 
+// inbound do FacilitaFlow (se você usar)
+app.post("/ff/inbound", async (req, res) => {
+  try {
+    const body = req.body || {};
+    console.log("[FF INBOUND] body:", safeStr(JSON.stringify(body)));
+
+    const phone = body.phone || body.telefone || body.from || "";
+    const msg = String(body.message || body.mensagem || body.text || "").trim();
+
+    if (!phone) return res.status(400).json({ success: false, error: "phone ausente no body" });
+
+    if (msg.toUpperCase().includes("BOLETO")) {
+      await sendToFacilitaFlow(phone, "Certo ✅ Me envie seu CPF, por favor.");
+    } else {
+      await sendToFacilitaFlow(phone, "Para 2ª via, digite: BOLETO ✅");
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[FF INBOUND] erro:", err?.message || err);
+    return res.status(500).json({ success: false, error: "Erro interno", details: String(err?.message || err) });
+  }
+});
+
+// webhook PagSchool
+app.post("/webhook", async (req, res) => {
+  try {
+    console.log("[PAGSCHOOL WEBHOOK] body:", safeStr(JSON.stringify(req.body)));
+    return res.json({ ok: true, received: true });
+  } catch (err) {
+    console.error("[PAGSCHOOL WEBHOOK] erro:", err?.message || err);
+    return res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.use((req, res) => {
+  console.log("[404] rota não existe:", req.method, req.path);
+  res.status(404).json({ ok: false, build: BUILD, error: "Rota não encontrada", path: req.path });
+});
+
 app.listen(PORT, () => {
-  const { sendUrl, tokenWebhook } = getFacilitaFlowConfig();
+  const { sendUrl, apiKey } = getFacilitaFlowConfig();
   console.log("=== BOOT", BUILD, "===");
   console.log("Server ON na porta", PORT);
   console.log("FacilitaFlow SEND URL:", sendUrl);
-  console.log("Token configurado?", Boolean(tokenWebhook));
+  console.log("API Key configurada?", Boolean(apiKey));
   console.log("Rota de teste:", "/pagschool/aluno/new");
 });
