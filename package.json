@@ -1,16 +1,13 @@
 {
   "name": "pagschool-boleto-bot",
   "version": "1.0.0",
-  "description": "Integração PagSchool webhook + FacilitaFlow sendWebhook",
   "main": "server.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node server.js"
   },
-  "engines": {
-    "node": ">=18"
-  },
   "dependencies": {
-    "axios": "^1.6.8",
+    "axios": "^1.7.9",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
