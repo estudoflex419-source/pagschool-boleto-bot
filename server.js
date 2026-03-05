@@ -13,13 +13,14 @@ app.use(
     contentSecurityPolicy: false,
   })
 );
+
 app.use(cors());
 app.use(morgan("combined"));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
-const BUILD = "BOT-2026-03-05-JWT-AUTO";
+const BUILD = "BOT-2026-03-05-PAGSCHOOL-AUTO-BASIC";
 
 /* =========================
    Helpers
@@ -44,16 +45,19 @@ function upperTrim(s) {
   return String(s || "").trim().toUpperCase();
 }
 
+function base64(s) {
+  return Buffer.from(String(s || ""), "utf8").toString("base64");
+}
+
 /* =========================
    FacilitaFlow SEND
    (apiKey + tokenWebhook)
 ========================= */
 function getFacilitaFlowConfig() {
   const sendUrl =
-    (process.env.FACILITAFLOW_SEND_URL || process.env.FACILITAFLOW_SEND_URL || "").trim() ||
+    (process.env.FACILITAFLOW_SEND_URL || "").trim() ||
     "https://licenca.facilitaflow.com.br/sendWebhook";
 
-  // No seu Render você tem FACILITAFLOW_API_TOKEN
   const apiKey = (process.env.FACILITAFLOW_API_TOKEN || "").trim();
 
   return { sendUrl, apiKey };
@@ -65,7 +69,7 @@ async function sendToFacilitaFlow(phone, message, opts = {}) {
 
   const payload = {
     apiKey,
-    tokenWebhook: apiKey, // compatibilidade bug prisma deles
+    tokenWebhook: apiKey, // compatibilidade com bug deles
     phone: normalizePhoneBR(phone),
     message: String(message || ""),
     arquivo: opts.arquivo || undefined,
@@ -101,19 +105,12 @@ async function sendToFacilitaFlow(phone, message, opts = {}) {
 }
 
 /* =========================
-   PagSchool JWT AUTO
+   PagSchool - AUTO JWT -> fallback BASIC
 ========================= */
 function normalizePagSchoolBase(raw) {
   let base = (raw || "").trim().replace(/\/$/, "");
   if (!base) base = "https://sistema.pagschool.com.br/prod/api";
-
-  // Se vier ".../prod" sem /api, adiciona /api
-  if (base.endsWith("/prod")) base = base + "/api";
-  // Se vier sem /api e não tiver /api no final, tenta manter como está,
-  // mas a maioria é /prod/api, então:
-  if (!base.endsWith("/api") && base.includes("/prod") && !base.includes("/api")) {
-    base = base + "/api";
-  }
+  // garante sem / no final
   return base.replace(/\/$/, "");
 }
 
@@ -122,20 +119,19 @@ function getPagSchoolConfig() {
   const email = (process.env.PAGSCHOOL_EMAIL || "").trim();
   const password = (process.env.PAGSCHOOL_PASSWORD || "").trim();
 
-  // auto | jwt | bearer
+  // auto | jwt | bearer | basic
   const authType = (process.env.PAGSCHOOL_AUTH_TYPE || "auto").trim().toLowerCase();
 
   const codigoPadrao = (process.env.PAGSCHOOL_CODIGO_ESCOLA_PADRAO || "").trim();
   const boletoEndpoint = (process.env.PAGSCHOOL_BOLETO_ENDPOINT || "/boleto").trim();
 
-  // opcional: se você tiver um JWT fixo (não é o seu caso agora)
+  // se algum dia o PagSchool te der um JWT pronto, você pode pôr aqui:
   const fixedJwt = (process.env.PAGSCHOOL_JWT_TOKEN || "").trim();
 
   return { base, email, password, authType, codigoPadrao, boletoEndpoint, fixedJwt };
 }
 
 function decodeJwtExpMs(token) {
-  // tenta ler exp do JWT (se tiver)
   try {
     const parts = String(token || "").split(".");
     if (parts.length < 2) return 0;
@@ -149,7 +145,6 @@ function decodeJwtExpMs(token) {
 }
 
 function extractTokenFromResponse(data) {
-  // tenta achar token em vários formatos
   const d = data || {};
   const candidates = [
     d.token,
@@ -164,33 +159,37 @@ function extractTokenFromResponse(data) {
     d?.result?.jwt,
   ].filter(Boolean);
 
-  if (candidates.length) return String(candidates[0]);
-  return "";
+  return candidates.length ? String(candidates[0]) : "";
 }
 
 const tokenCache = {
+  mode: "", // "jwt" ou "basic"
   token: "",
   expMs: 0,
+  fallbackExp: 0,
   lastOkEndpoint: "",
+  loginUnsupportedUntil: 0,
 };
 
-function authHeaderFor(token) {
-  const { authType } = getPagSchoolConfig();
-  const t = String(token || "").trim();
-  if (!t) return {};
+function getBaseCandidates(base) {
+  // tenta com /api e sem /api (porque seu erro foi 404 nos endpoints de login)
+  const list = [base];
 
-  if (authType === "bearer") return { Authorization: `Bearer ${t}` };
-  if (authType === "jwt") return { Authorization: `JWT ${t}` };
+  if (base.endsWith("/api")) {
+    list.push(base.replace(/\/api$/, ""));
+  }
+  // se a base vier sem /api, tenta também com /api
+  if (!base.endsWith("/api")) {
+    list.push(base + "/api");
+  }
 
-  // auto: tenta JWT primeiro (se você me disse que é JWT)
-  return { Authorization: `JWT ${t}` };
+  // remove duplicados
+  return Array.from(new Set(list));
 }
 
 async function tryPagSchoolLogin() {
   const { base, email, password } = getPagSchoolConfig();
-  if (!email || !password) {
-    throw new Error("PAGSCHOOL_EMAIL e/ou PAGSCHOOL_PASSWORD não configurados no Render.");
-  }
+  if (!email || !password) throw new Error("PAGSCHOOL_EMAIL e/ou PAGSCHOOL_PASSWORD não configurados no Render.");
 
   const endpoints = [
     "/auth/login",
@@ -213,73 +212,123 @@ async function tryPagSchoolLogin() {
   ];
 
   let lastErr = "";
-  for (const path of endpoints) {
-    for (const body of bodies) {
-      const url = base + path;
-      try {
-        const resp = await axios.post(url, body, {
-          timeout: 20000,
-          validateStatus: () => true,
-          headers: { "Content-Type": "application/json" },
-        });
+  for (const baseTry of getBaseCandidates(base)) {
+    for (const path of endpoints) {
+      for (const body of bodies) {
+        const url = baseTry + path;
+        try {
+          const resp = await axios.post(url, body, {
+            timeout: 20000,
+            validateStatus: () => true,
+            headers: { "Content-Type": "application/json" },
+          });
 
-        if (resp.status >= 200 && resp.status < 300) {
-          const token = extractTokenFromResponse(resp.data);
-          if (token) {
-            tokenCache.lastOkEndpoint = path;
-            return token;
+          if (resp.status >= 200 && resp.status < 300) {
+            const token = extractTokenFromResponse(resp.data);
+            if (token) {
+              tokenCache.lastOkEndpoint = `${baseTry}${path}`;
+              return token;
+            }
+            lastErr = `Login OK em ${baseTry}${path} mas não encontrei token no JSON`;
+          } else {
+            // guarda o erro resumido
+            lastErr = `Login falhou ${resp.status} em ${baseTry}${path}: ${safeStr(JSON.stringify(resp.data), 250)}`;
           }
-          lastErr = `Login OK em ${path} mas não encontrei token no JSON`;
-        } else {
-          // guarda erro resumido
-          lastErr = `Login falhou ${resp.status} em ${path}: ${safeStr(JSON.stringify(resp.data), 300)}`;
+        } catch (e) {
+          lastErr = `Erro tentando ${baseTry}${path}: ${safeStr(e?.message || e, 200)}`;
         }
-      } catch (e) {
-        lastErr = `Erro tentando ${path}: ${safeStr(e?.message || e, 200)}`;
       }
     }
   }
 
-  throw new Error(
-    `Não consegui gerar JWT no PagSchool com email/senha. Último erro: ${lastErr}. ` +
-      `Endpoints testados: ${endpoints.join(", ")}`
-  );
+  // Se tudo deu 404, provavelmente não existe login => vai cair pro BASIC
+  throw new Error(lastErr || "Não encontrei endpoint de login no PagSchool.");
 }
 
-async function getPagSchoolToken() {
-  const { fixedJwt } = getPagSchoolConfig();
-  if (fixedJwt) return fixedJwt;
+function authHeaderJWT(token) {
+  return { Authorization: `JWT ${String(token || "").trim()}` };
+}
 
+function authHeaderBearer(token) {
+  return { Authorization: `Bearer ${String(token || "").trim()}` };
+}
+
+function authHeaderBasic(email, password) {
+  return { Authorization: `Basic ${base64(`${email}:${password}`)}` };
+}
+
+async function getPagSchoolAuthHeaders() {
+  const { authType, fixedJwt, email, password } = getPagSchoolConfig();
+
+  // Forçar basic
+  if (authType === "basic") {
+    if (!email || !password) throw new Error("Para BASIC, configure PAGSCHOOL_EMAIL e PAGSCHOOL_PASSWORD.");
+    tokenCache.mode = "basic";
+    return authHeaderBasic(email, password);
+  }
+
+  // Forçar jwt/bearer (token fixo)
+  if (fixedJwt) {
+    tokenCache.mode = "jwt";
+    if (authType === "bearer") return authHeaderBearer(fixedJwt);
+    return authHeaderJWT(fixedJwt);
+  }
+
+  // AUTO:
+  // se já decidimos modo basic, usa basic
+  if (tokenCache.mode === "basic") {
+    if (!email || !password) throw new Error("Para BASIC, configure PAGSCHOOL_EMAIL e PAGSCHOOL_PASSWORD.");
+    return authHeaderBasic(email, password);
+  }
+
+  // evita ficar tentando login toda hora se já vimos que não existe
+  if (Date.now() < tokenCache.loginUnsupportedUntil) {
+    tokenCache.mode = "basic";
+    if (!email || !password) throw new Error("Para BASIC, configure PAGSCHOOL_EMAIL e PAGSCHOOL_PASSWORD.");
+    return authHeaderBasic(email, password);
+  }
+
+  // tenta JWT
   const now = Date.now();
-  // se ainda válido por mais 2 minutos, reutiliza
-  if (tokenCache.token && tokenCache.expMs && now < tokenCache.expMs - 2 * 60 * 1000) {
-    return tokenCache.token;
+  if (tokenCache.token) {
+    // se tem exp, respeita
+    if (tokenCache.expMs && now < tokenCache.expMs - 2 * 60 * 1000) {
+      tokenCache.mode = "jwt";
+      return authHeaderJWT(tokenCache.token);
+    }
+    // se não tem exp, usa cache por 50min
+    if (!tokenCache.expMs && tokenCache.fallbackExp && now < tokenCache.fallbackExp) {
+      tokenCache.mode = "jwt";
+      return authHeaderJWT(tokenCache.token);
+    }
   }
 
-  // se não tem exp no JWT, usa cache por 50 min
-  if (tokenCache.token && !tokenCache.expMs && tokenCache._fallbackExp && now < tokenCache._fallbackExp) {
-    return tokenCache.token;
+  try {
+    const token = await tryPagSchoolLogin();
+    tokenCache.token = token;
+
+    const expMs = decodeJwtExpMs(token);
+    tokenCache.expMs = expMs || 0;
+    tokenCache.fallbackExp = expMs ? 0 : Date.now() + 50 * 60 * 1000;
+
+    tokenCache.mode = "jwt";
+    return authHeaderJWT(token);
+  } catch (e) {
+    // se não existe endpoint de login, cai para basic por 30min sem tentar de novo
+    console.log("[PAGSCHOOL] não achei login/JWT, vou usar BASIC. Motivo:", safeStr(e?.message || e, 300));
+    tokenCache.loginUnsupportedUntil = Date.now() + 30 * 60 * 1000;
+
+    tokenCache.mode = "basic";
+    if (!email || !password) throw new Error("Para BASIC, configure PAGSCHOOL_EMAIL e PAGSCHOOL_PASSWORD.");
+    return authHeaderBasic(email, password);
   }
-
-  const token = await tryPagSchoolLogin();
-  tokenCache.token = token;
-
-  const expMs = decodeJwtExpMs(token);
-  tokenCache.expMs = expMs || 0;
-  if (!expMs) tokenCache._fallbackExp = Date.now() + 50 * 60 * 1000;
-
-  return token;
 }
 
 async function pagschoolRequest({ method, path, data, params }) {
   const { base } = getPagSchoolConfig();
-  const token = await getPagSchoolToken();
-
   const url = base + (path.startsWith("/") ? path : `/${path}`);
-  const headers = {
-    "Content-Type": "application/json",
-    ...authHeaderFor(token),
-  };
+
+  const authHeaders = await getPagSchoolAuthHeaders();
 
   const resp = await axios({
     method,
@@ -288,7 +337,10 @@ async function pagschoolRequest({ method, path, data, params }) {
     params,
     timeout: 20000,
     validateStatus: () => true,
-    headers,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders,
+    },
   });
 
   return resp;
@@ -304,10 +356,11 @@ async function pagschoolGetBoleto({ cpf, codigoEscola }) {
     data: { cpf: onlyDigits(cpf), codigoEscola: String(codigoEscola || "") },
   });
 
+  console.log("[PAGSCHOOL] mode:", tokenCache.mode || "auto");
   console.log("[PAGSCHOOL] status:", resp.status);
   console.log("[PAGSCHOOL] data:", safeStr(JSON.stringify(resp.data)));
 
-  // se POST não for aceito, tenta GET com query
+  // fallback GET se POST não for aceito
   if (resp.status === 404 || resp.status === 405) {
     resp = await pagschoolRequest({
       method: "get",
@@ -344,15 +397,13 @@ function getSession(phone) {
 }
 
 function setSession(phone, data) {
-  const key = normalizePhoneBR(phone);
-  sessions.set(key, { ...data, updatedAt: Date.now() });
+  sessions.set(normalizePhoneBR(phone), { ...data, updatedAt: Date.now() });
 }
 
 function clearSession(phone) {
   sessions.delete(normalizePhoneBR(phone));
 }
 
-// limpa sessões antigas
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of sessions.entries()) {
@@ -387,7 +438,7 @@ function extractText(body) {
 }
 
 /* =========================
-   ROTAS
+   Rotas
 ========================= */
 app.get("/", (req, res) => {
   const { sendUrl, apiKey } = getFacilitaFlowConfig();
@@ -402,86 +453,33 @@ app.get("/", (req, res) => {
       authType,
       emailConfigured: Boolean(email),
       jwtFixedConfigured: Boolean(fixedJwt),
-      tokenCached: Boolean(tokenCache.token),
-      lastLoginEndpointOk: tokenCache.lastOkEndpoint || null,
+      modeDecidido: tokenCache.mode || null,
+      lastOkLogin: tokenCache.lastOkEndpoint || null,
       boletoEndpoint,
       codigoEscolaPadrao: codigoPadrao || null,
     },
-    routes: ["/pagschool/aluno/new", "/debug/send", "/debug/routes", "/debug/pagschool/token", "/ff/inbound", "/boleto"],
+    routes: ["/debug/pagschool/info", "/boleto", "/ff/inbound"],
   });
 });
 
-app.get("/debug/routes", (req, res) => {
-  const routes = [];
-  app._router?.stack?.forEach((m) => {
-    if (m.route?.path) {
-      const methods = Object.keys(m.route.methods || {}).map((x) => x.toUpperCase());
-      routes.push({ path: m.route.path, methods });
-    }
-  });
-  res.json({ ok: true, build: BUILD, routes });
-});
-
-// debug: ver se consegue gerar token (sem mostrar token)
-app.get("/debug/pagschool/token", async (req, res) => {
+// mostra qual modo está sendo usado (jwt/basic) sem expor nada
+app.get("/debug/pagschool/info", async (req, res) => {
   try {
-    const token = await getPagSchoolToken();
-    const expMs = decodeJwtExpMs(token) || tokenCache.expMs || 0;
+    const { base, authType, email } = getPagSchoolConfig();
+    const headers = await getPagSchoolAuthHeaders(); // isso decide jwt/basic no auto
     res.json({
       ok: true,
       build: BUILD,
-      tokenGenerated: Boolean(token),
-      expMs: expMs || null,
-      lastOkEndpoint: tokenCache.lastOkEndpoint || null,
+      base,
+      authType,
+      emailConfigured: Boolean(email),
+      mode: tokenCache.mode || "auto",
+      hasAuthHeader: Boolean(headers?.Authorization),
+      lastOkLogin: tokenCache.lastOkEndpoint || null,
+      loginUnsupportedUntil: tokenCache.loginUnsupportedUntil || null,
     });
   } catch (err) {
     res.status(500).json({ ok: false, build: BUILD, error: String(err?.message || err) });
-  }
-});
-
-// página simples de teste do FacilitaFlow
-app.get(["/pagschool/aluno/new", "/pagschool/aluno/new/"], (req, res) => {
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.end(`
-<!doctype html>
-<html lang="pt-br">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Teste</title>
-  <style>
-    body{font-family:Arial,sans-serif;padding:20px;max-width:760px;margin:0 auto;}
-    input,textarea,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box;}
-    button{cursor:pointer;}
-    .small{font-size:12px;color:#444;}
-  </style>
-</head>
-<body>
-  <h2>Teste de envio (FacilitaFlow)</h2>
-  <p class="small">Build: ${BUILD}</p>
-  <form method="POST" action="/debug/send">
-    <label>Telefone</label>
-    <input name="phone" placeholder="13981484410" />
-    <label>Mensagem</label>
-    <textarea name="message" rows="3" placeholder="ok"></textarea>
-    <button type="submit">Enviar</button>
-  </form>
-</body>
-</html>
-  `);
-});
-
-app.post("/debug/send", async (req, res) => {
-  try {
-    console.log("[DEBUG SEND] body:", safeStr(JSON.stringify(req.body)));
-    const { phone, message } = req.body || {};
-    if (!phone || !message) return res.status(400).json({ success: false, error: "Envie phone e message." });
-
-    const data = await sendToFacilitaFlow(phone, message);
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error("[DEBUG SEND] erro:", err?.message || err);
-    res.status(500).json({ success: false, error: "Erro interno", details: String(err?.message || err) });
   }
 });
 
@@ -492,11 +490,14 @@ app.post("/boleto", async (req, res) => {
     const { codigoPadrao } = getPagSchoolConfig();
 
     if (!cpf) return res.status(400).json({ ok: false, error: "Envie cpf no body." });
+
     const cod = String(codigoEscola || codigoPadrao || "").trim();
-    if (!cod) return res.status(400).json({ ok: false, error: "Envie codigoEscola ou configure PAGSCHOOL_CODIGO_ESCOLA_PADRAO." });
+    if (!cod) {
+      return res.status(400).json({ ok: false, error: "Envie codigoEscola ou configure PAGSCHOOL_CODIGO_ESCOLA_PADRAO." });
+    }
 
     const data = await pagschoolGetBoleto({ cpf, codigoEscola: cod });
-    res.json({ ok: true, data });
+    res.json({ ok: true, mode: tokenCache.mode || "auto", data });
   } catch (err) {
     console.error("[/boleto] erro:", err?.message || err);
     res.status(500).json({ ok: false, error: "Erro interno", details: String(err?.message || err) });
@@ -504,18 +505,15 @@ app.post("/boleto", async (req, res) => {
 });
 
 /* =========================
-   FLUXO: BOLETO -> CPF -> PagSchool -> responde
+   Fluxo: BOLETO -> CPF -> PagSchool -> responde
 ========================= */
 app.post("/ff/inbound", async (req, res) => {
   try {
     const body = req.body || {};
     console.log("[FF INBOUND] body:", safeStr(JSON.stringify(body)));
 
-    const phoneRaw = extractPhone(body);
-    const textRaw = extractText(body);
-
-    const phone = normalizePhoneBR(phoneRaw);
-    const text = String(textRaw || "").trim();
+    const phone = normalizePhoneBR(extractPhone(body));
+    const text = String(extractText(body) || "").trim();
     const textUpper = upperTrim(text);
 
     if (!phone) return res.status(400).json({ success: false, error: "phone ausente no body" });
@@ -528,7 +526,6 @@ app.post("/ff/inbound", async (req, res) => {
 
     const session = getSession(phone);
 
-    // esperando CPF
     if (session.stage === "WAIT_CPF") {
       const cpf = onlyDigits(text);
       if (cpf.length !== 11) {
@@ -549,9 +546,6 @@ app.post("/ff/inbound", async (req, res) => {
       try {
         const boleto = await pagschoolGetBoleto({ cpf, codigoEscola });
 
-        const parts = [];
-        parts.push("✅ Encontrei seu boleto!");
-
         const linha =
           boleto?.linhaDigitavel ||
           boleto?.linha ||
@@ -561,12 +555,16 @@ app.post("/ff/inbound", async (req, res) => {
 
         const link = boleto?.link || boleto?.url || boleto?.pdf || boleto?.boletoUrl || "";
 
-        if (linha) parts.push(`\n📌 Linha digitável:\n${linha}`);
-        if (link) parts.push(`\n🔗 Link/2ª via:\n${link}`);
+        const msg = [
+          "✅ Encontrei seu boleto!",
+          linha ? `\n📌 Linha digitável:\n${linha}` : "",
+          link ? `\n🔗 Link/2ª via:\n${link}` : "",
+          !linha && !link ? `\n📄 Retorno:\n${safeStr(JSON.stringify(boleto), 1200)}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
 
-        if (!linha && !link) parts.push(`\n📄 Retorno:\n${safeStr(JSON.stringify(boleto), 1200)}`);
-
-        await sendToFacilitaFlow(phone, parts.join("\n"));
+        await sendToFacilitaFlow(phone, msg);
         clearSession(phone);
       } catch (e) {
         await sendToFacilitaFlow(
@@ -579,7 +577,6 @@ app.post("/ff/inbound", async (req, res) => {
       return res.json({ success: true });
     }
 
-    // esperando codigoEscola
     if (session.stage === "WAIT_CODIGO") {
       const cod = onlyDigits(text);
       if (!cod) {
@@ -597,9 +594,6 @@ app.post("/ff/inbound", async (req, res) => {
       try {
         const boleto = await pagschoolGetBoleto({ cpf, codigoEscola: cod });
 
-        const parts = [];
-        parts.push("✅ Encontrei seu boleto!");
-
         const linha =
           boleto?.linhaDigitavel ||
           boleto?.linha ||
@@ -609,12 +603,16 @@ app.post("/ff/inbound", async (req, res) => {
 
         const link = boleto?.link || boleto?.url || boleto?.pdf || boleto?.boletoUrl || "";
 
-        if (linha) parts.push(`\n📌 Linha digitável:\n${linha}`);
-        if (link) parts.push(`\n🔗 Link/2ª via:\n${link}`);
+        const msg = [
+          "✅ Encontrei seu boleto!",
+          linha ? `\n📌 Linha digitável:\n${linha}` : "",
+          link ? `\n🔗 Link/2ª via:\n${link}` : "",
+          !linha && !link ? `\n📄 Retorno:\n${safeStr(JSON.stringify(boleto), 1200)}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
 
-        if (!linha && !link) parts.push(`\n📄 Retorno:\n${safeStr(JSON.stringify(boleto), 1200)}`);
-
-        await sendToFacilitaFlow(phone, parts.join("\n"));
+        await sendToFacilitaFlow(phone, msg);
         clearSession(phone);
       } catch (e) {
         await sendToFacilitaFlow(
@@ -627,7 +625,6 @@ app.post("/ff/inbound", async (req, res) => {
       return res.json({ success: true });
     }
 
-    // estado IDLE
     if (textUpper.includes("BOLETO")) {
       setSession(phone, { stage: "WAIT_CPF" });
       await sendToFacilitaFlow(phone, "Certo ✅ Me envie seu CPF (11 números) para eu buscar a 2ª via do boleto.");
@@ -652,7 +649,8 @@ app.use((req, res) => {
 
 app.listen(PORT, () => {
   const { sendUrl, apiKey } = getFacilitaFlowConfig();
-  const { base, email, authType, boletoEndpoint } = getPagSchoolConfig();
+  const { base, email, authType, boletoEndpoint, codigoPadrao } = getPagSchoolConfig();
+
   console.log("=== BOOT", BUILD, "===");
   console.log("Server ON na porta", PORT);
   console.log("FacilitaFlow SEND URL:", sendUrl);
@@ -661,5 +659,5 @@ app.listen(PORT, () => {
   console.log("PagSchool EMAIL configurado?", Boolean(email));
   console.log("PagSchool AUTH TYPE:", authType);
   console.log("PagSchool boleto endpoint:", boletoEndpoint);
-  console.log("Rota teste:", "/pagschool/aluno/new");
+  console.log("codigoEscola padrão:", codigoPadrao || "(não definido)");
 });
