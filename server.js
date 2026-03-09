@@ -34,7 +34,8 @@ const FACILITAFLOW_SENDWEBHOOK_URL = (
   process.env.FACILITAFLOW_SENDWEBHOOK_URL || "https://licenca.facilitaflow.com.br/sendWebhook"
 ).replace(/\/$/, "");
 const FACILITAFLOW_API_TOKEN = process.env.FACILITAFLOW_API_TOKEN || "";
-const FACILITAFLOW_TOKENWEBHOOK = process.env.FACILITAFLOW_TOKENWEBHOOK || "";
+const FACILITAFLOW_TOKENWEBHOOK =
+  process.env.FACILITAFLOW_TOKENWEBHOOK || process.env.FACILITAFLOW_API_TOKEN || "";
 
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
 const INBOUND_SECRET = process.env.INBOUND_SECRET || "";
@@ -48,21 +49,26 @@ function onlyDigits(v) {
 
 function mustHaveEnv() {
   if (!PAGSCHOOL_ENDPOINT) throw new Error("PAGSCHOOL_ENDPOINT não configurado");
+
   if (!PAGSCHOOL_EMAIL || !PAGSCHOOL_PASSWORD) {
-    if (!PAGSCHOOL_TOKEN_FIXO) throw new Error("Configure PAGSCHOOL_EMAIL/PAGSCHOOL_PASSWORD (ou PAGSCHOOL_TOKEN)");
+    if (!PAGSCHOOL_TOKEN_FIXO) {
+      throw new Error("Configure PAGSCHOOL_EMAIL/PAGSCHOOL_PASSWORD (ou PAGSCHOOL_TOKEN)");
+    }
   }
-  if (!FACILITAFLOW_API_TOKEN) throw new Error("FACILITAFLOW_API_TOKEN não configurado");
-  if (!FACILITAFLOW_TOKENWEBHOOK) throw new Error("FACILITAFLOW_TOKENWEBHOOK não configurado");
+
+  if (!FACILITAFLOW_API_TOKEN) {
+    throw new Error("FACILITAFLOW_API_TOKEN não configurado");
+  }
 }
 
 function buildPagSchoolUrl(path) {
   const base = PAGSCHOOL_ENDPOINT.replace(/\/$/, "");
   const p = path.startsWith("/") ? path : `/${path}`;
 
-  // Se base termina com /api e path começa com /api/, evita /api/api/
   if (base.endsWith("/api") && p.startsWith("/api/")) {
     return base + p.replace("/api", "");
   }
+
   return base + p;
 }
 
@@ -70,7 +76,11 @@ function decodeJwtExpMs(token) {
   try {
     const parts = String(token).split(".");
     if (parts.length < 2) return 0;
-    const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+
+    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+
     if (!payload || !payload.exp) return 0;
     return payload.exp * 1000;
   } catch {
@@ -80,14 +90,44 @@ function decodeJwtExpMs(token) {
 
 function extractCpfFromText(text) {
   const t = String(text || "");
-  const m = t.match(/\b(\d{11})\b/);
-  return m ? m[1] : "";
+
+  const matchFormatado = t.match(/(\d{3}\.?\d{3}\.?\d{3}\-?\d{2})/);
+  if (matchFormatado) {
+    const cpf = onlyDigits(matchFormatado[1]);
+    if (cpf.length === 11) return cpf;
+  }
+
+  const match11 = t.match(/\b(\d{11})\b/);
+  if (match11) return match11[1];
+
+  return "";
+}
+
+function extractInboundText(messageNode) {
+  if (!messageNode || typeof messageNode !== "object") return "";
+
+  const msg = messageNode.message || {};
+
+  return (
+    msg.conversation ||
+    msg.extendedTextMessage?.text ||
+    msg.imageMessage?.caption ||
+    msg.videoMessage?.caption ||
+    msg.documentMessage?.caption ||
+    msg.buttonsResponseMessage?.selectedButtonId ||
+    msg.listResponseMessage?.title ||
+    msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    ""
+  );
 }
 
 function parseInbound(body) {
   const b = body || {};
 
-  const phone =
+  const ffMessage = b.message || {};
+  const rawPhone =
+    ffMessage.chatId ||
+    ffMessage.key?.remoteJid ||
     b.phone ||
     b.telefone ||
     b.from ||
@@ -95,20 +135,29 @@ function parseInbound(body) {
     (b.data && (b.data.phone || b.data.from)) ||
     "";
 
-  const message =
-    b.message ||
+  const phone = onlyDigits(String(rawPhone).split("@")[0]);
+
+  const textFromWebhook = extractInboundText(ffMessage);
+  const rawMessage =
+    textFromWebhook ||
     b.text ||
     b.body ||
     b.mensagem ||
     (b.data && b.data.message) ||
     "";
 
-  const cpf = b.cpf || extractCpfFromText(message);
+  const message = String(rawMessage || "").trim();
+  const cpf = onlyDigits(b.cpf || extractCpfFromText(message));
+  const fromMe = !!(ffMessage.key?.fromMe || ffMessage.fromMe);
+  const pushName = String(ffMessage.pushName || b.pushName || "").trim();
 
   return {
-    phone: onlyDigits(phone),
-    message: String(message || "").trim(),
-    cpf: onlyDigits(cpf),
+    phone,
+    message,
+    cpf,
+    fromMe,
+    pushName,
+    rawPhone: String(rawPhone || ""),
   };
 }
 
@@ -131,11 +180,15 @@ async function getPagSchoolToken() {
 
   for (const path of candidates) {
     const url = buildPagSchoolUrl(path);
+
     const resp = await axios.post(
       url,
       { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD },
       {
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         timeout: 12000,
         validateStatus: () => true,
       }
@@ -150,7 +203,9 @@ async function getPagSchoolToken() {
 
     lastErr = new Error(
       `Falha ao autenticar (${resp.status}) em ${path}. Resp: ${
-        typeof resp.data === "string" ? resp.data.slice(0, 200) : JSON.stringify(resp.data).slice(0, 200)
+        typeof resp.data === "string"
+          ? resp.data.slice(0, 200)
+          : JSON.stringify(resp.data).slice(0, 200)
       }`
     );
   }
@@ -182,22 +237,31 @@ async function pagschoolRequest(method, path, { params, data, responseType } = {
 
 /**
  * FacilitaFlow sendWebhook
- * IMPORTANTE: mandar desativarFluxo=true para não criar loop
  */
-async function sendToFacilitaFlow({ phone, message, desativarFluxo = true }) {
+async function sendToFacilitaFlow({
+  phone,
+  message,
+  arquivo,
+  desativarFluxo = true,
+}) {
   const body = {
+    apiKey: FACILITAFLOW_API_TOKEN,
     phone: onlyDigits(phone),
     message: String(message || ""),
-    apiKey: FACILITAFLOW_API_TOKEN,
-    tokenWebhook: FACILITAFLOW_TOKENWEBHOOK,
-
-    // compat (algumas validações antigas)
-    token: FACILITAFLOW_TOKENWEBHOOK,
-
     desativarFluxo: !!desativarFluxo,
   };
 
+  if (arquivo) {
+    body.arquivo = arquivo;
+  }
+
+  if (FACILITAFLOW_TOKENWEBHOOK) {
+    body.tokenWebhook = FACILITAFLOW_TOKENWEBHOOK;
+    body.token = FACILITAFLOW_TOKENWEBHOOK;
+  }
+
   const resp = await axios.post(FACILITAFLOW_SENDWEBHOOK_URL, body, {
+    headers: { "Content-Type": "application/json" },
     timeout: 12000,
     validateStatus: () => true,
   });
@@ -238,7 +302,9 @@ async function buscarContratosPorAluno(alunoId) {
   const resp = await pagschoolRequest("GET", `/api/contrato/by-aluno/${alunoId}`);
 
   if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(`Erro ao consultar contratos. status=${resp.status} body=${JSON.stringify(resp.data).slice(0, 500)}`);
+    throw new Error(
+      `Erro ao consultar contratos. status=${resp.status} body=${JSON.stringify(resp.data).slice(0, 500)}`
+    );
   }
 
   const contratos = Array.isArray(resp.data)
@@ -264,7 +330,11 @@ function escolherParcelaParaBoleto(contratos) {
   const abertas = parcelas.filter((p) => String(p?.status || "").toUpperCase() !== "PAGO");
   const list = abertas.length ? abertas : parcelas;
 
-  list.sort((a, b) => new Date(a?.vencimento || "2100-01-01") - new Date(b?.vencimento || "2100-01-01"));
+  list.sort(
+    (a, b) =>
+      new Date(a?.vencimento || "2100-01-01") -
+      new Date(b?.vencimento || "2100-01-01")
+  );
 
   return { contrato, parcela: list[0] || null };
 }
@@ -281,11 +351,12 @@ async function gerarBoletoDaParcela(parcelaId) {
     const resp = await pagschoolRequest("POST", p);
 
     if (resp.status >= 200 && resp.status < 300) return resp.data;
-
     last = resp;
   }
 
-  throw new Error(`Erro ao gerar boleto. status=${last?.status} body=${JSON.stringify(last?.data).slice(0, 500)}`);
+  throw new Error(
+    `Erro ao gerar boleto. status=${last?.status} body=${JSON.stringify(last?.data).slice(0, 500)}`
+  );
 }
 
 /**
@@ -294,18 +365,23 @@ async function gerarBoletoDaParcela(parcelaId) {
 const pendingCpf = new Map(); // phone -> expMs
 
 function setPendingCpf(phone) {
-  pendingCpf.set(onlyDigits(phone), Date.now() + 5 * 60 * 1000); // 5 min
+  pendingCpf.set(onlyDigits(phone), Date.now() + 5 * 60 * 1000);
 }
+
 function isPendingCpf(phone) {
   const p = onlyDigits(phone);
   const exp = pendingCpf.get(p);
+
   if (!exp) return false;
+
   if (exp < Date.now()) {
     pendingCpf.delete(p);
     return false;
   }
+
   return true;
 }
+
 function clearPendingCpf(phone) {
   pendingCpf.delete(onlyDigits(phone));
 }
@@ -313,6 +389,11 @@ function clearPendingCpf(phone) {
 /**
  * Rotas
  */
+app.get("/", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json({ ok: true, service: "pagschool-boleto-bot" });
+});
+
 app.get("/health", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.json({ ok: true, service: "pagschool-boleto-bot", time: new Date().toISOString() });
@@ -331,6 +412,7 @@ app.get("/debug/env", (req, res) => {
     FACILITAFLOW_API_TOKEN_SET: !!FACILITAFLOW_API_TOKEN,
     FACILITAFLOW_TOKENWEBHOOK_SET: !!FACILITAFLOW_TOKENWEBHOOK,
     PUBLIC_BASE_URL: PUBLIC_BASE_URL || "",
+    INBOUND_SECRET_SET: !!INBOUND_SECRET,
   });
 });
 
@@ -344,11 +426,9 @@ app.get("/debug/pagschool/auth", async (req, res) => {
   }
 });
 
-/**
- * PagSchool -> nosso webhook (não precisa fazer nada aqui por enquanto)
- */
 app.post("/webhook", (req, res) => {
   res.json({ ok: true });
+
   setImmediate(() => {
     try {
       console.log("[WEBHOOK PAGSCHOOL]", JSON.stringify(req.body || {}));
@@ -358,92 +438,100 @@ app.post("/webhook", (req, res) => {
 
 /**
  * FacilitaFlow -> nosso inbound
- * - Se vier "boleto" sem CPF: pede CPF no formato "CPF 123..."
- * - Se vier CPF: gera e envia boleto
- *
- * IMPORTANTÍSSIMO: esse endpoint é POST (GET vai dar 404)
  */
 app.post("/ff/inbound", async (req, res) => {
-  // responde rápido para não estourar timeout do FacilitaFlow
+  if (INBOUND_SECRET) {
+    const secret = req.headers["x-inbound-secret"];
+    if (secret !== INBOUND_SECRET) {
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+  }
+
   res.json({ ok: true });
 
   setImmediate(async () => {
+    let inbound = { phone: "", message: "", cpf: "", fromMe: false, pushName: "" };
+
     try {
       mustHaveEnv();
 
-      if (INBOUND_SECRET) {
-        const secret = req.headers["x-inbound-secret"];
-        if (secret !== INBOUND_SECRET) {
-          console.warn("[FF INBOUND] unauthorized secret");
-          return;
-        }
+      inbound = parseInbound(req.body);
+
+      console.log("[FF INBOUND RAW]", JSON.stringify(req.body || {}));
+      console.log("[FF INBOUND PARSED]", JSON.stringify(inbound));
+
+      if (inbound.fromMe) {
+        console.log("[FF INBOUND] ignorado: mensagem enviada pelo próprio bot");
+        return;
       }
 
-      const { phone, message, cpf } = parseInbound(req.body);
-
-      if (!phone) {
+      if (!inbound.phone) {
         console.warn("[FF INBOUND] sem phone. body=", JSON.stringify(req.body || {}));
         return;
       }
 
-      // Se a pessoa escreveu "boleto" (ou contém boleto)
-      const pediuBoleto = /(^|\s)boleto(\s|$)/i.test(message);
+      const pediuBoleto = /\bboleto\b/i.test(inbound.message);
+      const cpfValido = inbound.cpf && inbound.cpf.length === 11;
 
-      // Se já estamos esperando CPF e agora chegou CPF (no campo ou no texto)
-      const cpfValido = cpf && cpf.length === 11;
-
-      // 1) Se pediu boleto e ainda não tem CPF -> pedir CPF
       if (pediuBoleto && !cpfValido) {
-        setPendingCpf(phone);
+        setPendingCpf(inbound.phone);
+
         await sendToFacilitaFlow({
-          phone,
-          message: 'Para eu puxar a 2ª via, me envie seu CPF assim: "CPF 12345678901" (11 números). 😊',
+          phone: inbound.phone,
+          message:
+            'Para eu puxar a 2ª via, me envie seu CPF assim: "CPF 12345678901" (11 números). 😊',
         });
         return;
       }
 
-      // 2) Se estava pendente e veio CPF -> processar
-      if ((isPendingCpf(phone) || pediuBoleto || cpfValido) && cpfValido) {
-        clearPendingCpf(phone);
+      if ((isPendingCpf(inbound.phone) || pediuBoleto || cpfValido) && cpfValido) {
+        clearPendingCpf(inbound.phone);
 
-        await sendToFacilitaFlow({ phone, message: "Só um instante… vou buscar seu boleto 😊" });
+        await sendToFacilitaFlow({
+          phone: inbound.phone,
+          message: "Só um instante… vou buscar seu boleto 😊",
+        });
 
-        const aluno = await buscarAlunoPorCpf(cpf);
+        const aluno = await buscarAlunoPorCpf(inbound.cpf);
+
         if (!aluno) {
           await sendToFacilitaFlow({
-            phone,
-            message: "Não encontrei esse CPF na PagSchool. Confere se digitou certinho (11 números).",
+            phone: inbound.phone,
+            message: "Não encontrei esse CPF na PagSchool. Confere se digitou certinho com 11 números.",
           });
           return;
         }
 
         const contratos = await buscarContratosPorAluno(aluno.id);
+
         if (!contratos.length) {
           await sendToFacilitaFlow({
-            phone,
-            message: "Achei seu cadastro, mas não encontrei contrato. Se quiser, me chama que eu verifico. 😊",
+            phone: inbound.phone,
+            message: "Achei seu cadastro, mas não encontrei contrato. Vou precisar verificar. 😊",
           });
           return;
         }
 
         const { contrato, parcela } = escolherParcelaParaBoleto(contratos);
+
         if (!contrato || !parcela?.id) {
           await sendToFacilitaFlow({
-            phone,
-            message: "Encontrei seu contrato, mas não consegui identificar uma parcela válida. Vou precisar verificar. 😊",
+            phone: inbound.phone,
+            message:
+              "Encontrei seu contrato, mas não consegui identificar uma parcela válida. Vou verificar. 😊",
           });
           return;
         }
 
         const gerada = await gerarBoletoDaParcela(parcela.id);
 
-        const nossoNumero = gerada?.nossoNumero || parcela?.nossoNumero;
+        const nossoNumero = gerada?.nossoNumero || parcela?.nossoNumero || "";
         const numeroBoleto = gerada?.numeroBoleto || parcela?.numeroBoleto || "";
 
         if (!nossoNumero) {
           await sendToFacilitaFlow({
-            phone,
-            message: "Gerei a solicitação, mas não recebi o nosso número do boleto. Vou verificar aqui. 😊",
+            phone: inbound.phone,
+            message: "Gerei a solicitação, mas não recebi o nosso número do boleto. Vou verificar. 😊",
           });
           return;
         }
@@ -455,20 +543,34 @@ app.post("/ff/inbound", async (req, res) => {
           `✅ Aqui está a 2ª via do seu boleto:\n${pdfUrl}` +
           (numeroBoleto ? `\n\nLinha digitável:\n${numeroBoleto}` : "");
 
-        await sendToFacilitaFlow({ phone, message: texto });
+        await sendToFacilitaFlow({
+          phone: inbound.phone,
+          message: texto,
+        });
+
         return;
       }
 
-      // 3) Se não é boleto e nem CPF, ignora
       return;
     } catch (e) {
       console.error("[FF INBOUND] erro:", e.message);
+
+      if (inbound.phone) {
+        try {
+          await sendToFacilitaFlow({
+            phone: inbound.phone,
+            message: "Tive um erro ao buscar seu boleto agora. Me chama novamente em instantes. 😊",
+          });
+        } catch (sendErr) {
+          console.error("[FF INBOUND] erro ao enviar mensagem de falha:", sendErr.message);
+        }
+      }
     }
   });
 });
 
 /**
- * Proxy do PDF (para você mandar um link público no WhatsApp)
+ * Proxy do PDF
  */
 app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   try {
@@ -476,9 +578,11 @@ app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
 
     const { parcelaId, nossoNumero } = req.params;
 
-    const resp = await pagschoolRequest("GET", `/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`, {
-      responseType: "arraybuffer",
-    });
+    const resp = await pagschoolRequest(
+      "GET",
+      `/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
+      { responseType: "arraybuffer" }
+    );
 
     if (resp.status < 200 || resp.status >= 300) {
       return res.status(resp.status).send(Buffer.from(resp.data || ""));
