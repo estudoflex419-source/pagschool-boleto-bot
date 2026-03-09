@@ -47,6 +47,15 @@ function onlyDigits(v) {
   return String(v || "").replace(/\D/g, "");
 }
 
+function shortJson(v, max = 500) {
+  try {
+    const s = typeof v === "string" ? v : JSON.stringify(v);
+    return s.length > max ? `${s.slice(0, max)}...` : s;
+  } catch {
+    return String(v);
+  }
+}
+
 function mustHaveEnv() {
   if (!PAGSCHOOL_ENDPOINT) throw new Error("PAGSCHOOL_ENDPOINT não configurado");
 
@@ -105,9 +114,7 @@ function extractCpfFromText(text) {
 
 function extractInboundText(node) {
   if (!node) return "";
-
   if (typeof node === "string") return node;
-
   if (typeof node !== "object") return "";
 
   return (
@@ -162,7 +169,6 @@ function parseInbound(body) {
     "";
 
   const message = String(rawMessage || "").trim();
-
   const cpf = onlyDigits(b.cpf || extractCpfFromText(message));
 
   const fromMe = !!(
@@ -207,6 +213,7 @@ async function getPagSchoolToken() {
 
   for (const path of candidates) {
     const url = buildPagSchoolUrl(path);
+    console.log("[PAGSCHOOL AUTH] tentando", url);
 
     const resp = await axios.post(
       url,
@@ -221,6 +228,8 @@ async function getPagSchoolToken() {
       }
     );
 
+    console.log("[PAGSCHOOL AUTH] status=", resp.status, "body=", shortJson(resp.data, 300));
+
     if (resp.status >= 200 && resp.status < 300 && resp.data && resp.data.token) {
       const token = resp.data.token;
       const expMs = decodeJwtExpMs(token) || Date.now() + 50 * 60 * 1000;
@@ -229,11 +238,7 @@ async function getPagSchoolToken() {
     }
 
     lastErr = new Error(
-      `Falha ao autenticar (${resp.status}) em ${path}. Resp: ${
-        typeof resp.data === "string"
-          ? resp.data.slice(0, 200)
-          : JSON.stringify(resp.data).slice(0, 200)
-      }`
+      `Falha ao autenticar (${resp.status}) em ${path}. Resp: ${shortJson(resp.data, 300)}`
     );
   }
 
@@ -243,6 +248,8 @@ async function getPagSchoolToken() {
 async function pagschoolRequest(method, path, { params, data, responseType } = {}) {
   const token = await getPagSchoolToken();
   const url = buildPagSchoolUrl(path);
+
+  console.log("[PAGSCHOOL REQ]", method, url, "params=", shortJson(params, 200), "data=", shortJson(data, 200));
 
   const resp = await axios({
     method,
@@ -258,6 +265,16 @@ async function pagschoolRequest(method, path, { params, data, responseType } = {
     timeout: 12000,
     validateStatus: () => true,
   });
+
+  console.log(
+    "[PAGSCHOOL RESP]",
+    method,
+    path,
+    "status=",
+    resp.status,
+    "body=",
+    responseType === "arraybuffer" ? `[arraybuffer ${resp.data?.length || 0}]` : shortJson(resp.data, 400)
+  );
 
   return resp;
 }
@@ -287,11 +304,35 @@ async function sendToFacilitaFlow({
     body.token = FACILITAFLOW_TOKENWEBHOOK;
   }
 
+  console.log("[FACILITAFLOW SEND] url=", FACILITAFLOW_SENDWEBHOOK_URL);
+  console.log(
+    "[FACILITAFLOW SEND] body=",
+    shortJson(
+      {
+        ...body,
+        apiKey: body.apiKey ? "***set***" : "",
+        tokenWebhook: body.tokenWebhook ? "***set***" : "",
+        token: body.token ? "***set***" : "",
+      },
+      400
+    )
+  );
+
   const resp = await axios.post(FACILITAFLOW_SENDWEBHOOK_URL, body, {
     headers: { "Content-Type": "application/json" },
     timeout: 12000,
     validateStatus: () => true,
   });
+
+  console.log("[FACILITAFLOW SEND] status=", resp.status, "data=", shortJson(resp.data, 500));
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Falha no sendWebhook. status=${resp.status} data=${shortJson(resp.data, 400)}`);
+  }
+
+  if (resp.data && typeof resp.data === "object" && resp.data.success === false) {
+    throw new Error(`sendWebhook respondeu success=false. data=${shortJson(resp.data, 400)}`);
+  }
 
   return { status: resp.status, data: resp.data };
 }
@@ -303,6 +344,8 @@ async function buscarAlunoPorCpf(cpf) {
   const tries = [{ cpf }, { filter: cpf }, { search: cpf }, { termo: cpf }];
 
   for (const params of tries) {
+    console.log("[BUSCAR ALUNO] tentando params=", shortJson(params, 120));
+
     const resp = await pagschoolRequest("GET", "/api/aluno/all", { params });
 
     if (resp.status < 200 || resp.status >= 300) continue;
@@ -316,21 +359,28 @@ async function buscarAlunoPorCpf(cpf) {
       ? data.alunos
       : [];
 
+    console.log("[BUSCAR ALUNO] rows encontradas=", rows.length);
+
     if (!rows.length) continue;
 
     const found = rows.find((a) => onlyDigits(a?.cpf) === onlyDigits(cpf)) || rows[0];
+
+    console.log("[BUSCAR ALUNO] aluno encontrado=", shortJson(found, 300));
     if (found) return found;
   }
 
+  console.log("[BUSCAR ALUNO] nenhum aluno encontrado para CPF", cpf);
   return null;
 }
 
 async function buscarContratosPorAluno(alunoId) {
+  console.log("[BUSCAR CONTRATOS] alunoId=", alunoId);
+
   const resp = await pagschoolRequest("GET", `/api/contrato/by-aluno/${alunoId}`);
 
   if (resp.status < 200 || resp.status >= 300) {
     throw new Error(
-      `Erro ao consultar contratos. status=${resp.status} body=${JSON.stringify(resp.data).slice(0, 500)}`
+      `Erro ao consultar contratos. status=${resp.status} body=${shortJson(resp.data, 500)}`
     );
   }
 
@@ -341,6 +391,8 @@ async function buscarContratosPorAluno(alunoId) {
     : Array.isArray(resp.data?.contratos)
     ? resp.data.contratos
     : [];
+
+  console.log("[BUSCAR CONTRATOS] quantidade=", contratos.length);
 
   return contratos;
 }
@@ -375,14 +427,20 @@ async function gerarBoletoDaParcela(parcelaId) {
   let last = null;
 
   for (const p of paths) {
+    console.log("[GERAR BOLETO] tentando", p);
+
     const resp = await pagschoolRequest("POST", p);
 
-    if (resp.status >= 200 && resp.status < 300) return resp.data;
+    if (resp.status >= 200 && resp.status < 300) {
+      console.log("[GERAR BOLETO] sucesso body=", shortJson(resp.data, 400));
+      return resp.data;
+    }
+
     last = resp;
   }
 
   throw new Error(
-    `Erro ao gerar boleto. status=${last?.status} body=${JSON.stringify(last?.data).slice(0, 500)}`
+    `Erro ao gerar boleto. status=${last?.status} body=${shortJson(last?.data, 500)}`
   );
 }
 
@@ -393,6 +451,7 @@ const pendingCpf = new Map();
 
 function setPendingCpf(phone) {
   pendingCpf.set(onlyDigits(phone), Date.now() + 5 * 60 * 1000);
+  console.log("[PENDING CPF] set", onlyDigits(phone));
 }
 
 function isPendingCpf(phone) {
@@ -411,6 +470,7 @@ function isPendingCpf(phone) {
 
 function clearPendingCpf(phone) {
   pendingCpf.delete(onlyDigits(phone));
+  console.log("[PENDING CPF] clear", onlyDigits(phone));
 }
 
 /**
@@ -463,9 +523,6 @@ app.post("/webhook", (req, res) => {
   });
 });
 
-/**
- * FacilitaFlow -> nosso inbound
- */
 app.post("/ff/inbound", async (req, res) => {
   if (INBOUND_SECRET) {
     const secret = req.headers["x-inbound-secret"];
@@ -484,7 +541,8 @@ app.post("/ff/inbound", async (req, res) => {
 
       inbound = parseInbound(req.body);
 
-      console.log("[FF INBOUND RAW]", JSON.stringify(req.body || {}));
+      console.log("[FF INBOUND RAW]");
+      console.log(shortJson(req.body || {}, 3000));
       console.log("[FF INBOUND PARSED]", JSON.stringify(inbound));
 
       if (inbound.fromMe) {
@@ -493,26 +551,44 @@ app.post("/ff/inbound", async (req, res) => {
       }
 
       if (!inbound.phone) {
-        console.warn("[FF INBOUND] sem phone. body=", JSON.stringify(req.body || {}));
+        console.warn("[FF INBOUND] sem phone. body=", shortJson(req.body || {}, 2000));
         return;
       }
 
       const pediuBoleto = /\bboleto\b/i.test(inbound.message);
       const cpfValido = inbound.cpf && inbound.cpf.length === 11;
 
+      console.log(
+        "[FF FLOW] phone=",
+        inbound.phone,
+        "message=",
+        inbound.message,
+        "cpf=",
+        inbound.cpf,
+        "pediuBoleto=",
+        pediuBoleto,
+        "cpfValido=",
+        cpfValido,
+        "pending=",
+        isPendingCpf(inbound.phone)
+      );
+
       if (pediuBoleto && !cpfValido) {
         setPendingCpf(inbound.phone);
 
         await sendToFacilitaFlow({
           phone: inbound.phone,
-          message:
-            'Para eu puxar a 2ª via, me envie seu CPF assim: "CPF 12345678901" (11 números). 😊',
+          message: 'Para eu puxar a 2ª via, me envie seu CPF assim: "CPF 12345678901" (11 números). 😊',
         });
+
+        console.log("[FF FLOW] pediu boleto sem CPF -> mensagem de solicitação enviada");
         return;
       }
 
       if ((isPendingCpf(inbound.phone) || pediuBoleto || cpfValido) && cpfValido) {
         clearPendingCpf(inbound.phone);
+
+        console.log("[FF FLOW] iniciando busca do boleto para CPF", inbound.cpf);
 
         await sendToFacilitaFlow({
           phone: inbound.phone,
@@ -526,8 +602,11 @@ app.post("/ff/inbound", async (req, res) => {
             phone: inbound.phone,
             message: "Não encontrei esse CPF na PagSchool. Confere se digitou certinho com 11 números.",
           });
+          console.log("[FF FLOW] aluno não encontrado");
           return;
         }
+
+        console.log("[FF FLOW] aluno ok id=", aluno.id, "nome=", aluno.nome || aluno.nomeAluno || "");
 
         const contratos = await buscarContratosPorAluno(aluno.id);
 
@@ -536,17 +615,44 @@ app.post("/ff/inbound", async (req, res) => {
             phone: inbound.phone,
             message: "Achei seu cadastro, mas não encontrei contrato. Vou precisar verificar. 😊",
           });
+          console.log("[FF FLOW] sem contratos");
           return;
         }
 
         const { contrato, parcela } = escolherParcelaParaBoleto(contratos);
 
+        console.log(
+          "[FF FLOW] contrato escolhido=",
+          shortJson(
+            contrato
+              ? { id: contrato.id, status: contrato.status, parcelas: Array.isArray(contrato.parcelas) ? contrato.parcelas.length : 0 }
+              : null,
+            300
+          )
+        );
+
+        console.log(
+          "[FF FLOW] parcela escolhida=",
+          shortJson(
+            parcela
+              ? {
+                  id: parcela.id,
+                  status: parcela.status,
+                  vencimento: parcela.vencimento,
+                  nossoNumero: parcela.nossoNumero,
+                  numeroBoleto: parcela.numeroBoleto,
+                }
+              : null,
+            300
+          )
+        );
+
         if (!contrato || !parcela?.id) {
           await sendToFacilitaFlow({
             phone: inbound.phone,
-            message:
-              "Encontrei seu contrato, mas não consegui identificar uma parcela válida. Vou verificar. 😊",
+            message: "Encontrei seu contrato, mas não consegui identificar uma parcela válida. Vou verificar. 😊",
           });
+          console.log("[FF FLOW] sem parcela válida");
           return;
         }
 
@@ -555,16 +661,24 @@ app.post("/ff/inbound", async (req, res) => {
         const nossoNumero = gerada?.nossoNumero || parcela?.nossoNumero || "";
         const numeroBoleto = gerada?.numeroBoleto || parcela?.numeroBoleto || "";
 
+        console.log(
+          "[FF FLOW] boleto gerado dados=",
+          shortJson({ nossoNumero, numeroBoleto, gerada }, 500)
+        );
+
         if (!nossoNumero) {
           await sendToFacilitaFlow({
             phone: inbound.phone,
             message: "Gerei a solicitação, mas não recebi o nosso número do boleto. Vou verificar. 😊",
           });
+          console.log("[FF FLOW] sem nossoNumero");
           return;
         }
 
         const publicBase = (PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
         const pdfUrl = `${publicBase}/boleto/pdf/${parcela.id}/${encodeURIComponent(nossoNumero)}`;
+
+        console.log("[FF FLOW] pdfUrl=", pdfUrl);
 
         const texto =
           `✅ Aqui está a 2ª via do seu boleto:\n${pdfUrl}` +
@@ -575,12 +689,17 @@ app.post("/ff/inbound", async (req, res) => {
           message: texto,
         });
 
+        console.log("[FF FLOW] boleto enviado com sucesso");
         return;
       }
 
+      console.log("[FF FLOW] mensagem ignorada: não entrou em boleto/cpf");
       return;
     } catch (e) {
       console.error("[FF INBOUND] erro:", e.message);
+      if (e.stack) {
+        console.error("[FF INBOUND] stack:", e.stack);
+      }
 
       if (inbound.phone) {
         try {
@@ -596,14 +715,13 @@ app.post("/ff/inbound", async (req, res) => {
   });
 });
 
-/**
- * Proxy do PDF
- */
 app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   try {
     mustHaveEnv();
 
     const { parcelaId, nossoNumero } = req.params;
+
+    console.log("[PDF] solicitando PDF parcelaId=", parcelaId, "nossoNumero=", nossoNumero);
 
     const resp = await pagschoolRequest(
       "GET",
@@ -612,8 +730,11 @@ app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
     );
 
     if (resp.status < 200 || resp.status >= 300) {
+      console.log("[PDF] erro status=", resp.status);
       return res.status(resp.status).send(Buffer.from(resp.data || ""));
     }
+
+    console.log("[PDF] sucesso tamanho=", resp.data?.length || 0);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", "inline; filename=boleto.pdf");
