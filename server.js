@@ -103,20 +103,32 @@ function extractCpfFromText(text) {
   return "";
 }
 
-function extractInboundText(messageNode) {
-  if (!messageNode || typeof messageNode !== "object") return "";
+function extractInboundText(node) {
+  if (!node) return "";
 
-  const msg = messageNode.message || {};
+  if (typeof node === "string") return node;
+
+  if (typeof node !== "object") return "";
 
   return (
-    msg.conversation ||
-    msg.extendedTextMessage?.text ||
-    msg.imageMessage?.caption ||
-    msg.videoMessage?.caption ||
-    msg.documentMessage?.caption ||
-    msg.buttonsResponseMessage?.selectedButtonId ||
-    msg.listResponseMessage?.title ||
-    msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    node.conversation ||
+    node.extendedTextMessage?.text ||
+    node.imageMessage?.caption ||
+    node.videoMessage?.caption ||
+    node.documentMessage?.caption ||
+    node.buttonsResponseMessage?.selectedButtonId ||
+    node.listResponseMessage?.title ||
+    node.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    node.templateButtonReplyMessage?.selectedId ||
+    node.interactiveResponseMessage?.body?.text ||
+    node.message?.conversation ||
+    node.message?.extendedTextMessage?.text ||
+    node.message?.imageMessage?.caption ||
+    node.message?.videoMessage?.caption ||
+    node.message?.documentMessage?.caption ||
+    node.message?.buttonsResponseMessage?.selectedButtonId ||
+    node.message?.listResponseMessage?.title ||
+    node.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
     ""
   );
 }
@@ -124,32 +136,48 @@ function extractInboundText(messageNode) {
 function parseInbound(body) {
   const b = body || {};
 
-  const ffMessage = b.message || {};
   const rawPhone =
-    ffMessage.chatId ||
-    ffMessage.key?.remoteJid ||
+    b.chatId ||
     b.phone ||
     b.telefone ||
     b.from ||
     b.numero ||
-    (b.data && (b.data.phone || b.data.from)) ||
+    b.remoteJid ||
+    b.key?.remoteJid ||
+    b.message?.chatId ||
+    b.message?.remoteJid ||
+    b.message?.key?.remoteJid ||
+    (b.data && (b.data.phone || b.data.from || b.data.chatId)) ||
     "";
 
   const phone = onlyDigits(String(rawPhone).split("@")[0]);
 
-  const textFromWebhook = extractInboundText(ffMessage);
   const rawMessage =
-    textFromWebhook ||
+    extractInboundText(b.message) ||
+    extractInboundText(b) ||
     b.text ||
     b.body ||
     b.mensagem ||
-    (b.data && b.data.message) ||
+    (b.data && (b.data.message || b.data.text || b.data.body)) ||
     "";
 
   const message = String(rawMessage || "").trim();
+
   const cpf = onlyDigits(b.cpf || extractCpfFromText(message));
-  const fromMe = !!(ffMessage.key?.fromMe || ffMessage.fromMe);
-  const pushName = String(ffMessage.pushName || b.pushName || "").trim();
+
+  const fromMe = !!(
+    b.fromMe ||
+    b.key?.fromMe ||
+    b.message?.fromMe ||
+    b.message?.key?.fromMe
+  );
+
+  const pushName = String(
+    b.pushName ||
+      b.message?.pushName ||
+      (b.data && b.data.pushName) ||
+      ""
+  ).trim();
 
   return {
     phone,
@@ -175,7 +203,6 @@ async function getPagSchoolToken() {
   }
 
   const candidates = ["/api/authenticate", "/auth/authenticate"];
-
   let lastErr = null;
 
   for (const path of candidates) {
@@ -362,7 +389,7 @@ async function gerarBoletoDaParcela(parcelaId) {
 /**
  * Conversa: guarda “pendente CPF”
  */
-const pendingCpf = new Map(); // phone -> expMs
+const pendingCpf = new Map();
 
 function setPendingCpf(phone) {
   pendingCpf.set(onlyDigits(phone), Date.now() + 5 * 60 * 1000);
