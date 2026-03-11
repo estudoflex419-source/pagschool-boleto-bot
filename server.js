@@ -7,6 +7,7 @@ const morgan = require("morgan");
 const axios = require("axios");
 
 const app = express();
+
 app.use(cors());
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan("combined"));
@@ -14,6 +15,7 @@ app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
 const PORT = Number(process.env.PORT || 3000);
+
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
 
 const META_VERIFY_TOKEN = String(process.env.META_VERIFY_TOKEN || "");
@@ -28,148 +30,41 @@ const PAGSCHOOL_PASSWORD = String(process.env.PAGSCHOOL_PASSWORD || "");
 const tokenCache = {
   token: "",
   exp: 0,
-  codigoEscola: "",
 };
 
 const conversations = new Map();
+
+/* =========================
+   UTILS
+========================= */
 
 function onlyDigits(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-function isCpf(value) {
-  return onlyDigits(value).length === 11;
-}
-
 function normalizePhone(value) {
-  let digits = onlyDigits(value);
-
+  const digits = onlyDigits(value);
   if (!digits) return "";
   if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) return digits;
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
   return digits;
 }
 
+function isCpf(value) {
+  return onlyDigits(value).length === 11;
+}
+
 function formatDateBR(value) {
   if (!value) return "";
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleDateString("pt-BR");
+  if (!Number.isNaN(d.getTime())) return d.toLocaleDateString("pt-BR");
+  return String(value);
 }
 
 function formatCurrencyBR(value) {
   const num = Number(value || 0);
   if (Number.isNaN(num)) return String(value || "");
   return num.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function getConversation(phone) {
-  const key = normalizePhone(phone);
-  if (!conversations.has(key)) {
-    conversations.set(key, {
-      step: "idle",
-      lastCpf: "",
-      updatedAt: Date.now(),
-    });
-  }
-  const convo = conversations.get(key);
-  convo.updatedAt = Date.now();
-  return convo;
-}
-
-function resetConversation(phone) {
-  conversations.set(normalizePhone(phone), {
-    step: "idle",
-    lastCpf: "",
-    updatedAt: Date.now(),
-  });
-}
-
-function cleanupConversations() {
-  const now = Date.now();
-  for (const [key, value] of conversations.entries()) {
-    if (now - Number(value.updatedAt || 0) > 1000 * 60 * 60 * 6) {
-      conversations.delete(key);
-    }
-  }
-}
-setInterval(cleanupConversations, 1000 * 60 * 30).unref();
-
-function requireMetaEnv() {
-  if (!META_VERIFY_TOKEN) throw new Error("Faltou META_VERIFY_TOKEN no Render.");
-  if (!META_ACCESS_TOKEN) throw new Error("Faltou META_ACCESS_TOKEN no Render.");
-  if (!META_PHONE_NUMBER_ID) throw new Error("Faltou META_PHONE_NUMBER_ID no Render.");
-}
-
-function requirePagSchoolEnv() {
-  if (!PAGSCHOOL_ENDPOINT) throw new Error("Faltou PAGSCHOOL_ENDPOINT no Render.");
-  if (!PAGSCHOOL_EMAIL) throw new Error("Faltou PAGSCHOOL_EMAIL no Render.");
-  if (!PAGSCHOOL_PASSWORD) throw new Error("Faltou PAGSCHOOL_PASSWORD no Render.");
-}
-
-function buildMetaUrl() {
-  return `https://graph.facebook.com/${META_API_VERSION}/${META_PHONE_NUMBER_ID}/messages`;
-}
-
-async function sendMetaText(phone, bodyText) {
-  requireMetaEnv();
-  const to = normalizePhone(phone);
-
-  const payload = {
-    messaging_product: "whatsapp",
-    to,
-    type: "text",
-    text: {
-      preview_url: false,
-      body: String(bodyText || "").slice(0, 4096),
-    },
-  };
-
-  const resp = await axios.post(buildMetaUrl(), payload, {
-    headers: {
-      Authorization: `Bearer ${META_ACCESS_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    timeout: 30000,
-    validateStatus: () => true,
-  });
-
-  if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(`Meta texto falhou (${resp.status}): ${JSON.stringify(resp.data)}`);
-  }
-
-  return resp.data;
-}
-
-async function sendMetaDocument(phone, documentUrl, filename, caption) {
-  requireMetaEnv();
-  const to = normalizePhone(phone);
-
-  const payload = {
-    messaging_product: "whatsapp",
-    to,
-    type: "document",
-    document: {
-      link: documentUrl,
-      filename: filename || "boleto.pdf",
-      caption: caption || "Segue o seu boleto em PDF.",
-    },
-  };
-
-  const resp = await axios.post(buildMetaUrl(), payload, {
-    headers: {
-      Authorization: `Bearer ${META_ACCESS_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    timeout: 30000,
-    validateStatus: () => true,
-  });
-
-  if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(`Meta documento falhou (${resp.status}): ${JSON.stringify(resp.data)}`);
-  }
-
-  return resp.data;
 }
 
 function getByKeys(obj, keys) {
@@ -182,7 +77,7 @@ function getByKeys(obj, keys) {
   return undefined;
 }
 
-function collectObjects(input, maxItems = 300) {
+function collectObjects(input, maxItems = 400) {
   const result = [];
   const stack = [input];
   const seen = new Set();
@@ -209,9 +104,9 @@ function findFirstArray(input) {
   if (!input || typeof input !== "object") return [];
 
   const preferredKeys = [
+    "rows",
     "data",
     "items",
-    "rows",
     "result",
     "results",
     "content",
@@ -237,28 +132,306 @@ function findFirstArray(input) {
   return [];
 }
 
-function parseDateAny(value) {
-  if (!value) return null;
+function dedupeStrings(items) {
+  return [...new Set(items.filter(Boolean))];
+}
 
-  const d = new Date(value);
-  if (!Number.isNaN(d.getTime())) return d;
+function cleanupConversations() {
+  const now = Date.now();
+  for (const [key, value] of conversations.entries()) {
+    if (now - Number(value.updatedAt || 0) > 1000 * 60 * 60 * 6) {
+      conversations.delete(key);
+    }
+  }
+}
+setInterval(cleanupConversations, 1000 * 60 * 30).unref();
 
-  const match = String(value).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (match) {
-    const [, dd, mm, yyyy] = match;
-    const d2 = new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
-    if (!Number.isNaN(d2.getTime())) return d2;
+function getConversation(phone) {
+  const key = normalizePhone(phone);
+  if (!conversations.has(key)) {
+    conversations.set(key, {
+      step: "idle",
+      lastCpf: "",
+      updatedAt: Date.now(),
+    });
+  }
+  const state = conversations.get(key);
+  state.updatedAt = Date.now();
+  return state;
+}
+
+function resetConversation(phone) {
+  conversations.set(normalizePhone(phone), {
+    step: "idle",
+    lastCpf: "",
+    updatedAt: Date.now(),
+  });
+}
+
+/* =========================
+   ENV CHECKS
+========================= */
+
+function requireMetaEnv() {
+  if (!META_VERIFY_TOKEN) throw new Error("Faltou META_VERIFY_TOKEN no Render.");
+  if (!META_ACCESS_TOKEN) throw new Error("Faltou META_ACCESS_TOKEN no Render.");
+  if (!META_PHONE_NUMBER_ID) throw new Error("Faltou META_PHONE_NUMBER_ID no Render.");
+}
+
+function requirePagSchoolEnv() {
+  if (!PAGSCHOOL_ENDPOINT) throw new Error("Faltou PAGSCHOOL_ENDPOINT no Render.");
+  if (!PAGSCHOOL_EMAIL) throw new Error("Faltou PAGSCHOOL_EMAIL no Render.");
+  if (!PAGSCHOOL_PASSWORD) throw new Error("Faltou PAGSCHOOL_PASSWORD no Render.");
+}
+
+/* =========================
+   META
+========================= */
+
+function buildMetaUrl() {
+  return `https://graph.facebook.com/${META_API_VERSION}/${META_PHONE_NUMBER_ID}/messages`;
+}
+
+async function sendMetaText(phone, bodyText) {
+  requireMetaEnv();
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: normalizePhone(phone),
+    type: "text",
+    text: {
+      preview_url: false,
+      body: String(bodyText || "").slice(0, 4096),
+    },
+  };
+
+  const resp = await axios.post(buildMetaUrl(), payload, {
+    headers: {
+      Authorization: `Bearer ${META_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Meta texto falhou (${resp.status}): ${JSON.stringify(resp.data)}`);
   }
 
-  return null;
+  return resp.data;
 }
+
+async function sendMetaDocument(phone, documentUrl, filename, caption) {
+  requireMetaEnv();
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: normalizePhone(phone),
+    type: "document",
+    document: {
+      link: documentUrl,
+      filename: filename || "boleto.pdf",
+      caption: caption || "Segue o seu boleto em PDF.",
+    },
+  };
+
+  const resp = await axios.post(buildMetaUrl(), payload, {
+    headers: {
+      Authorization: `Bearer ${META_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Meta documento falhou (${resp.status}): ${JSON.stringify(resp.data)}`);
+  }
+
+  return resp.data;
+}
+
+/* =========================
+   PAGSCHOOL URL BUILDER
+========================= */
+
+function buildPagSchoolUrls(docPath) {
+  const base = PAGSCHOOL_ENDPOINT.replace(/\/$/, "");
+  const path = `/${String(docPath || "").replace(/^\/+/, "")}`;
+
+  const pathWithoutApi = path.replace(/^\/api\b/, "") || "/";
+  const isBaseApi = /\/api$/i.test(base);
+
+  if (isBaseApi) {
+    return dedupeStrings([
+      `${base}${pathWithoutApi}`,
+      `${base}${path}`,
+    ]);
+  }
+
+  return dedupeStrings([
+    `${base}${path}`,
+    `${base}/api${pathWithoutApi}`,
+  ]);
+}
+
+async function pagSchoolRequestNoAuth({ method = "get", docPath, params, data, responseType = "json" }) {
+  requirePagSchoolEnv();
+
+  const urls = buildPagSchoolUrls(docPath);
+  const errors = [];
+
+  for (const url of urls) {
+    const resp = await axios({
+      method,
+      url,
+      params,
+      data,
+      responseType,
+      timeout: 30000,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      validateStatus: () => true,
+    }).catch((err) => ({
+      status: 0,
+      data: err.message,
+      headers: {},
+      url,
+    }));
+
+    if (resp.status >= 200 && resp.status < 300) {
+      return { ...resp, triedUrl: url };
+    }
+
+    errors.push({
+      url,
+      status: resp.status,
+      data: resp.data,
+    });
+  }
+
+  throw new Error(JSON.stringify(errors));
+}
+
+async function getPagSchoolToken(forceRefresh = false) {
+  requirePagSchoolEnv();
+
+  if (!forceRefresh && tokenCache.token && Date.now() < tokenCache.exp) {
+    return tokenCache.token;
+  }
+
+  const attempts = [
+    {
+      docPath: "/api/authenticate",
+      data: { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD },
+    },
+    {
+      docPath: "/authenticate",
+      data: { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD },
+    },
+  ];
+
+  const errors = [];
+
+  for (const attempt of attempts) {
+    try {
+      const resp = await pagSchoolRequestNoAuth({
+        method: "post",
+        docPath: attempt.docPath,
+        data: attempt.data,
+      });
+
+      const token =
+        resp?.data?.token ||
+        resp?.data?.jwt ||
+        resp?.data?.accessToken ||
+        resp?.data?.data?.token ||
+        resp?.data?.data?.jwt ||
+        resp?.data?.data?.accessToken ||
+        "";
+
+      if (token) {
+        tokenCache.token = String(token);
+        tokenCache.exp = Date.now() + 1000 * 60 * 50;
+        return tokenCache.token;
+      }
+
+      errors.push({
+        docPath: attempt.docPath,
+        triedUrl: resp.triedUrl,
+        data: resp.data,
+      });
+    } catch (error) {
+      errors.push({
+        docPath: attempt.docPath,
+        error: String(error.message || error),
+      });
+    }
+  }
+
+  throw new Error(`Não consegui autenticar na PagSchool: ${JSON.stringify(errors)}`);
+}
+
+async function pagSchoolRequest(
+  { method = "get", docPath, params, data, responseType = "json" },
+  retry = true
+) {
+  const token = await getPagSchoolToken(false);
+  const urls = buildPagSchoolUrls(docPath);
+  const errors = [];
+
+  for (const url of urls) {
+    for (const authHeader of [`JWT ${token}`, `Bearer ${token}`]) {
+      const resp = await axios({
+        method,
+        url,
+        params,
+        data,
+        responseType,
+        timeout: 30000,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        validateStatus: () => true,
+      }).catch((err) => ({
+        status: 0,
+        data: err.message,
+        headers: {},
+        url,
+      }));
+
+      if (resp.status === 401 && retry) {
+        await getPagSchoolToken(true);
+        return pagSchoolRequest({ method, docPath, params, data, responseType }, false);
+      }
+
+      if (resp.status >= 200 && resp.status < 300) {
+        return { ...resp, triedUrl: url };
+      }
+
+      errors.push({
+        url,
+        auth: authHeader.startsWith("JWT ") ? "JWT" : "Bearer",
+        status: resp.status,
+        data: resp.data,
+      });
+    }
+  }
+
+  throw new Error(JSON.stringify(errors));
+}
+
+/* =========================
+   PAGSCHOOL PARSERS
+========================= */
 
 function normalizeAluno(raw, cpf) {
   if (!raw || typeof raw !== "object") return null;
 
-  const id = getByKeys(raw, ["id", "alunoId", "idAluno", "pessoaId", "pessoa_id"]);
-  const nome = getByKeys(raw, ["nome", "nomeAluno", "aluno", "razaoSocial", "name"]);
-  const codigoEscola = getByKeys(raw, ["codigoEscola", "escolaId", "codigo_escola"]);
+  const id = getByKeys(raw, ["id", "alunoId", "idAluno", "pessoaId", "userId"]);
+  const nome = getByKeys(raw, ["nome", "nomeAluno", "name"]);
   const rawCpf = getByKeys(raw, ["cpf", "documento", "cpfAluno"]);
 
   if (!id) return null;
@@ -267,7 +440,8 @@ function normalizeAluno(raw, cpf) {
     id,
     nome: nome || "Aluno",
     cpf: onlyDigits(rawCpf || cpf),
-    codigoEscola: codigoEscola || tokenCache.codigoEscola || "",
+    telefone:
+      getByKeys(raw, ["telefoneCelular", "telefone", "celular", "whatsapp", "fone"]) || "",
     raw,
   };
 }
@@ -289,8 +463,8 @@ function extractAlunoFromResponse(data, cpf) {
     if (aluno) return aluno;
   }
 
-  const array = findFirstArray(data);
-  for (const item of array) {
+  const arr = findFirstArray(data);
+  for (const item of arr) {
     const aluno = normalizeAluno(item, cpfDigits);
     if (aluno) return aluno;
   }
@@ -298,45 +472,7 @@ function extractAlunoFromResponse(data, cpf) {
   return null;
 }
 
-function normalizeContrato(raw, alunoId) {
-  if (!raw || typeof raw !== "object") return null;
-
-  const id = getByKeys(raw, ["id", "contratoId", "idContrato"]);
-  if (!id) return null;
-
-  return {
-    id,
-    alunoId: getByKeys(raw, ["alunoId", "aluno_id", "pessoaId", "pessoa_id"]) || alunoId || "",
-    status: String(getByKeys(raw, ["status", "situacao", "descricaoStatus"]) || "").toLowerCase(),
-    codigoEscola: getByKeys(raw, ["codigoEscola", "escolaId", "codigo_escola"]) || tokenCache.codigoEscola || "",
-    raw,
-  };
-}
-
-function isContratoAtivo(contrato) {
-  const status = String(contrato?.status || "").toLowerCase();
-  if (!status) return true;
-  if (status.includes("cancel")) return false;
-  if (status.includes("inativ")) return false;
-  if (status.includes("encerr")) return false;
-  return true;
-}
-
-function extractContratoFromResponse(data, alunoId) {
-  const objects = collectObjects(data);
-  const contratos = [];
-
-  for (const obj of objects) {
-    const contrato = normalizeContrato(obj, alunoId);
-    if (contrato) contratos.push(contrato);
-  }
-
-  const ativos = contratos.filter(isContratoAtivo);
-  if (ativos.length) return ativos[0];
-  return contratos[0] || null;
-}
-
-function normalizeParcela(raw, contratoId) {
+function normalizeParcela(raw) {
   if (!raw || typeof raw !== "object") return null;
 
   const id = getByKeys(raw, ["id", "parcelaId", "idParcela"]);
@@ -344,28 +480,28 @@ function normalizeParcela(raw, contratoId) {
 
   return {
     id,
-    contratoId: getByKeys(raw, ["contratoId", "contrato_id", "idContrato"]) || contratoId || "",
-    nossoNumero: getByKeys(raw, ["nossoNumero", "nosso_numero"]),
-    numeroBoleto: getByKeys(raw, ["numeroBoleto", "codigoBarras", "linhaDigitavel"]),
-    linhaDigitavel: getByKeys(raw, ["linhaDigitavel", "codigoBarras", "numeroBoleto"]),
-    valor: Number(getByKeys(raw, ["valor", "valorOriginal", "valorParcela", "saldo"]) || 0),
-    valorPago: Number(getByKeys(raw, ["valorPago", "pago", "pagamento"]) || 0),
-    vencimento: getByKeys(raw, ["vencimento", "dataVencimento", "vencimentoEm"]),
-    status: String(getByKeys(raw, ["status", "situacao", "descricaoStatus"]) || "").toLowerCase(),
+    status: String(getByKeys(raw, ["status", "situacao"]) || "").toUpperCase(),
+    valor: Number(getByKeys(raw, ["valor", "valorParcela", "saldo"]) || 0),
+    valorPago: Number(getByKeys(raw, ["valorPago"]) || 0),
+    vencimento: getByKeys(raw, ["vencimento", "dataVencimento"]),
+    numeroBoleto: getByKeys(raw, ["numeroBoleto", "linhaDigitavel", "codigoBarras"]) || "",
+    nossoNumero: getByKeys(raw, ["nossoNumero"]) || "",
+    linkPDF: getByKeys(raw, ["linkPDF", "pdfUrl", "urlPdf"]) || "",
     raw,
   };
 }
 
 function isParcelaEmAberto(parcela) {
-  const status = String(parcela?.status || "").toLowerCase();
-  if (status.includes("paga") || status.includes("quitad")) return false;
-  if (status.includes("cancel")) return false;
-  if (status.includes("baixad")) return false;
+  const status = String(parcela?.status || "").toUpperCase();
+
+  if (status.includes("PAGO")) return false;
+  if (status.includes("QUITADO")) return false;
+  if (status.includes("CANCEL")) return false;
+  if (status.includes("BAIXADO")) return false;
 
   if (
-    Number(parcela?.valorPago || 0) > 0 &&
     Number(parcela?.valor || 0) > 0 &&
-    Number(parcela.valorPago) >= Number(parcela.valor)
+    Number(parcela?.valorPago || 0) >= Number(parcela?.valor || 0)
   ) {
     return false;
   }
@@ -373,304 +509,182 @@ function isParcelaEmAberto(parcela) {
   return true;
 }
 
-function extractParcelaFromResponse(data, contratoId) {
-  const objects = collectObjects(data);
-  const parcelas = [];
-
-  for (const obj of objects) {
-    const parcela = normalizeParcela(obj, contratoId);
-    if (parcela) parcelas.push(parcela);
-  }
-
-  const abertas = parcelas.filter(isParcelaEmAberto);
-  abertas.sort((a, b) => {
-    const da = parseDateAny(a.vencimento)?.getTime() || 0;
-    const db = parseDateAny(b.vencimento)?.getTime() || 0;
-    return da - db;
-  });
-
-  if (abertas.length) return abertas[0];
-  return parcelas[0] || null;
-}
-
-function normalizeBoleto(raw, parcela) {
+function normalizeContrato(raw) {
   if (!raw || typeof raw !== "object") return null;
 
-  const nossoNumero = getByKeys(raw, ["nossoNumero", "nosso_numero"]) || parcela?.nossoNumero || "";
-  const pdfUrl = getByKeys(raw, ["pdfUrl", "urlPdf", "linkPdf", "pdf", "url"]);
-  const linhaDigitavel = getByKeys(raw, ["linhaDigitavel", "codigoBarras", "numeroBoleto"]);
-  const numeroBoleto = getByKeys(raw, ["numeroBoleto", "codigoBarras", "linhaDigitavel"]);
-  const vencimento = getByKeys(raw, ["vencimento", "dataVencimento", "vencimentoEm"]) || parcela?.vencimento || "";
-  const valor = Number(getByKeys(raw, ["valor", "valorOriginal", "valorBoleto"]) || parcela?.valor || 0);
+  const id = getByKeys(raw, ["id", "contratoId", "idContrato"]);
+  if (!id) return null;
 
-  if (!nossoNumero && !pdfUrl && !linhaDigitavel && !numeroBoleto) return null;
+  const parcelasRaw = Array.isArray(raw.parcelas) ? raw.parcelas : [];
+  const parcelas = parcelasRaw.map(normalizeParcela).filter(Boolean);
 
   return {
-    parcelaId: parcela?.id || getByKeys(raw, ["parcelaId", "idParcela"]),
-    nossoNumero,
-    pdfUrl,
-    linhaDigitavel: linhaDigitavel || numeroBoleto || "",
-    numeroBoleto: numeroBoleto || linhaDigitavel || "",
-    vencimento,
-    valor,
+    id,
+    status: String(getByKeys(raw, ["status", "situacao"]) || "").toUpperCase(),
+    parcelas,
     raw,
   };
 }
 
-function extractBoletoFromResponse(data, parcela) {
+function extractContratosFromResponse(data) {
+  const arr = findFirstArray(data);
+  if (arr.length) return arr.map(normalizeContrato).filter(Boolean);
+
   const objects = collectObjects(data);
-  for (const obj of objects) {
-    const boleto = normalizeBoleto(obj, parcela);
-    if (boleto) return boleto;
-  }
-
-  if (typeof data === "string" && data.startsWith("http")) {
-    return {
-      parcelaId: parcela?.id || "",
-      nossoNumero: parcela?.nossoNumero || "",
-      pdfUrl: data,
-      linhaDigitavel: parcela?.linhaDigitavel || parcela?.numeroBoleto || "",
-      numeroBoleto: parcela?.numeroBoleto || parcela?.linhaDigitavel || "",
-      vencimento: parcela?.vencimento || "",
-      valor: parcela?.valor || 0,
-      raw: data,
-    };
-  }
-
-  return null;
+  return objects.map(normalizeContrato).filter(Boolean);
 }
 
-async function getPagSchoolToken(forceRefresh = false) {
-  requirePagSchoolEnv();
+function selectBestContrato(contratos) {
+  if (!Array.isArray(contratos) || !contratos.length) return null;
 
-  if (!forceRefresh && tokenCache.token && Date.now() < tokenCache.exp) {
-    return tokenCache.token;
-  }
+  const withOpenParcela = contratos.find((c) => c.parcelas.some(isParcelaEmAberto));
+  if (withOpenParcela) return withOpenParcela;
+
+  const active = contratos.find((c) => !String(c.status || "").includes("CANCEL"));
+  if (active) return active;
+
+  return contratos[0];
+}
+
+function selectBestParcela(contrato) {
+  if (!contrato || !Array.isArray(contrato.parcelas)) return null;
+
+  const abertas = contrato.parcelas.filter(isParcelaEmAberto);
+
+  abertas.sort((a, b) => {
+    const da = new Date(a.vencimento || 0).getTime() || 0;
+    const db = new Date(b.vencimento || 0).getTime() || 0;
+    return da - db;
+  });
+
+  if (abertas.length) return abertas[0];
+  return contrato.parcelas[0] || null;
+}
+
+/* =========================
+   PAGSCHOOL BUSINESS
+========================= */
+
+async function findAlunoByCpf(cpf) {
+  const cpfDigits = onlyDigits(cpf);
 
   const attempts = [
-    { path: "/auth/authenticate", data: { email: PAGSCHOOL_EMAIL, senha: PAGSCHOOL_PASSWORD } },
-    { path: "/auth/authenticate", data: { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD } },
-    { path: "/session", data: { email: PAGSCHOOL_EMAIL, senha: PAGSCHOOL_PASSWORD } },
-    { path: "/session", data: { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD } },
+    { params: { cpf: cpfDigits, list: false, limit: 20 } },
+    { params: { filtro: cpfDigits, list: false, limit: 20 } },
+    { params: { filters: cpfDigits, list: false, limit: 20 } },
+    { params: { cpfResponsavel: cpfDigits, list: false, limit: 20 } },
+    { params: { list: false, limit: 100 } },
   ];
 
   const errors = [];
 
   for (const attempt of attempts) {
-    const url = `${PAGSCHOOL_ENDPOINT}${attempt.path}`;
+    try {
+      const resp = await pagSchoolRequest({
+        method: "get",
+        docPath: "/api/aluno/all",
+        params: attempt.params,
+      });
 
-    const resp = await axios
-      .post(url, attempt.data, {
-        headers: { "Content-Type": "application/json" },
-        timeout: 30000,
-        validateStatus: () => true,
-      })
-      .catch((err) => ({ status: 0, data: err.message }));
+      const aluno = extractAlunoFromResponse(resp.data, cpfDigits);
+      if (aluno) return aluno;
 
-    const token =
-      resp?.data?.token ||
-      resp?.data?.accessToken ||
-      resp?.data?.jwt ||
-      resp?.data?.data?.token ||
-      resp?.data?.data?.accessToken ||
-      "";
-
-    if (resp.status >= 200 && resp.status < 300 && token) {
-      tokenCache.token = String(token);
-      tokenCache.exp = Date.now() + 1000 * 60 * 50;
-      tokenCache.codigoEscola = String(
-        resp?.data?.user?.codigoEscola ||
-          resp?.data?.codigoEscola ||
-          resp?.data?.data?.user?.codigoEscola ||
-          tokenCache.codigoEscola ||
-          ""
-      );
-      return tokenCache.token;
-    }
-
-    errors.push({ url, status: resp.status, data: resp.data });
-  }
-
-  throw new Error(`Não consegui autenticar na PagSchool: ${JSON.stringify(errors)}`);
-}
-
-async function pagSchoolHttp(requestConfig, retry = true) {
-  const token = await getPagSchoolToken(false);
-  const url = requestConfig.url.startsWith("http")
-    ? requestConfig.url
-    : `${PAGSCHOOL_ENDPOINT}${requestConfig.url}`;
-
-  const authHeadersList = [{ Authorization: `JWT ${token}` }, { Authorization: `Bearer ${token}` }];
-
-  for (const extraHeaders of authHeadersList) {
-    const resp = await axios({
-      method: requestConfig.method || "get",
-      url,
-      params: requestConfig.params,
-      data: requestConfig.data,
-      responseType: requestConfig.responseType || "json",
-      timeout: requestConfig.timeout || 30000,
-      headers: {
-        "Content-Type": "application/json",
-        ...extraHeaders,
-        ...(requestConfig.headers || {}),
-      },
-      validateStatus: () => true,
-    }).catch((err) => ({ status: 0, data: err.message, headers: {} }));
-
-    if (resp.status === 401 && retry) {
-      await getPagSchoolToken(true);
-      return pagSchoolHttp(requestConfig, false);
-    }
-
-    if (resp.status >= 200 && resp.status < 300) {
-      return resp;
+      errors.push({
+        params: attempt.params,
+        triedUrl: resp.triedUrl,
+        result: "Aluno não encontrado nessa tentativa",
+      });
+    } catch (error) {
+      errors.push({
+        params: attempt.params,
+        error: String(error.message || error),
+      });
     }
   }
 
-  return { status: 0, data: `Falha no endpoint ${url}`, headers: {} };
+  throw new Error(`Aluno não encontrado para o CPF ${cpfDigits}. Tentativas: ${JSON.stringify(errors)}`);
 }
 
-async function findAlunoByCpf(cpf) {
-  const cpfDigits = onlyDigits(cpf);
-  const codigoEscola = tokenCache.codigoEscola || "";
+async function findContratoByAlunoId(alunoId) {
+  const resp = await pagSchoolRequest({
+    method: "get",
+    docPath: `/api/contrato/by-aluno/${alunoId}`,
+  });
 
-  const candidates = [
-    { method: "get", url: "/aluno", params: { cpf: cpfDigits, codigoEscola } },
-    { method: "get", url: "/alunos", params: { cpf: cpfDigits, codigoEscola } },
-    { method: "get", url: `/aluno/cpf/${cpfDigits}`, params: { codigoEscola } },
-    { method: "get", url: `/alunos/cpf/${cpfDigits}`, params: { codigoEscola } },
-    { method: "post", url: "/aluno/search", data: { cpf: cpfDigits, codigoEscola } },
-    { method: "post", url: "/alunos/search", data: { cpf: cpfDigits, codigoEscola } },
-    { method: "get", url: "/pessoas", params: { cpf: cpfDigits, codigoEscola } },
-    { method: "get", url: "/responsavel", params: { cpf: cpfDigits, codigoEscola } },
-  ];
+  const contratos = extractContratosFromResponse(resp.data);
+  const contrato = selectBestContrato(contratos);
 
-  for (const candidate of candidates) {
-    const resp = await pagSchoolHttp(candidate);
-    const aluno = extractAlunoFromResponse(resp.data, cpfDigits);
-    if (aluno) return aluno;
+  if (!contrato) {
+    throw new Error(`Contrato não encontrado para o aluno ${alunoId}.`);
   }
 
-  throw new Error(`Aluno não encontrado para o CPF ${cpfDigits}.`);
+  return contrato;
 }
 
-async function findContratoByAluno(aluno) {
-  const alunoId = aluno?.id;
-  const codigoEscola = aluno?.codigoEscola || tokenCache.codigoEscola || "";
-  if (!alunoId) throw new Error("Aluno sem ID para buscar contrato.");
+async function gerarBoletoDaParcela(parcelaId) {
+  const resp = await pagSchoolRequest({
+    method: "post",
+    docPath: `/api/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`,
+    data: {},
+  });
 
-  const candidates = [
-    { method: "get", url: "/contrato", params: { alunoId, codigoEscola } },
-    { method: "get", url: "/contratos", params: { alunoId, codigoEscola } },
-    { method: "get", url: `/aluno/${alunoId}/contratos`, params: { codigoEscola } },
-    { method: "get", url: `/alunos/${alunoId}/contratos`, params: { codigoEscola } },
-    { method: "post", url: "/contrato/search", data: { alunoId, codigoEscola } },
-    { method: "post", url: "/contratos/search", data: { alunoId, codigoEscola } },
-  ];
-
-  for (const candidate of candidates) {
-    const resp = await pagSchoolHttp(candidate);
-    const contrato = extractContratoFromResponse(resp.data, alunoId);
-    if (contrato) return contrato;
-  }
-
-  throw new Error(`Contrato não encontrado para o aluno ${alunoId}.`);
-}
-
-async function findParcelaEmAberto(contrato) {
-  const contratoId = contrato?.id;
-  if (!contratoId) throw new Error("Contrato sem ID para buscar parcela.");
-
-  const candidates = [
-    { method: "get", url: "/parcela", params: { contratoId, status: "aberto" } },
-    { method: "get", url: "/parcelas", params: { contratoId, status: "aberto" } },
-    { method: "get", url: `/contrato/${contratoId}/parcelas`, params: { status: "aberto" } },
-    { method: "get", url: `/contratos/${contratoId}/parcelas`, params: { status: "aberto" } },
-    { method: "post", url: "/parcela/search", data: { contratoId, status: "aberto" } },
-    { method: "post", url: "/parcelas/search", data: { contratoId, status: "aberto" } },
-  ];
-
-  for (const candidate of candidates) {
-    const resp = await pagSchoolHttp(candidate);
-    const parcela = extractParcelaFromResponse(resp.data, contratoId);
-    if (parcela) return parcela;
-  }
-
-  throw new Error(`Parcela em aberto não encontrada para o contrato ${contratoId}.`);
-}
-
-async function getOuGerarBoleto(aluno, contrato, parcela) {
-  const parcelaId = parcela?.id;
-  if (!parcelaId) throw new Error("Parcela sem ID para gerar boleto.");
-
-  const payloadBase = {
-    alunoId: aluno?.id,
-    contratoId: contrato?.id,
-    parcelaId,
-    nossoNumero: parcela?.nossoNumero,
-    codigoEscola: aluno?.codigoEscola || contrato?.codigoEscola || tokenCache.codigoEscola || undefined,
-  };
-
-  const candidates = [
-    { method: "post", url: "/boleto", data: payloadBase },
-    { method: "post", url: "/boleto/gerar", data: payloadBase },
-    { method: "post", url: "/boletos/gerar", data: payloadBase },
-    { method: "get", url: "/boleto", params: payloadBase },
-    { method: "get", url: "/boletos", params: payloadBase },
-    { method: "get", url: `/parcela/${parcelaId}/boleto`, params: payloadBase },
-    { method: "post", url: `/parcela/${parcelaId}/boleto`, data: payloadBase },
-  ];
-
-  for (const candidate of candidates) {
-    const resp = await pagSchoolHttp(candidate);
-    const boleto = extractBoletoFromResponse(resp.data, parcela);
-    if (boleto) return boleto;
-  }
+  const data = resp.data || {};
+  const nossoNumero =
+    data?.nossoNumero ||
+    data?.data?.nossoNumero ||
+    getByKeys(data, ["nossoNumero"]) ||
+    "";
 
   return {
-    parcelaId,
-    nossoNumero: parcela?.nossoNumero || "",
-    pdfUrl: "",
-    linhaDigitavel: parcela?.linhaDigitavel || parcela?.numeroBoleto || "",
-    numeroBoleto: parcela?.numeroBoleto || parcela?.linhaDigitavel || "",
-    vencimento: parcela?.vencimento || "",
-    valor: parcela?.valor || 0,
-    raw: parcela?.raw || {},
+    nossoNumero,
+    raw: data,
+    triedUrl: resp.triedUrl,
   };
+}
+
+function buildPublicPdfUrl(parcelaId, nossoNumero) {
+  if (!PUBLIC_BASE_URL) return "";
+  return `${PUBLIC_BASE_URL}/boleto/pdf/${encodeURIComponent(parcelaId)}/${encodeURIComponent(
+    String(nossoNumero || "sem-nosso-numero")
+  )}`;
 }
 
 async function buildBoletoResultFromCpf(cpf) {
   const aluno = await findAlunoByCpf(cpf);
-  const contrato = await findContratoByAluno(aluno);
-  const parcela = await findParcelaEmAberto(contrato);
-  const boleto = await getOuGerarBoleto(aluno, contrato, parcela);
+  const contrato = await findContratoByAlunoId(aluno.id);
+  const parcela = selectBestParcela(contrato);
 
-  let pdfUrl = boleto.pdfUrl || "";
-  if (!pdfUrl && PUBLIC_BASE_URL) {
-    const nn = encodeURIComponent(String(boleto.nossoNumero || parcela.nossoNumero || "auto"));
-    pdfUrl = `${PUBLIC_BASE_URL}/boleto/pdf/${encodeURIComponent(parcela.id)}/${nn}`;
+  if (!parcela) {
+    throw new Error("Nenhuma parcela encontrada para esse contrato.");
+  }
+
+  let nossoNumero = parcela.nossoNumero || "";
+  let pdfUrl = parcela.linkPDF || "";
+
+  if (!nossoNumero) {
+    const gerado = await gerarBoletoDaParcela(parcela.id);
+    nossoNumero = gerado.nossoNumero || "";
+  }
+
+  if (!pdfUrl && nossoNumero) {
+    pdfUrl = buildPublicPdfUrl(parcela.id, nossoNumero);
   }
 
   return {
-    studentName: aluno.nome,
-    alunoId: aluno.id,
-    contratoId: contrato.id,
-    parcelaId: parcela.id,
-    nossoNumero: boleto.nossoNumero || parcela.nossoNumero || "",
-    numeroBoleto: boleto.numeroBoleto || parcela.numeroBoleto || "",
-    linhaDigitavel: boleto.linhaDigitavel || parcela.linhaDigitavel || parcela.numeroBoleto || "",
-    vencimento: boleto.vencimento || parcela.vencimento || "",
-    valor: boleto.valor || parcela.valor || 0,
+    aluno,
+    contrato,
+    parcela,
+    nossoNumero,
     pdfUrl,
-    raw: {
-      aluno: aluno.raw,
-      contrato: contrato.raw,
-      parcela: parcela.raw,
-      boleto: boleto.raw,
-    },
+    linhaDigitavel: parcela.numeroBoleto || "",
+    valor: parcela.valor || 0,
+    vencimento: parcela.vencimento || "",
   };
 }
+
+/* =========================
+   FLOW
+========================= */
 
 function looksLikeHello(text) {
   return /^(oi|olá|ola|bom dia|boa tarde|boa noite|menu|iniciar|começar|comecar)$/i.test(
@@ -735,11 +749,16 @@ async function processUserMessage(phone, text) {
       const result = await buildBoletoResultFromCpf(digits);
 
       const lines = [];
-      if (result.studentName) lines.push(`Aluno: ${result.studentName}`);
+      lines.push(`Aluno: ${result.aluno.nome}`);
       if (result.vencimento) lines.push(`Vencimento: ${formatDateBR(result.vencimento)}`);
       if (result.valor) lines.push(`Valor: ${formatCurrencyBR(result.valor)}`);
       if (result.linhaDigitavel) lines.push(`Linha digitável: ${result.linhaDigitavel}`);
-      lines.push("Segue o PDF do boleto logo abaixo.");
+
+      if (result.pdfUrl) {
+        lines.push("Segue o PDF do boleto logo abaixo.");
+      } else {
+        lines.push("Eu localizei o boleto, mas não consegui montar o PDF agora.");
+      }
 
       await sendMetaText(phone, lines.join("\n"));
 
@@ -747,16 +766,15 @@ async function processUserMessage(phone, text) {
         await sendMetaDocument(
           phone,
           result.pdfUrl,
-          `boleto-${result.nossoNumero || result.parcelaId || "pagschool"}.pdf`,
+          `boleto-${result.nossoNumero || result.parcela.id}.pdf`,
           "Segue o seu boleto em PDF."
         );
-      } else {
-        await sendMetaText(phone, "Eu localizei os dados do boleto, mas não consegui montar o link do PDF.");
       }
 
       resetConversation(phone);
       return;
-    } catch (_error) {
+    } catch (error) {
+      console.error("[BOLETO ERROR]", error?.message || error);
       resetConversation(phone);
       await sendMetaText(
         phone,
@@ -779,6 +797,7 @@ async function handleMetaWebhook(body) {
       if (change?.field !== "messages") continue;
 
       const messages = Array.isArray(change?.value?.messages) ? change.value.messages : [];
+
       for (const message of messages) {
         const from = normalizePhone(message?.from || "");
         const text = extractIncomingText(message);
@@ -790,17 +809,53 @@ async function handleMetaWebhook(body) {
   }
 }
 
+/* =========================
+   PAGSCHOOL WEBHOOK
+========================= */
+
+function extractPagSchoolEvent(body) {
+  const payload = body && typeof body === "object" ? body : {};
+
+  return {
+    parcelaId: getByKeys(payload, ["id", "parcelaId"]),
+    valor: getByKeys(payload, ["valor", "valorPago"]),
+    valorPago: getByKeys(payload, ["valorPago"]),
+    numeroBoleto: getByKeys(payload, ["numeroBoleto"]),
+    vencimento: getByKeys(payload, ["vencimento"]),
+    dataPagamento: getByKeys(payload, ["dataPagamento"]),
+    nossoNumero: getByKeys(payload, ["nossoNumero"]),
+    contratoId: getByKeys(payload, ["contrato_id", "contratoId"]),
+    phone: normalizePhone(
+      getByKeys(payload, ["phone", "telefone", "celular", "whatsapp"]) ||
+        getByKeys(payload?.aluno || {}, ["phone", "telefone", "celular", "whatsapp"]) ||
+        ""
+    ),
+    nome:
+      getByKeys(payload, ["nome", "nomeAluno"]) ||
+      getByKeys(payload?.aluno || {}, ["nome", "nomeAluno"]) ||
+      "Aluno",
+    raw: payload,
+  };
+}
+
+/* =========================
+   ROUTES
+========================= */
+
 app.get("/", (_req, res) => {
   res.json({
     ok: true,
-    service: "pagschool-meta-bot",
-    webhook: "/meta/webhook",
+    service: "pagschool-boleto-bot",
     time: new Date().toISOString(),
   });
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: "pagschool-boleto-bot",
+    time: new Date().toISOString(),
+  });
 });
 
 app.get("/debug/routes", (_req, res) => {
@@ -842,49 +897,63 @@ app.post("/meta/webhook", async (req, res) => {
   }
 });
 
+app.get("/webhook", (_req, res) => {
+  res.json({
+    ok: true,
+    webhook: "pagschool",
+    message: "Endpoint pronto para receber eventos da PagSchool.",
+    time: new Date().toISOString(),
+  });
+});
+
+app.post("/webhook", async (req, res) => {
+  res.status(200).json({ ok: true, received: true });
+
+  try {
+    console.log("[PAGSCHOOL WEBHOOK BODY]", JSON.stringify(req.body));
+
+    const event = extractPagSchoolEvent(req.body);
+
+    if (event.phone) {
+      const lines = [];
+      lines.push(`Olá, ${event.nome}.`);
+      lines.push("Recebemos a confirmação de pagamento do seu boleto.");
+      if (event.valorPago || event.valor) lines.push(`Valor: ${formatCurrencyBR(event.valorPago || event.valor)}`);
+      if (event.dataPagamento) lines.push(`Pagamento: ${formatDateBR(event.dataPagamento)}`);
+      if (event.nossoNumero) lines.push(`Nosso número: ${event.nossoNumero}`);
+      lines.push("Obrigado.");
+
+      await sendMetaText(event.phone, lines.join("\n"));
+    }
+  } catch (error) {
+    console.error("[PAGSCHOOL WEBHOOK ERROR]", error?.message || error);
+  }
+});
+
 app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   try {
     const parcelaId = String(req.params.parcelaId || "");
     const nossoNumero = String(req.params.nossoNumero || "");
 
-    if (!parcelaId) {
-      return res.status(400).send("parcelaId é obrigatório");
+    if (!parcelaId || !nossoNumero) {
+      return res.status(400).send("parcelaId e nossoNumero são obrigatórios");
     }
 
-    const candidates = [
-      { method: "get", url: `/boleto/pdf/${parcelaId}/${nossoNumero}`, responseType: "arraybuffer" },
-      { method: "get", url: "/boleto/pdf", params: { parcelaId, nossoNumero }, responseType: "arraybuffer" },
-      { method: "get", url: `/parcela/${parcelaId}/boleto/pdf`, params: { nossoNumero }, responseType: "arraybuffer" },
-      { method: "post", url: "/boleto/pdf", data: { parcelaId, nossoNumero }, responseType: "arraybuffer" },
-    ];
+    const resp = await pagSchoolRequest({
+      method: "get",
+      docPath: `/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
+      responseType: "arraybuffer",
+    });
 
-    for (const candidate of candidates) {
-      const resp = await pagSchoolHttp(candidate);
-      const contentType = String(resp?.headers?.["content-type"] || "").toLowerCase();
+    const contentType = String(resp?.headers?.["content-type"] || "").toLowerCase();
 
-      if (contentType.includes("application/pdf")) {
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename="boleto-${nossoNumero || parcelaId}.pdf"`);
-        return res.status(200).send(resp.data);
-      }
-
-      const maybeJson = Buffer.isBuffer(resp.data)
-        ? (() => {
-            try {
-              return JSON.parse(resp.data.toString("utf8"));
-            } catch (_e) {
-              return null;
-            }
-          })()
-        : resp.data;
-
-      const boleto = extractBoletoFromResponse(maybeJson, { id: parcelaId, nossoNumero });
-      if (boleto?.pdfUrl) {
-        return res.redirect(boleto.pdfUrl);
-      }
+    if (contentType.includes("application/pdf")) {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="boleto-${nossoNumero}.pdf"`);
+      return res.status(200).send(resp.data);
     }
 
-    return res.status(404).send("PDF do boleto não encontrado");
+    return res.status(500).send("A PagSchool não retornou um PDF válido.");
   } catch (error) {
     return res.status(500).send(String(error.message || error));
   }
@@ -896,19 +965,45 @@ app.get("/debug/pagschool/test-auth", async (_req, res) => {
     res.json({
       ok: true,
       tokenPreview: `${String(token).slice(0, 12)}...`,
-      codigoEscola: tokenCache.codigoEscola || null,
+      base: PAGSCHOOL_ENDPOINT,
+      authUrlsTried: buildPagSchoolUrls("/api/authenticate"),
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: String(error.message || error) });
+    res.status(500).json({
+      ok: false,
+      error: String(error.message || error),
+      base: PAGSCHOOL_ENDPOINT,
+      authUrlsTried: buildPagSchoolUrls("/api/authenticate"),
+    });
   }
 });
 
 app.get("/debug/pagschool/test-cpf/:cpf", async (req, res) => {
   try {
     const result = await buildBoletoResultFromCpf(req.params.cpf);
-    res.json({ ok: true, result });
+    res.json({
+      ok: true,
+      result: {
+        aluno: {
+          id: result.aluno.id,
+          nome: result.aluno.nome,
+          cpf: result.aluno.cpf,
+          telefone: result.aluno.telefone,
+        },
+        contratoId: result.contrato.id,
+        parcelaId: result.parcela.id,
+        nossoNumero: result.nossoNumero,
+        linhaDigitavel: result.linhaDigitavel,
+        valor: result.valor,
+        vencimento: result.vencimento,
+        pdfUrl: result.pdfUrl,
+      },
+    });
   } catch (error) {
-    res.status(500).json({ ok: false, error: String(error.message || error) });
+    res.status(500).json({
+      ok: false,
+      error: String(error.message || error),
+    });
   }
 });
 
