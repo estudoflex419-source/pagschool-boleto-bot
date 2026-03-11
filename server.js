@@ -88,7 +88,7 @@ const HUMAN_MESSAGES = {
     "O CPF informado parece estar incompleto.\n\nMe envie novamente com os *11 números*, por favor.",
 
   processing:
-    "Só um instante... estou localizando o boleto para você. ⏳",
+    "Só um instante... estou localizando as informações para você. ⏳",
 
   fallback:
     "Posso te ajudar com a 2ª via do boleto.\n\nDigite *boleto* para continuar.",
@@ -109,7 +109,7 @@ const HUMAN_MESSAGES = {
     "Verifiquei aqui e, no momento, não encontrei boleto em aberto para esse CPF. ✅",
 
   pdfOnlyFallback:
-    "Localizei o boleto, mas não consegui gerar o PDF neste momento.\n\nVocê pode usar a linha digitável enviada acima ou tentar novamente em alguns instantes.",
+    "Localizei o boleto, mas não consegui gerar o PDF neste momento.\n\nTente novamente em alguns instantes.",
 
   genericError:
     "No momento não consegui concluir sua solicitação por aqui.\n\nTente novamente em alguns minutos.",
@@ -117,18 +117,41 @@ const HUMAN_MESSAGES = {
   securityMismatch:
     "Por segurança, não consegui confirmar o CPF informado com os dados localizados.\n\nConfira o CPF e tente novamente.",
 
+  confirmationCancelled:
+    "Tudo bem.\nCancelei esse envio.\n\nSe quiser consultar outro boleto, envie um novo *CPF* ou digite *boleto*.",
+
+  askConfirmAgain:
+    "Se os dados estiverem corretos, responda *CONFIRMAR*.\nSe não estiverem corretos, responda *CANCELAR*.",
+
   boletoFound(result) {
     const lines = [];
-    lines.push("Pronto. Localizei o boleto ✅");
+    lines.push("Pronto. Aqui estão os dados do boleto ✅");
     lines.push("");
     lines.push(`*Aluno:* ${result.aluno.nome}`);
     if (result.vencimento) lines.push(`*Vencimento:* ${formatDateBR(result.vencimento)}`);
     if (result.valor) lines.push(`*Valor:* ${formatCurrencyBR(result.valor)}`);
     if (result.linhaDigitavel) lines.push(`*Linha digitável:* ${result.linhaDigitavel}`);
-    if (result.pdfUrl) {
+    lines.push("");
+    lines.push("Estou enviando o PDF logo abaixo.");
+    return lines.join("\n");
+  },
+
+  confirmationPreview(result, suspiciousName) {
+    const lines = [];
+    lines.push("Encontrei um cadastro com estes dados:");
+    lines.push("");
+    lines.push(`*Aluno:* ${result.aluno.nome}`);
+    if (result.vencimento) lines.push(`*Vencimento:* ${formatDateBR(result.vencimento)}`);
+    if (result.valor) lines.push(`*Valor:* ${formatCurrencyBR(result.valor)}`);
+
+    if (suspiciousName) {
       lines.push("");
-      lines.push("Estou enviando o PDF logo abaixo.");
+      lines.push("⚠️ *Atenção:* o nome retornado parece ser um cadastro institucional/empresa.");
     }
+
+    lines.push("");
+    lines.push("Se os dados estiverem corretos, responda *CONFIRMAR* para eu enviar o PDF.");
+    lines.push("Se não estiverem corretos, responda *CANCELAR*.");
     return lines.join("\n");
   },
 
@@ -307,6 +330,34 @@ function truncateText(value, max = 300) {
   return `${text.slice(0, max)}...`;
 }
 
+function looksCorporateName(name) {
+  const text = String(name || "").toUpperCase();
+  if (!text) return false;
+
+  const terms = [
+    "LTDA",
+    "EIRELI",
+    "ME ",
+    " ME",
+    "MEI",
+    "ESCOLA",
+    "EMPRESA",
+    "COMERCIO",
+    "COMÉRCIO",
+    "SERVICOS",
+    "SERVIÇOS",
+    "ASSOCIACAO",
+    "ASSOCIAÇÃO",
+    "INSTITUTO",
+    "CENTRO EDUCACIONAL",
+    "EDUCACIONAL",
+    "MATRIZ",
+    "FILIAL",
+  ];
+
+  return terms.some((term) => text.includes(term));
+}
+
 function cleanupMaps() {
   const now = Date.now();
 
@@ -332,6 +383,7 @@ function getConversation(phone) {
     conversations.set(key, {
       step: "idle",
       lastCpf: "",
+      pendingBoleto: null,
       updatedAt: Date.now(),
     });
   }
@@ -346,6 +398,7 @@ function resetConversation(phone) {
   conversations.set(key, {
     step: "idle",
     lastCpf: "",
+    pendingBoleto: null,
     updatedAt: Date.now(),
   });
 }
@@ -673,12 +726,6 @@ async function pagSchoolRequest(
 /* =========================
    PAGSCHOOL PARSERS
 ========================= */
-
-/*
-  CORREÇÃO CRÍTICA:
-  NUNCA usar o CPF digitado como fallback no aluno.
-  Só vale o CPF que veio da API.
-*/
 function normalizeAluno(raw) {
   if (!raw || typeof raw !== "object") return null;
 
@@ -688,12 +735,10 @@ function normalizeAluno(raw) {
 
   if (!id) return null;
 
-  const cpfFromApi = onlyDigits(rawCpf || "");
-
   return {
     id,
     nome: nome || "Aluno",
-    cpf: cpfFromApi,
+    cpf: onlyDigits(rawCpf || ""),
     telefone: getByKeys(raw, ["telefoneCelular", "telefone", "celular", "whatsapp", "fone"]) || "",
     raw,
   };
@@ -1077,6 +1122,14 @@ function looksLikeHumanSupport(text) {
   return /(atendente|humano|pessoa|suporte|ajuda)/i.test(String(text || ""));
 }
 
+function looksLikeConfirm(text) {
+  return /^(confirmar|confirmo|sim|ok)$/i.test(String(text || "").trim());
+}
+
+function looksLikeCancel(text) {
+  return /^(cancelar|cancela|não|nao)$/i.test(String(text || "").trim());
+}
+
 function extractIncomingText(message) {
   if (!message || typeof message !== "object") return "";
 
@@ -1136,10 +1189,53 @@ async function processUserMessage(phone, text) {
 
   if (looksLikeBoletoRequest(cleanText)) {
     convo.step = "awaiting_cpf";
+    convo.pendingBoleto = null;
     convo.updatedAt = Date.now();
 
     await sendMetaText(phone, HUMAN_MESSAGES.askCpf);
     return;
+  }
+
+  if (convo.step === "awaiting_confirmation") {
+    if (looksLikeConfirm(cleanText)) {
+      const pending = convo.pendingBoleto;
+
+      if (!pending) {
+        resetConversation(phone);
+        await sendMetaText(phone, HUMAN_MESSAGES.fallback);
+        return;
+      }
+
+      await sendMetaText(phone, HUMAN_MESSAGES.boletoFound(pending));
+
+      if (pending.pdfUrl) {
+        await sendMetaDocument(
+          phone,
+          pending.pdfUrl,
+          `boleto-${pending.nossoNumero || pending.parcela.id}.pdf`,
+          HUMAN_MESSAGES.pdfCaption
+        );
+      } else {
+        await sendMetaText(phone, HUMAN_MESSAGES.pdfOnlyFallback);
+      }
+
+      resetConversation(phone);
+      return;
+    }
+
+    if (looksLikeCancel(cleanText)) {
+      resetConversation(phone);
+      await sendMetaText(phone, HUMAN_MESSAGES.confirmationCancelled);
+      return;
+    }
+
+    if (isCpf(digits)) {
+      convo.step = "awaiting_cpf";
+      convo.pendingBoleto = null;
+    } else {
+      await sendMetaText(phone, HUMAN_MESSAGES.askConfirmAgain);
+      return;
+    }
   }
 
   if (convo.step === "awaiting_cpf" || isCpf(digits)) {
@@ -1150,39 +1246,33 @@ async function processUserMessage(phone, text) {
 
     convo.step = "processing";
     convo.lastCpf = digits;
+    convo.pendingBoleto = null;
     convo.updatedAt = Date.now();
 
     await sendMetaText(phone, HUMAN_MESSAGES.processing);
 
     try {
       const result = await buildBoletoResultFromCpf(digits);
+      const suspiciousName = looksCorporateName(result.aluno.nome);
 
-      logInfo("Boleto localizado com sucesso.", {
+      logInfo("Boleto localizado aguardando confirmação.", {
         phone: maskPhone(phone),
         cpf: maskCpf(digits),
         alunoId: result.aluno.id,
         contratoId: result.contrato.id,
         parcelaId: result.parcela.id,
         nossoNumero: result.nossoNumero,
+        suspiciousName,
       });
 
-      await sendMetaText(phone, HUMAN_MESSAGES.boletoFound(result));
+      convo.step = "awaiting_confirmation";
+      convo.pendingBoleto = result;
+      convo.updatedAt = Date.now();
 
-      if (result.pdfUrl) {
-        await sendMetaDocument(
-          phone,
-          result.pdfUrl,
-          `boleto-${result.nossoNumero || result.parcela.id}.pdf`,
-          HUMAN_MESSAGES.pdfCaption
-        );
-      } else {
-        await sendMetaText(phone, HUMAN_MESSAGES.pdfOnlyFallback);
-      }
-
-      resetConversation(phone);
+      await sendMetaText(phone, HUMAN_MESSAGES.confirmationPreview(result, suspiciousName));
       return;
     } catch (error) {
-      logError("Falha ao localizar ou enviar boleto.", {
+      logError("Falha ao localizar boleto.", {
         phone: maskPhone(phone),
         cpf: maskCpf(digits),
         error: String(error.message || error),
