@@ -58,6 +58,10 @@ const PAGSCHOOL_PASSWORD = String(process.env.PAGSCHOOL_PASSWORD || "");
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 6);
 const PROCESSED_MESSAGE_TTL_MS = Number(process.env.PROCESSED_MESSAGE_TTL_MS || 1000 * 60 * 30);
 const LOG_VERBOSE = String(process.env.LOG_VERBOSE || "true").toLowerCase() === "true";
+const SUPPORT_CONTACT_MESSAGE = String(
+  process.env.SUPPORT_CONTACT_MESSAGE ||
+    "Se preferir, posso encaminhar você para o atendimento humano."
+);
 
 /* =========================
    MEMORY
@@ -73,10 +77,9 @@ const processedMessageIds = new Map();
 /* =========================
    HUMAN MESSAGES
 ========================= */
-
 const HUMAN_MESSAGES = {
   welcome:
-    "Olá 😊\nSeja bem-vindo(a).\nSou a assistente virtual responsável pela 2ª via de boletos.\n\nPara continuar, digite *boleto*.",
+    "Olá 😊\nSeja bem-vindo(a).\nSou a assistente virtual responsável pela 2ª via de boletos.\n\nDigite *boleto* para solicitar seu boleto.\nSe quiser recomeçar a qualquer momento, digite *menu*.",
 
   askCpf:
     "Perfeito.\nMe envie o *CPF do aluno* para eu localizar a 2ª via do boleto.\n\nPode mandar apenas os números.",
@@ -88,10 +91,16 @@ const HUMAN_MESSAGES = {
     "Só um instante... estou localizando o boleto para você. ⏳",
 
   fallback:
-    "Para solicitar a 2ª via, digite *boleto*.",
+    "Posso te ajudar com a 2ª via do boleto.\n\nDigite *boleto* para continuar.",
 
-  pdfOnlyFallback:
-    "Localizei o boleto, mas não consegui gerar o PDF neste momento.\n\nTente novamente em alguns instantes.",
+  restart:
+    "Tudo certo 😊\nReiniciei o atendimento.\n\nDigite *boleto* para solicitar a 2ª via.",
+
+  thanks:
+    "Por nada 😊\nSe precisar de mais alguma coisa, é só me chamar.",
+
+  askHuman:
+    `${SUPPORT_CONTACT_MESSAGE}\n\nEnquanto isso, se quiser tentar por aqui, digite *boleto*.`,
 
   alunoNotFound:
     "Não localizei nenhum aluno com esse CPF no momento.\n\nConfira os números enviados e tente novamente.",
@@ -99,19 +108,14 @@ const HUMAN_MESSAGES = {
   noOpenBoleto:
     "Verifiquei aqui e, no momento, não encontrei boleto em aberto para esse CPF. ✅",
 
+  pdfOnlyFallback:
+    "Localizei o boleto, mas não consegui gerar o PDF neste momento.\n\nVocê pode usar a linha digitável enviada acima ou tentar novamente em alguns instantes.",
+
   genericError:
     "No momento não consegui concluir sua solicitação por aqui.\n\nTente novamente em alguns minutos.",
 
-  paymentReceived(name, valor, dataPagamento, nossoNumero) {
-    const lines = [];
-    lines.push(`Olá, ${name}.`);
-    lines.push("Recebemos a confirmação do pagamento do seu boleto com sucesso ✅");
-    if (valor) lines.push(`Valor: ${valor}`);
-    if (dataPagamento) lines.push(`Pagamento: ${dataPagamento}`);
-    if (nossoNumero) lines.push(`Nosso número: ${nossoNumero}`);
-    lines.push("Obrigado.");
-    return lines.join("\n");
-  },
+  securityMismatch:
+    "Por segurança, não consegui confirmar o CPF informado com os dados localizados.\n\nConfira o CPF e tente novamente.",
 
   boletoFound(result) {
     const lines = [];
@@ -128,14 +132,23 @@ const HUMAN_MESSAGES = {
     return lines.join("\n");
   },
 
-  pdfCaption:
-    "Segue a 2ª via do boleto em PDF. 📄",
+  pdfCaption: "Segue a 2ª via do boleto em PDF. 📄",
+
+  paymentReceived(name, valor, dataPagamento, nossoNumero) {
+    const lines = [];
+    lines.push(`Olá, ${name}.`);
+    lines.push("Recebemos a confirmação do pagamento do seu boleto com sucesso ✅");
+    if (valor) lines.push(`Valor: ${valor}`);
+    if (dataPagamento) lines.push(`Pagamento: ${dataPagamento}`);
+    if (nossoNumero) lines.push(`Nosso número: ${nossoNumero}`);
+    lines.push("Obrigado.");
+    return lines.join("\n");
+  },
 };
 
 /* =========================
    LOGS
 ========================= */
-
 function logInfo(message, meta) {
   if (meta !== undefined) {
     console.log(`[INFO] ${message}`, meta);
@@ -163,7 +176,6 @@ function logError(message, meta) {
 /* =========================
    UTILS
 ========================= */
-
 function onlyDigits(value) {
   return String(value || "").replace(/\D/g, "");
 }
@@ -351,7 +363,6 @@ function wasMessageProcessed(id) {
 /* =========================
    ENV CHECKS
 ========================= */
-
 function requireMetaEnv() {
   if (!META_VERIFY_TOKEN) throw new Error("Faltou META_VERIFY_TOKEN no Render.");
   if (!META_ACCESS_TOKEN) throw new Error("Faltou META_ACCESS_TOKEN no Render.");
@@ -367,7 +378,6 @@ function requirePagSchoolEnv() {
 /* =========================
    META SECURITY
 ========================= */
-
 function verifyMetaSignature(req) {
   if (!META_APP_SECRET) return true;
 
@@ -394,7 +404,6 @@ function verifyMetaSignature(req) {
 /* =========================
    META SEND
 ========================= */
-
 function buildMetaMessagesUrl() {
   return `https://graph.facebook.com/${META_API_VERSION}/${META_PHONE_NUMBER_ID}/messages`;
 }
@@ -476,7 +485,6 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
 /* =========================
    PAGSCHOOL CORE
 ========================= */
-
 function buildPagSchoolUrls(docPath) {
   const base = PAGSCHOOL_ENDPOINT.replace(/\/$/, "");
   const path = `/${String(docPath || "").replace(/^\/+/, "")}`;
@@ -665,7 +673,6 @@ async function pagSchoolRequest(
 /* =========================
    PAGSCHOOL PARSERS
 ========================= */
-
 function normalizeAluno(raw, cpf) {
   if (!raw || typeof raw !== "object") return null;
 
@@ -684,30 +691,49 @@ function normalizeAluno(raw, cpf) {
   };
 }
 
-function extractAlunoFromResponse(data, cpf) {
+function extractAlunoFromResponseStrict(data, cpf) {
   const cpfDigits = onlyDigits(cpf);
+  if (!cpfDigits) return null;
+
   const objects = collectObjects(data);
 
   for (const obj of objects) {
-    const objCpf = onlyDigits(getByKeys(obj, ["cpf", "documento", "cpfAluno"]) || "");
-    if (cpfDigits && objCpf && objCpf === cpfDigits) {
-      const aluno = normalizeAluno(obj, cpfDigits);
-      if (aluno) return aluno;
-    }
-  }
-
-  for (const obj of objects) {
     const aluno = normalizeAluno(obj, cpfDigits);
-    if (aluno) return aluno;
+    if (!aluno) continue;
+
+    const alunoCpf = onlyDigits(aluno.cpf || "");
+    if (alunoCpf && alunoCpf === cpfDigits) {
+      return aluno;
+    }
   }
 
   const arr = findFirstArray(data);
   for (const item of arr) {
     const aluno = normalizeAluno(item, cpfDigits);
-    if (aluno) return aluno;
+    if (!aluno) continue;
+
+    const alunoCpf = onlyDigits(aluno.cpf || "");
+    if (alunoCpf && alunoCpf === cpfDigits) {
+      return aluno;
+    }
   }
 
   return null;
+}
+
+function assertCpfMatches(inputCpf, aluno) {
+  const cpfInput = onlyDigits(inputCpf);
+  const cpfAluno = onlyDigits(aluno?.cpf || "");
+
+  if (!cpfInput || !cpfAluno) {
+    throw new Error("Falha de segurança: CPF ausente para validação.");
+  }
+
+  if (cpfInput !== cpfAluno) {
+    throw new Error(`Falha de segurança: CPF divergente. input=${cpfInput} aluno=${cpfAluno}`);
+  }
+
+  return true;
 }
 
 function normalizeParcela(raw) {
@@ -783,7 +809,9 @@ function extractParcelasFromResponse(data) {
 function selectBestContrato(contratos) {
   if (!Array.isArray(contratos) || !contratos.length) return null;
 
-  const withOpenParcela = contratos.find((c) => Array.isArray(c.parcelas) && c.parcelas.some(isParcelaEmAberto));
+  const withOpenParcela = contratos.find(
+    (c) => Array.isArray(c.parcelas) && c.parcelas.some(isParcelaEmAberto)
+  );
   if (withOpenParcela) return withOpenParcela;
 
   const active = contratos.find((c) => !String(c.status || "").includes("CANCEL"));
@@ -810,16 +838,18 @@ function selectBestParcela(contrato) {
 /* =========================
    PAGSCHOOL BUSINESS
 ========================= */
-
 async function findAlunoByCpf(cpf) {
   const cpfDigits = onlyDigits(cpf);
+
+  if (!isCpf(cpfDigits)) {
+    throw new Error("CPF inválido para busca.");
+  }
 
   const attempts = [
     { params: { cpf: cpfDigits, list: false, limit: 20 } },
     { params: { filtro: cpfDigits, list: false, limit: 20 } },
     { params: { filters: cpfDigits, list: false, limit: 20 } },
     { params: { cpfResponsavel: cpfDigits, list: false, limit: 20 } },
-    { params: { list: false, limit: 100 } },
   ];
 
   const errors = [];
@@ -832,13 +862,17 @@ async function findAlunoByCpf(cpf) {
         params: attempt.params,
       });
 
-      const aluno = extractAlunoFromResponse(resp.data, cpfDigits);
-      if (aluno) return aluno;
+      const aluno = extractAlunoFromResponseStrict(resp.data, cpfDigits);
+
+      if (aluno) {
+        assertCpfMatches(cpfDigits, aluno);
+        return aluno;
+      }
 
       errors.push({
         params: attempt.params,
         triedUrl: resp.triedUrl,
-        result: "Aluno não encontrado nessa tentativa",
+        result: "Nenhum aluno com CPF exato encontrado nessa tentativa",
       });
     } catch (error) {
       errors.push({
@@ -953,7 +987,15 @@ function buildPublicPdfUrl(parcelaId, nossoNumero) {
 }
 
 async function buildBoletoResultFromCpf(cpf) {
-  const aluno = await findAlunoByCpf(cpf);
+  const cpfDigits = onlyDigits(cpf);
+
+  if (!isCpf(cpfDigits)) {
+    throw new Error("CPF inválido.");
+  }
+
+  const aluno = await findAlunoByCpf(cpfDigits);
+  assertCpfMatches(cpfDigits, aluno);
+
   const contrato = await findContratoByAlunoId(aluno.id);
 
   if (!Array.isArray(contrato.parcelas) || !contrato.parcelas.length) {
@@ -1001,15 +1043,26 @@ async function buildBoletoResultFromCpf(cpf) {
 /* =========================
    FLOW
 ========================= */
-
 function looksLikeHello(text) {
-  return /^(oi|olá|ola|bom dia|boa tarde|boa noite|menu|iniciar|começar|comecar)$/i.test(
+  return /^(oi|olá|ola|bom dia|boa tarde|boa noite|iniciar|começar|comecar)$/i.test(
     String(text || "").trim()
   );
 }
 
+function looksLikeMenu(text) {
+  return /^(menu|reiniciar|recomeçar|recomecar|voltar)$/i.test(String(text || "").trim());
+}
+
 function looksLikeBoletoRequest(text) {
   return /(boleto|2a via|segunda via|2 via|fatura|mensalidade)/i.test(String(text || ""));
+}
+
+function looksLikeThanks(text) {
+  return /^(obrigado|obrigada|valeu|agradeço|agradeco)$/i.test(String(text || "").trim());
+}
+
+function looksLikeHumanSupport(text) {
+  return /(atendente|humano|pessoa|suporte|ajuda)/i.test(String(text || ""));
 }
 
 function extractIncomingText(message) {
@@ -1047,9 +1100,25 @@ async function processUserMessage(phone, text) {
     text: truncateText(cleanText, 80),
   });
 
+  if (looksLikeMenu(cleanText)) {
+    resetConversation(phone);
+    await sendMetaText(phone, HUMAN_MESSAGES.restart);
+    return;
+  }
+
   if (looksLikeHello(cleanText)) {
     resetConversation(phone);
     await sendMetaText(phone, HUMAN_MESSAGES.welcome);
+    return;
+  }
+
+  if (looksLikeThanks(cleanText)) {
+    await sendMetaText(phone, HUMAN_MESSAGES.thanks);
+    return;
+  }
+
+  if (looksLikeHumanSupport(cleanText)) {
+    await sendMetaText(phone, HUMAN_MESSAGES.askHuman);
     return;
   }
 
@@ -1110,6 +1179,11 @@ async function processUserMessage(phone, text) {
       resetConversation(phone);
 
       const lower = String(error.message || error).toLowerCase();
+
+      if (lower.includes("falha de segurança") || lower.includes("cpf divergente")) {
+        await sendMetaText(phone, HUMAN_MESSAGES.securityMismatch);
+        return;
+      }
 
       if (lower.includes("aluno não encontrado")) {
         await sendMetaText(phone, HUMAN_MESSAGES.alunoNotFound);
@@ -1187,7 +1261,6 @@ async function handleMetaWebhook(body) {
 /* =========================
    PAGSCHOOL PAYMENT WEBHOOK
 ========================= */
-
 function extractPagSchoolEvent(body) {
   const payload = body && typeof body === "object" ? body : {};
 
@@ -1216,7 +1289,6 @@ function extractPagSchoolEvent(body) {
 /* =========================
    ROUTES
 ========================= */
-
 app.get("/", (_req, res) => {
   res.json({
     ok: true,
@@ -1366,7 +1438,9 @@ app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
       }
     }
 
-    return res.status(500).send(`A PagSchool não retornou um PDF válido. Tentativas: ${JSON.stringify(errors)}`);
+    return res
+      .status(500)
+      .send(`A PagSchool não retornou um PDF válido. Tentativas: ${JSON.stringify(errors)}`);
   } catch (error) {
     return res.status(500).send(String(error.message || error));
   }
