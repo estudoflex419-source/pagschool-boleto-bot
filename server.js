@@ -673,7 +673,13 @@ async function pagSchoolRequest(
 /* =========================
    PAGSCHOOL PARSERS
 ========================= */
-function normalizeAluno(raw, cpf) {
+
+/*
+  CORREÇÃO CRÍTICA:
+  NUNCA usar o CPF digitado como fallback no aluno.
+  Só vale o CPF que veio da API.
+*/
+function normalizeAluno(raw) {
   if (!raw || typeof raw !== "object") return null;
 
   const id = getByKeys(raw, ["id", "alunoId", "idAluno", "pessoaId", "userId"]);
@@ -682,10 +688,12 @@ function normalizeAluno(raw, cpf) {
 
   if (!id) return null;
 
+  const cpfFromApi = onlyDigits(rawCpf || "");
+
   return {
     id,
     nome: nome || "Aluno",
-    cpf: onlyDigits(rawCpf || cpf),
+    cpf: cpfFromApi,
     telefone: getByKeys(raw, ["telefoneCelular", "telefone", "celular", "whatsapp", "fone"]) || "",
     raw,
   };
@@ -698,22 +706,26 @@ function extractAlunoFromResponseStrict(data, cpf) {
   const objects = collectObjects(data);
 
   for (const obj of objects) {
-    const aluno = normalizeAluno(obj, cpfDigits);
+    const aluno = normalizeAluno(obj);
     if (!aluno) continue;
 
     const alunoCpf = onlyDigits(aluno.cpf || "");
-    if (alunoCpf && alunoCpf === cpfDigits) {
+    if (!alunoCpf) continue;
+
+    if (alunoCpf === cpfDigits) {
       return aluno;
     }
   }
 
   const arr = findFirstArray(data);
   for (const item of arr) {
-    const aluno = normalizeAluno(item, cpfDigits);
+    const aluno = normalizeAluno(item);
     if (!aluno) continue;
 
     const alunoCpf = onlyDigits(aluno.cpf || "");
-    if (alunoCpf && alunoCpf === cpfDigits) {
+    if (!alunoCpf) continue;
+
+    if (alunoCpf === cpfDigits) {
       return aluno;
     }
   }
