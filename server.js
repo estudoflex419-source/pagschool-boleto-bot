@@ -7,745 +7,911 @@ const morgan = require("morgan");
 const axios = require("axios");
 
 const app = express();
-app.set("trust proxy", true);
-app.disable("etag");
-
 app.use(cors());
-app.use(
-  helmet({
-    contentSecurityPolicy: false,
-  })
-);
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan("combined"));
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
+const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
 
-/**
- * ENV (Render)
- */
-const PAGSCHOOL_ENDPOINT = (process.env.PAGSCHOOL_ENDPOINT || "").replace(/\/$/, "");
-const PAGSCHOOL_EMAIL = process.env.PAGSCHOOL_EMAIL || "";
-const PAGSCHOOL_PASSWORD = process.env.PAGSCHOOL_PASSWORD || "";
-const PAGSCHOOL_TOKEN_FIXO = process.env.PAGSCHOOL_TOKEN || "";
+const META_VERIFY_TOKEN = String(process.env.META_VERIFY_TOKEN || "");
+const META_ACCESS_TOKEN = String(process.env.META_ACCESS_TOKEN || "");
+const META_PHONE_NUMBER_ID = String(process.env.META_PHONE_NUMBER_ID || "");
+const META_API_VERSION = String(process.env.META_API_VERSION || "v22.0");
 
-const FACILITAFLOW_SENDWEBHOOK_URL = (
-  process.env.FACILITAFLOW_SENDWEBHOOK_URL || "https://licenca.facilitaflow.com.br/sendWebhook"
-).replace(/\/$/, "");
-const FACILITAFLOW_API_TOKEN = process.env.FACILITAFLOW_API_TOKEN || "";
-const FACILITAFLOW_TOKENWEBHOOK =
-  process.env.FACILITAFLOW_TOKENWEBHOOK || process.env.FACILITAFLOW_API_TOKEN || "";
+const PAGSCHOOL_ENDPOINT = String(process.env.PAGSCHOOL_ENDPOINT || "").replace(/\/$/, "");
+const PAGSCHOOL_EMAIL = String(process.env.PAGSCHOOL_EMAIL || "");
+const PAGSCHOOL_PASSWORD = String(process.env.PAGSCHOOL_PASSWORD || "");
 
-const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
-const INBOUND_SECRET = process.env.INBOUND_SECRET || "";
+const tokenCache = {
+  token: "",
+  exp: 0,
+  codigoEscola: "",
+};
 
-/**
- * Helpers
- */
-function onlyDigits(v) {
-  return String(v || "").replace(/\D/g, "");
+const conversations = new Map();
+
+function onlyDigits(value) {
+  return String(value || "").replace(/\D/g, "");
 }
 
-function shortJson(v, max = 500) {
-  try {
-    const s = typeof v === "string" ? v : JSON.stringify(v);
-    return s.length > max ? `${s.slice(0, max)}...` : s;
-  } catch {
-    return String(v);
+function isCpf(value) {
+  return onlyDigits(value).length === 11;
+}
+
+function normalizePhone(value) {
+  let digits = onlyDigits(value);
+
+  if (!digits) return "";
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) return digits;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return digits;
+}
+
+function formatDateBR(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString("pt-BR");
+}
+
+function formatCurrencyBR(value) {
+  const num = Number(value || 0);
+  if (Number.isNaN(num)) return String(value || "");
+  return num.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function getConversation(phone) {
+  const key = normalizePhone(phone);
+  if (!conversations.has(key)) {
+    conversations.set(key, {
+      step: "idle",
+      lastCpf: "",
+      updatedAt: Date.now(),
+    });
   }
+  const convo = conversations.get(key);
+  convo.updatedAt = Date.now();
+  return convo;
 }
 
-function mustHaveEnv() {
-  if (!PAGSCHOOL_ENDPOINT) throw new Error("PAGSCHOOL_ENDPOINT não configurado");
-
-  if (!PAGSCHOOL_EMAIL || !PAGSCHOOL_PASSWORD) {
-    if (!PAGSCHOOL_TOKEN_FIXO) {
-      throw new Error("Configure PAGSCHOOL_EMAIL/PAGSCHOOL_PASSWORD (ou PAGSCHOOL_TOKEN)");
-    }
-  }
-
-  if (!FACILITAFLOW_API_TOKEN) {
-    throw new Error("FACILITAFLOW_API_TOKEN não configurado");
-  }
+function resetConversation(phone) {
+  conversations.set(normalizePhone(phone), {
+    step: "idle",
+    lastCpf: "",
+    updatedAt: Date.now(),
+  });
 }
 
-function buildPagSchoolUrl(path) {
-  const base = PAGSCHOOL_ENDPOINT.replace(/\/$/, "");
-  const p = path.startsWith("/") ? path : `/${path}`;
-
-  if (base.endsWith("/api") && p.startsWith("/api/")) {
-    return base + p.replace("/api", "");
-  }
-
-  return base + p;
-}
-
-function decodeJwtExpMs(token) {
-  try {
-    const parts = String(token).split(".");
-    if (parts.length < 2) return 0;
-
-    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-    const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-
-    if (!payload || !payload.exp) return 0;
-    return payload.exp * 1000;
-  } catch {
-    return 0;
-  }
-}
-
-function extractCpfFromText(text) {
-  const t = String(text || "");
-
-  const matchFormatado = t.match(/(\d{3}\.?\d{3}\.?\d{3}\-?\d{2})/);
-  if (matchFormatado) {
-    const cpf = onlyDigits(matchFormatado[1]);
-    if (cpf.length === 11) return cpf;
-  }
-
-  const match11 = t.match(/\b(\d{11})\b/);
-  if (match11) return match11[1];
-
-  return "";
-}
-
-function extractInboundText(node) {
-  if (!node) return "";
-  if (typeof node === "string") return node;
-  if (typeof node !== "object") return "";
-
-  return (
-    node.conversation ||
-    node.extendedTextMessage?.text ||
-    node.imageMessage?.caption ||
-    node.videoMessage?.caption ||
-    node.documentMessage?.caption ||
-    node.buttonsResponseMessage?.selectedButtonId ||
-    node.listResponseMessage?.title ||
-    node.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    node.templateButtonReplyMessage?.selectedId ||
-    node.interactiveResponseMessage?.body?.text ||
-    node.message?.conversation ||
-    node.message?.extendedTextMessage?.text ||
-    node.message?.imageMessage?.caption ||
-    node.message?.videoMessage?.caption ||
-    node.message?.documentMessage?.caption ||
-    node.message?.buttonsResponseMessage?.selectedButtonId ||
-    node.message?.listResponseMessage?.title ||
-    node.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    ""
-  );
-}
-
-function parseInbound(body) {
-  const b = body || {};
-
-  const rawPhone =
-    b.chatId ||
-    b.phone ||
-    b.telefone ||
-    b.from ||
-    b.numero ||
-    b.remoteJid ||
-    b.key?.remoteJid ||
-    b.message?.chatId ||
-    b.message?.remoteJid ||
-    b.message?.key?.remoteJid ||
-    (b.data && (b.data.phone || b.data.from || b.data.chatId)) ||
-    "";
-
-  const phone = onlyDigits(String(rawPhone).split("@")[0]);
-
-  const rawMessage =
-    extractInboundText(b.message) ||
-    extractInboundText(b) ||
-    b.text ||
-    b.body ||
-    b.mensagem ||
-    (b.data && (b.data.message || b.data.text || b.data.body)) ||
-    "";
-
-  const message = String(rawMessage || "").trim();
-  const cpf = onlyDigits(b.cpf || extractCpfFromText(message));
-
-  const fromMe = !!(
-    b.fromMe ||
-    b.key?.fromMe ||
-    b.message?.fromMe ||
-    b.message?.key?.fromMe
-  );
-
-  const pushName = String(
-    b.pushName ||
-      b.message?.pushName ||
-      (b.data && b.data.pushName) ||
-      ""
-  ).trim();
-
-  return {
-    phone,
-    message,
-    cpf,
-    fromMe,
-    pushName,
-    rawPhone: String(rawPhone || ""),
-  };
-}
-
-/**
- * PagSchool token cache
- */
-let tokenCache = { token: "", expMs: 0 };
-
-async function getPagSchoolToken() {
-  if (PAGSCHOOL_TOKEN_FIXO) return PAGSCHOOL_TOKEN_FIXO;
-
+function cleanupConversations() {
   const now = Date.now();
-  if (tokenCache.token && tokenCache.expMs && now < tokenCache.expMs - 60_000) {
-    return tokenCache.token;
-  }
-
-  const candidates = ["/api/authenticate", "/auth/authenticate"];
-  let lastErr = null;
-
-  for (const path of candidates) {
-    const url = buildPagSchoolUrl(path);
-    console.log("[PAGSCHOOL AUTH] tentando", url);
-
-    const resp = await axios.post(
-      url,
-      { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        timeout: 12000,
-        validateStatus: () => true,
-      }
-    );
-
-    console.log("[PAGSCHOOL AUTH] status=", resp.status, "body=", shortJson(resp.data, 300));
-
-    if (resp.status >= 200 && resp.status < 300 && resp.data && resp.data.token) {
-      const token = resp.data.token;
-      const expMs = decodeJwtExpMs(token) || Date.now() + 50 * 60 * 1000;
-      tokenCache = { token, expMs };
-      return token;
+  for (const [key, value] of conversations.entries()) {
+    if (now - Number(value.updatedAt || 0) > 1000 * 60 * 60 * 6) {
+      conversations.delete(key);
     }
-
-    lastErr = new Error(
-      `Falha ao autenticar (${resp.status}) em ${path}. Resp: ${shortJson(resp.data, 300)}`
-    );
   }
+}
+setInterval(cleanupConversations, 1000 * 60 * 30).unref();
 
-  throw lastErr || new Error("Falha ao autenticar na PagSchool");
+function requireMetaEnv() {
+  if (!META_VERIFY_TOKEN) throw new Error("Faltou META_VERIFY_TOKEN no Render.");
+  if (!META_ACCESS_TOKEN) throw new Error("Faltou META_ACCESS_TOKEN no Render.");
+  if (!META_PHONE_NUMBER_ID) throw new Error("Faltou META_PHONE_NUMBER_ID no Render.");
 }
 
-async function pagschoolRequest(method, path, { params, data, responseType } = {}) {
-  const token = await getPagSchoolToken();
-  const url = buildPagSchoolUrl(path);
+function requirePagSchoolEnv() {
+  if (!PAGSCHOOL_ENDPOINT) throw new Error("Faltou PAGSCHOOL_ENDPOINT no Render.");
+  if (!PAGSCHOOL_EMAIL) throw new Error("Faltou PAGSCHOOL_EMAIL no Render.");
+  if (!PAGSCHOOL_PASSWORD) throw new Error("Faltou PAGSCHOOL_PASSWORD no Render.");
+}
 
-  console.log("[PAGSCHOOL REQ]", method, url, "params=", shortJson(params, 200), "data=", shortJson(data, 200));
+function buildMetaUrl() {
+  return `https://graph.facebook.com/${META_API_VERSION}/${META_PHONE_NUMBER_ID}/messages`;
+}
 
-  const resp = await axios({
-    method,
-    url,
-    params,
-    data,
-    responseType: responseType || "json",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: responseType === "arraybuffer" ? "application/pdf" : "application/json",
-      Authorization: `JWT ${token}`,
+async function sendMetaText(phone, bodyText) {
+  requireMetaEnv();
+  const to = normalizePhone(phone);
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: {
+      preview_url: false,
+      body: String(bodyText || "").slice(0, 4096),
     },
-    timeout: 12000,
-    validateStatus: () => true,
-  });
-
-  console.log(
-    "[PAGSCHOOL RESP]",
-    method,
-    path,
-    "status=",
-    resp.status,
-    "body=",
-    responseType === "arraybuffer" ? `[arraybuffer ${resp.data?.length || 0}]` : shortJson(resp.data, 400)
-  );
-
-  return resp;
-}
-
-/**
- * FacilitaFlow sendWebhook
- */
-async function sendToFacilitaFlow({
-  phone,
-  message,
-  arquivo,
-  desativarFluxo = true,
-}) {
-  const body = {
-    apiKey: FACILITAFLOW_API_TOKEN,
-    phone: onlyDigits(phone),
-    message: String(message || ""),
-    desativarFluxo: !!desativarFluxo,
   };
 
-  if (arquivo) {
-    body.arquivo = arquivo;
-  }
-
-  if (FACILITAFLOW_TOKENWEBHOOK) {
-    body.tokenWebhook = FACILITAFLOW_TOKENWEBHOOK;
-    body.token = FACILITAFLOW_TOKENWEBHOOK;
-  }
-
-  console.log("[FACILITAFLOW SEND] url=", FACILITAFLOW_SENDWEBHOOK_URL);
-  console.log(
-    "[FACILITAFLOW SEND] body=",
-    shortJson(
-      {
-        ...body,
-        apiKey: body.apiKey ? "***set***" : "",
-        tokenWebhook: body.tokenWebhook ? "***set***" : "",
-        token: body.token ? "***set***" : "",
-      },
-      400
-    )
-  );
-
-  const resp = await axios.post(FACILITAFLOW_SENDWEBHOOK_URL, body, {
-    headers: { "Content-Type": "application/json" },
-    timeout: 12000,
+  const resp = await axios.post(buildMetaUrl(), payload, {
+    headers: {
+      Authorization: `Bearer ${META_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    timeout: 30000,
     validateStatus: () => true,
   });
-
-  console.log("[FACILITAFLOW SEND] status=", resp.status, "data=", shortJson(resp.data, 500));
 
   if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(`Falha no sendWebhook. status=${resp.status} data=${shortJson(resp.data, 400)}`);
+    throw new Error(`Meta texto falhou (${resp.status}): ${JSON.stringify(resp.data)}`);
   }
 
-  if (resp.data && typeof resp.data === "object" && resp.data.success === false) {
-    throw new Error(`sendWebhook respondeu success=false. data=${shortJson(resp.data, 400)}`);
-  }
-
-  return { status: resp.status, data: resp.data };
+  return resp.data;
 }
 
-/**
- * PagSchool: buscar aluno / contratos / parcela / gerar boleto
- */
-async function buscarAlunoPorCpf(cpf) {
-  const tries = [{ cpf }, { filter: cpf }, { search: cpf }, { termo: cpf }];
+async function sendMetaDocument(phone, documentUrl, filename, caption) {
+  requireMetaEnv();
+  const to = normalizePhone(phone);
 
-  for (const params of tries) {
-    console.log("[BUSCAR ALUNO] tentando params=", shortJson(params, 120));
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "document",
+    document: {
+      link: documentUrl,
+      filename: filename || "boleto.pdf",
+      caption: caption || "Segue o seu boleto em PDF.",
+    },
+  };
 
-    const resp = await pagschoolRequest("GET", "/api/aluno/all", { params });
+  const resp = await axios.post(buildMetaUrl(), payload, {
+    headers: {
+      Authorization: `Bearer ${META_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    timeout: 30000,
+    validateStatus: () => true,
+  });
 
-    if (resp.status < 200 || resp.status >= 300) continue;
-
-    const data = resp.data;
-    const rows = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.rows)
-      ? data.rows
-      : Array.isArray(data?.alunos)
-      ? data.alunos
-      : [];
-
-    console.log("[BUSCAR ALUNO] rows encontradas=", rows.length);
-
-    if (!rows.length) continue;
-
-    const found = rows.find((a) => onlyDigits(a?.cpf) === onlyDigits(cpf)) || rows[0];
-
-    console.log("[BUSCAR ALUNO] aluno encontrado=", shortJson(found, 300));
-    if (found) return found;
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Meta documento falhou (${resp.status}): ${JSON.stringify(resp.data)}`);
   }
 
-  console.log("[BUSCAR ALUNO] nenhum aluno encontrado para CPF", cpf);
+  return resp.data;
+}
+
+function getByKeys(obj, keys) {
+  if (!obj || typeof obj !== "object") return undefined;
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+      return obj[key];
+    }
+  }
+  return undefined;
+}
+
+function collectObjects(input, maxItems = 300) {
+  const result = [];
+  const stack = [input];
+  const seen = new Set();
+
+  while (stack.length && result.length < maxItems) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object") continue;
+    if (seen.has(current)) continue;
+    seen.add(current);
+
+    if (!Array.isArray(current)) result.push(current);
+
+    const values = Array.isArray(current) ? current : Object.values(current);
+    for (const value of values) {
+      if (value && typeof value === "object") stack.push(value);
+    }
+  }
+
+  return result;
+}
+
+function findFirstArray(input) {
+  if (Array.isArray(input)) return input;
+  if (!input || typeof input !== "object") return [];
+
+  const preferredKeys = [
+    "data",
+    "items",
+    "rows",
+    "result",
+    "results",
+    "content",
+    "alunos",
+    "contratos",
+    "parcelas",
+    "boletos",
+    "list",
+  ];
+
+  for (const key of preferredKeys) {
+    if (Array.isArray(input[key])) return input[key];
+  }
+
+  for (const value of Object.values(input)) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") {
+      const inner = findFirstArray(value);
+      if (inner.length) return inner;
+    }
+  }
+
+  return [];
+}
+
+function parseDateAny(value) {
+  if (!value) return null;
+
+  const d = new Date(value);
+  if (!Number.isNaN(d.getTime())) return d;
+
+  const match = String(value).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (match) {
+    const [, dd, mm, yyyy] = match;
+    const d2 = new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+    if (!Number.isNaN(d2.getTime())) return d2;
+  }
+
   return null;
 }
 
-async function buscarContratosPorAluno(alunoId) {
-  console.log("[BUSCAR CONTRATOS] alunoId=", alunoId);
+function normalizeAluno(raw, cpf) {
+  if (!raw || typeof raw !== "object") return null;
 
-  const resp = await pagschoolRequest("GET", `/api/contrato/by-aluno/${alunoId}`);
+  const id = getByKeys(raw, ["id", "alunoId", "idAluno", "pessoaId", "pessoa_id"]);
+  const nome = getByKeys(raw, ["nome", "nomeAluno", "aluno", "razaoSocial", "name"]);
+  const codigoEscola = getByKeys(raw, ["codigoEscola", "escolaId", "codigo_escola"]);
+  const rawCpf = getByKeys(raw, ["cpf", "documento", "cpfAluno"]);
 
-  if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(
-      `Erro ao consultar contratos. status=${resp.status} body=${shortJson(resp.data, 500)}`
-    );
-  }
+  if (!id) return null;
 
-  const contratos = Array.isArray(resp.data)
-    ? resp.data
-    : Array.isArray(resp.data?.rows)
-    ? resp.data.rows
-    : Array.isArray(resp.data?.contratos)
-    ? resp.data.contratos
-    : [];
-
-  console.log("[BUSCAR CONTRATOS] quantidade=", contratos.length);
-
-  return contratos;
+  return {
+    id,
+    nome: nome || "Aluno",
+    cpf: onlyDigits(rawCpf || cpf),
+    codigoEscola: codigoEscola || tokenCache.codigoEscola || "",
+    raw,
+  };
 }
 
-function escolherParcelaParaBoleto(contratos) {
-  const contrato =
-    contratos.find((c) => String(c?.status || "").toUpperCase() === "ATIVO") || contratos[0];
+function extractAlunoFromResponse(data, cpf) {
+  const cpfDigits = onlyDigits(cpf);
+  const objects = collectObjects(data);
 
-  if (!contrato) return { contrato: null, parcela: null };
-
-  const parcelas = Array.isArray(contrato?.parcelas) ? contrato.parcelas : [];
-  if (!parcelas.length) return { contrato, parcela: null };
-
-  const abertas = parcelas.filter((p) => String(p?.status || "").toUpperCase() !== "PAGO");
-  const list = abertas.length ? abertas : parcelas;
-
-  list.sort(
-    (a, b) =>
-      new Date(a?.vencimento || "2100-01-01") -
-      new Date(b?.vencimento || "2100-01-01")
-  );
-
-  return { contrato, parcela: list[0] || null };
-}
-
-async function gerarBoletoDaParcela(parcelaId) {
-  const paths = [
-    `/api/parcelas-contrato/gera-boleto-parcela/${parcelaId}`,
-    `/api/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`,
-  ];
-
-  let last = null;
-
-  for (const p of paths) {
-    console.log("[GERAR BOLETO] tentando", p);
-
-    const resp = await pagschoolRequest("POST", p);
-
-    if (resp.status >= 200 && resp.status < 300) {
-      console.log("[GERAR BOLETO] sucesso body=", shortJson(resp.data, 400));
-      return resp.data;
+  for (const obj of objects) {
+    const objCpf = onlyDigits(getByKeys(obj, ["cpf", "documento", "cpfAluno"]) || "");
+    if (cpfDigits && objCpf && objCpf === cpfDigits) {
+      const aluno = normalizeAluno(obj, cpfDigits);
+      if (aluno) return aluno;
     }
-
-    last = resp;
   }
 
-  throw new Error(
-    `Erro ao gerar boleto. status=${last?.status} body=${shortJson(last?.data, 500)}`
-  );
+  for (const obj of objects) {
+    const aluno = normalizeAluno(obj, cpfDigits);
+    if (aluno) return aluno;
+  }
+
+  const array = findFirstArray(data);
+  for (const item of array) {
+    const aluno = normalizeAluno(item, cpfDigits);
+    if (aluno) return aluno;
+  }
+
+  return null;
 }
 
-/**
- * Conversa: guarda “pendente CPF”
- */
-const pendingCpf = new Map();
+function normalizeContrato(raw, alunoId) {
+  if (!raw || typeof raw !== "object") return null;
 
-function setPendingCpf(phone) {
-  pendingCpf.set(onlyDigits(phone), Date.now() + 5 * 60 * 1000);
-  console.log("[PENDING CPF] set", onlyDigits(phone));
+  const id = getByKeys(raw, ["id", "contratoId", "idContrato"]);
+  if (!id) return null;
+
+  return {
+    id,
+    alunoId: getByKeys(raw, ["alunoId", "aluno_id", "pessoaId", "pessoa_id"]) || alunoId || "",
+    status: String(getByKeys(raw, ["status", "situacao", "descricaoStatus"]) || "").toLowerCase(),
+    codigoEscola: getByKeys(raw, ["codigoEscola", "escolaId", "codigo_escola"]) || tokenCache.codigoEscola || "",
+    raw,
+  };
 }
 
-function isPendingCpf(phone) {
-  const p = onlyDigits(phone);
-  const exp = pendingCpf.get(p);
+function isContratoAtivo(contrato) {
+  const status = String(contrato?.status || "").toLowerCase();
+  if (!status) return true;
+  if (status.includes("cancel")) return false;
+  if (status.includes("inativ")) return false;
+  if (status.includes("encerr")) return false;
+  return true;
+}
 
-  if (!exp) return false;
+function extractContratoFromResponse(data, alunoId) {
+  const objects = collectObjects(data);
+  const contratos = [];
 
-  if (exp < Date.now()) {
-    pendingCpf.delete(p);
+  for (const obj of objects) {
+    const contrato = normalizeContrato(obj, alunoId);
+    if (contrato) contratos.push(contrato);
+  }
+
+  const ativos = contratos.filter(isContratoAtivo);
+  if (ativos.length) return ativos[0];
+  return contratos[0] || null;
+}
+
+function normalizeParcela(raw, contratoId) {
+  if (!raw || typeof raw !== "object") return null;
+
+  const id = getByKeys(raw, ["id", "parcelaId", "idParcela"]);
+  if (!id) return null;
+
+  return {
+    id,
+    contratoId: getByKeys(raw, ["contratoId", "contrato_id", "idContrato"]) || contratoId || "",
+    nossoNumero: getByKeys(raw, ["nossoNumero", "nosso_numero"]),
+    numeroBoleto: getByKeys(raw, ["numeroBoleto", "codigoBarras", "linhaDigitavel"]),
+    linhaDigitavel: getByKeys(raw, ["linhaDigitavel", "codigoBarras", "numeroBoleto"]),
+    valor: Number(getByKeys(raw, ["valor", "valorOriginal", "valorParcela", "saldo"]) || 0),
+    valorPago: Number(getByKeys(raw, ["valorPago", "pago", "pagamento"]) || 0),
+    vencimento: getByKeys(raw, ["vencimento", "dataVencimento", "vencimentoEm"]),
+    status: String(getByKeys(raw, ["status", "situacao", "descricaoStatus"]) || "").toLowerCase(),
+    raw,
+  };
+}
+
+function isParcelaEmAberto(parcela) {
+  const status = String(parcela?.status || "").toLowerCase();
+  if (status.includes("paga") || status.includes("quitad")) return false;
+  if (status.includes("cancel")) return false;
+  if (status.includes("baixad")) return false;
+
+  if (
+    Number(parcela?.valorPago || 0) > 0 &&
+    Number(parcela?.valor || 0) > 0 &&
+    Number(parcela.valorPago) >= Number(parcela.valor)
+  ) {
     return false;
   }
 
   return true;
 }
 
-function clearPendingCpf(phone) {
-  pendingCpf.delete(onlyDigits(phone));
-  console.log("[PENDING CPF] clear", onlyDigits(phone));
+function extractParcelaFromResponse(data, contratoId) {
+  const objects = collectObjects(data);
+  const parcelas = [];
+
+  for (const obj of objects) {
+    const parcela = normalizeParcela(obj, contratoId);
+    if (parcela) parcelas.push(parcela);
+  }
+
+  const abertas = parcelas.filter(isParcelaEmAberto);
+  abertas.sort((a, b) => {
+    const da = parseDateAny(a.vencimento)?.getTime() || 0;
+    const db = parseDateAny(b.vencimento)?.getTime() || 0;
+    return da - db;
+  });
+
+  if (abertas.length) return abertas[0];
+  return parcelas[0] || null;
 }
 
-/**
- * Rotas
- */
-app.get("/", (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.json({ ok: true, service: "pagschool-boleto-bot" });
-});
+function normalizeBoleto(raw, parcela) {
+  if (!raw || typeof raw !== "object") return null;
 
-app.get("/health", (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.json({ ok: true, service: "pagschool-boleto-bot", time: new Date().toISOString() });
-});
+  const nossoNumero = getByKeys(raw, ["nossoNumero", "nosso_numero"]) || parcela?.nossoNumero || "";
+  const pdfUrl = getByKeys(raw, ["pdfUrl", "urlPdf", "linkPdf", "pdf", "url"]);
+  const linhaDigitavel = getByKeys(raw, ["linhaDigitavel", "codigoBarras", "numeroBoleto"]);
+  const numeroBoleto = getByKeys(raw, ["numeroBoleto", "codigoBarras", "linhaDigitavel"]);
+  const vencimento = getByKeys(raw, ["vencimento", "dataVencimento", "vencimentoEm"]) || parcela?.vencimento || "";
+  const valor = Number(getByKeys(raw, ["valor", "valorOriginal", "valorBoleto"]) || parcela?.valor || 0);
 
-app.get("/debug/env", (req, res) => {
-  res.set("Cache-Control", "no-store");
+  if (!nossoNumero && !pdfUrl && !linhaDigitavel && !numeroBoleto) return null;
+
+  return {
+    parcelaId: parcela?.id || getByKeys(raw, ["parcelaId", "idParcela"]),
+    nossoNumero,
+    pdfUrl,
+    linhaDigitavel: linhaDigitavel || numeroBoleto || "",
+    numeroBoleto: numeroBoleto || linhaDigitavel || "",
+    vencimento,
+    valor,
+    raw,
+  };
+}
+
+function extractBoletoFromResponse(data, parcela) {
+  const objects = collectObjects(data);
+  for (const obj of objects) {
+    const boleto = normalizeBoleto(obj, parcela);
+    if (boleto) return boleto;
+  }
+
+  if (typeof data === "string" && data.startsWith("http")) {
+    return {
+      parcelaId: parcela?.id || "",
+      nossoNumero: parcela?.nossoNumero || "",
+      pdfUrl: data,
+      linhaDigitavel: parcela?.linhaDigitavel || parcela?.numeroBoleto || "",
+      numeroBoleto: parcela?.numeroBoleto || parcela?.linhaDigitavel || "",
+      vencimento: parcela?.vencimento || "",
+      valor: parcela?.valor || 0,
+      raw: data,
+    };
+  }
+
+  return null;
+}
+
+async function getPagSchoolToken(forceRefresh = false) {
+  requirePagSchoolEnv();
+
+  if (!forceRefresh && tokenCache.token && Date.now() < tokenCache.exp) {
+    return tokenCache.token;
+  }
+
+  const attempts = [
+    { path: "/auth/authenticate", data: { email: PAGSCHOOL_EMAIL, senha: PAGSCHOOL_PASSWORD } },
+    { path: "/auth/authenticate", data: { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD } },
+    { path: "/session", data: { email: PAGSCHOOL_EMAIL, senha: PAGSCHOOL_PASSWORD } },
+    { path: "/session", data: { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD } },
+  ];
+
+  const errors = [];
+
+  for (const attempt of attempts) {
+    const url = `${PAGSCHOOL_ENDPOINT}${attempt.path}`;
+
+    const resp = await axios
+      .post(url, attempt.data, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 30000,
+        validateStatus: () => true,
+      })
+      .catch((err) => ({ status: 0, data: err.message }));
+
+    const token =
+      resp?.data?.token ||
+      resp?.data?.accessToken ||
+      resp?.data?.jwt ||
+      resp?.data?.data?.token ||
+      resp?.data?.data?.accessToken ||
+      "";
+
+    if (resp.status >= 200 && resp.status < 300 && token) {
+      tokenCache.token = String(token);
+      tokenCache.exp = Date.now() + 1000 * 60 * 50;
+      tokenCache.codigoEscola = String(
+        resp?.data?.user?.codigoEscola ||
+          resp?.data?.codigoEscola ||
+          resp?.data?.data?.user?.codigoEscola ||
+          tokenCache.codigoEscola ||
+          ""
+      );
+      return tokenCache.token;
+    }
+
+    errors.push({ url, status: resp.status, data: resp.data });
+  }
+
+  throw new Error(`Não consegui autenticar na PagSchool: ${JSON.stringify(errors)}`);
+}
+
+async function pagSchoolHttp(requestConfig, retry = true) {
+  const token = await getPagSchoolToken(false);
+  const url = requestConfig.url.startsWith("http")
+    ? requestConfig.url
+    : `${PAGSCHOOL_ENDPOINT}${requestConfig.url}`;
+
+  const authHeadersList = [{ Authorization: `JWT ${token}` }, { Authorization: `Bearer ${token}` }];
+
+  for (const extraHeaders of authHeadersList) {
+    const resp = await axios({
+      method: requestConfig.method || "get",
+      url,
+      params: requestConfig.params,
+      data: requestConfig.data,
+      responseType: requestConfig.responseType || "json",
+      timeout: requestConfig.timeout || 30000,
+      headers: {
+        "Content-Type": "application/json",
+        ...extraHeaders,
+        ...(requestConfig.headers || {}),
+      },
+      validateStatus: () => true,
+    }).catch((err) => ({ status: 0, data: err.message, headers: {} }));
+
+    if (resp.status === 401 && retry) {
+      await getPagSchoolToken(true);
+      return pagSchoolHttp(requestConfig, false);
+    }
+
+    if (resp.status >= 200 && resp.status < 300) {
+      return resp;
+    }
+  }
+
+  return { status: 0, data: `Falha no endpoint ${url}`, headers: {} };
+}
+
+async function findAlunoByCpf(cpf) {
+  const cpfDigits = onlyDigits(cpf);
+  const codigoEscola = tokenCache.codigoEscola || "";
+
+  const candidates = [
+    { method: "get", url: "/aluno", params: { cpf: cpfDigits, codigoEscola } },
+    { method: "get", url: "/alunos", params: { cpf: cpfDigits, codigoEscola } },
+    { method: "get", url: `/aluno/cpf/${cpfDigits}`, params: { codigoEscola } },
+    { method: "get", url: `/alunos/cpf/${cpfDigits}`, params: { codigoEscola } },
+    { method: "post", url: "/aluno/search", data: { cpf: cpfDigits, codigoEscola } },
+    { method: "post", url: "/alunos/search", data: { cpf: cpfDigits, codigoEscola } },
+    { method: "get", url: "/pessoas", params: { cpf: cpfDigits, codigoEscola } },
+    { method: "get", url: "/responsavel", params: { cpf: cpfDigits, codigoEscola } },
+  ];
+
+  for (const candidate of candidates) {
+    const resp = await pagSchoolHttp(candidate);
+    const aluno = extractAlunoFromResponse(resp.data, cpfDigits);
+    if (aluno) return aluno;
+  }
+
+  throw new Error(`Aluno não encontrado para o CPF ${cpfDigits}.`);
+}
+
+async function findContratoByAluno(aluno) {
+  const alunoId = aluno?.id;
+  const codigoEscola = aluno?.codigoEscola || tokenCache.codigoEscola || "";
+  if (!alunoId) throw new Error("Aluno sem ID para buscar contrato.");
+
+  const candidates = [
+    { method: "get", url: "/contrato", params: { alunoId, codigoEscola } },
+    { method: "get", url: "/contratos", params: { alunoId, codigoEscola } },
+    { method: "get", url: `/aluno/${alunoId}/contratos`, params: { codigoEscola } },
+    { method: "get", url: `/alunos/${alunoId}/contratos`, params: { codigoEscola } },
+    { method: "post", url: "/contrato/search", data: { alunoId, codigoEscola } },
+    { method: "post", url: "/contratos/search", data: { alunoId, codigoEscola } },
+  ];
+
+  for (const candidate of candidates) {
+    const resp = await pagSchoolHttp(candidate);
+    const contrato = extractContratoFromResponse(resp.data, alunoId);
+    if (contrato) return contrato;
+  }
+
+  throw new Error(`Contrato não encontrado para o aluno ${alunoId}.`);
+}
+
+async function findParcelaEmAberto(contrato) {
+  const contratoId = contrato?.id;
+  if (!contratoId) throw new Error("Contrato sem ID para buscar parcela.");
+
+  const candidates = [
+    { method: "get", url: "/parcela", params: { contratoId, status: "aberto" } },
+    { method: "get", url: "/parcelas", params: { contratoId, status: "aberto" } },
+    { method: "get", url: `/contrato/${contratoId}/parcelas`, params: { status: "aberto" } },
+    { method: "get", url: `/contratos/${contratoId}/parcelas`, params: { status: "aberto" } },
+    { method: "post", url: "/parcela/search", data: { contratoId, status: "aberto" } },
+    { method: "post", url: "/parcelas/search", data: { contratoId, status: "aberto" } },
+  ];
+
+  for (const candidate of candidates) {
+    const resp = await pagSchoolHttp(candidate);
+    const parcela = extractParcelaFromResponse(resp.data, contratoId);
+    if (parcela) return parcela;
+  }
+
+  throw new Error(`Parcela em aberto não encontrada para o contrato ${contratoId}.`);
+}
+
+async function getOuGerarBoleto(aluno, contrato, parcela) {
+  const parcelaId = parcela?.id;
+  if (!parcelaId) throw new Error("Parcela sem ID para gerar boleto.");
+
+  const payloadBase = {
+    alunoId: aluno?.id,
+    contratoId: contrato?.id,
+    parcelaId,
+    nossoNumero: parcela?.nossoNumero,
+    codigoEscola: aluno?.codigoEscola || contrato?.codigoEscola || tokenCache.codigoEscola || undefined,
+  };
+
+  const candidates = [
+    { method: "post", url: "/boleto", data: payloadBase },
+    { method: "post", url: "/boleto/gerar", data: payloadBase },
+    { method: "post", url: "/boletos/gerar", data: payloadBase },
+    { method: "get", url: "/boleto", params: payloadBase },
+    { method: "get", url: "/boletos", params: payloadBase },
+    { method: "get", url: `/parcela/${parcelaId}/boleto`, params: payloadBase },
+    { method: "post", url: `/parcela/${parcelaId}/boleto`, data: payloadBase },
+  ];
+
+  for (const candidate of candidates) {
+    const resp = await pagSchoolHttp(candidate);
+    const boleto = extractBoletoFromResponse(resp.data, parcela);
+    if (boleto) return boleto;
+  }
+
+  return {
+    parcelaId,
+    nossoNumero: parcela?.nossoNumero || "",
+    pdfUrl: "",
+    linhaDigitavel: parcela?.linhaDigitavel || parcela?.numeroBoleto || "",
+    numeroBoleto: parcela?.numeroBoleto || parcela?.linhaDigitavel || "",
+    vencimento: parcela?.vencimento || "",
+    valor: parcela?.valor || 0,
+    raw: parcela?.raw || {},
+  };
+}
+
+async function buildBoletoResultFromCpf(cpf) {
+  const aluno = await findAlunoByCpf(cpf);
+  const contrato = await findContratoByAluno(aluno);
+  const parcela = await findParcelaEmAberto(contrato);
+  const boleto = await getOuGerarBoleto(aluno, contrato, parcela);
+
+  let pdfUrl = boleto.pdfUrl || "";
+  if (!pdfUrl && PUBLIC_BASE_URL) {
+    const nn = encodeURIComponent(String(boleto.nossoNumero || parcela.nossoNumero || "auto"));
+    pdfUrl = `${PUBLIC_BASE_URL}/boleto/pdf/${encodeURIComponent(parcela.id)}/${nn}`;
+  }
+
+  return {
+    studentName: aluno.nome,
+    alunoId: aluno.id,
+    contratoId: contrato.id,
+    parcelaId: parcela.id,
+    nossoNumero: boleto.nossoNumero || parcela.nossoNumero || "",
+    numeroBoleto: boleto.numeroBoleto || parcela.numeroBoleto || "",
+    linhaDigitavel: boleto.linhaDigitavel || parcela.linhaDigitavel || parcela.numeroBoleto || "",
+    vencimento: boleto.vencimento || parcela.vencimento || "",
+    valor: boleto.valor || parcela.valor || 0,
+    pdfUrl,
+    raw: {
+      aluno: aluno.raw,
+      contrato: contrato.raw,
+      parcela: parcela.raw,
+      boleto: boleto.raw,
+    },
+  };
+}
+
+function looksLikeHello(text) {
+  return /^(oi|olá|ola|bom dia|boa tarde|boa noite|menu|iniciar|começar|comecar)$/i.test(
+    String(text || "").trim()
+  );
+}
+
+function looksLikeBoletoRequest(text) {
+  return /(boleto|2a via|segunda via|mensalidade|fatura)/i.test(String(text || ""));
+}
+
+function extractIncomingText(message) {
+  if (!message || typeof message !== "object") return "";
+
+  if (message.type === "text") return message.text?.body || "";
+  if (message.type === "button") return message.button?.text || "";
+  if (message.type === "interactive") {
+    return (
+      message.interactive?.button_reply?.title ||
+      message.interactive?.button_reply?.id ||
+      message.interactive?.list_reply?.title ||
+      message.interactive?.list_reply?.id ||
+      ""
+    );
+  }
+
+  return "";
+}
+
+async function processUserMessage(phone, text) {
+  const cleanText = String(text || "").trim();
+  const digits = onlyDigits(cleanText);
+  const convo = getConversation(phone);
+
+  if (looksLikeHello(cleanText)) {
+    resetConversation(phone);
+    await sendMetaText(
+      phone,
+      "Olá. Eu sou a assistente de boletos.\n\nDigite *boleto* para solicitar a 2ª via."
+    );
+    return;
+  }
+
+  if (looksLikeBoletoRequest(cleanText)) {
+    convo.step = "awaiting_cpf";
+    await sendMetaText(phone, "Perfeito. Me envie o *CPF do aluno* para eu localizar o boleto.");
+    return;
+  }
+
+  if (convo.step === "awaiting_cpf" || isCpf(digits)) {
+    if (!isCpf(digits)) {
+      await sendMetaText(phone, "O CPF precisa ter 11 números. Me envie novamente só com os números.");
+      return;
+    }
+
+    convo.step = "processing";
+    convo.lastCpf = digits;
+
+    await sendMetaText(phone, "Estou localizando o boleto. Aguarde um instante.");
+
+    try {
+      const result = await buildBoletoResultFromCpf(digits);
+
+      const lines = [];
+      if (result.studentName) lines.push(`Aluno: ${result.studentName}`);
+      if (result.vencimento) lines.push(`Vencimento: ${formatDateBR(result.vencimento)}`);
+      if (result.valor) lines.push(`Valor: ${formatCurrencyBR(result.valor)}`);
+      if (result.linhaDigitavel) lines.push(`Linha digitável: ${result.linhaDigitavel}`);
+      lines.push("Segue o PDF do boleto logo abaixo.");
+
+      await sendMetaText(phone, lines.join("\n"));
+
+      if (result.pdfUrl) {
+        await sendMetaDocument(
+          phone,
+          result.pdfUrl,
+          `boleto-${result.nossoNumero || result.parcelaId || "pagschool"}.pdf`,
+          "Segue o seu boleto em PDF."
+        );
+      } else {
+        await sendMetaText(phone, "Eu localizei os dados do boleto, mas não consegui montar o link do PDF.");
+      }
+
+      resetConversation(phone);
+      return;
+    } catch (_error) {
+      resetConversation(phone);
+      await sendMetaText(
+        phone,
+        "Não consegui localizar um boleto em aberto para esse CPF agora. Confira o CPF e tente novamente."
+      );
+      return;
+    }
+  }
+
+  await sendMetaText(phone, "Digite *boleto* para solicitar a 2ª via.");
+}
+
+async function handleMetaWebhook(body) {
+  const entries = Array.isArray(body?.entry) ? body.entry : [];
+
+  for (const entry of entries) {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+
+    for (const change of changes) {
+      if (change?.field !== "messages") continue;
+
+      const messages = Array.isArray(change?.value?.messages) ? change.value.messages : [];
+      for (const message of messages) {
+        const from = normalizePhone(message?.from || "");
+        const text = extractIncomingText(message);
+
+        if (!from || !text) continue;
+        await processUserMessage(from, text);
+      }
+    }
+  }
+}
+
+app.get("/", (_req, res) => {
   res.json({
     ok: true,
-    PORT: String(PORT),
-    PAGSCHOOL_ENDPOINT,
-    PAGSCHOOL_EMAIL_MASK: PAGSCHOOL_EMAIL ? `${PAGSCHOOL_EMAIL.slice(0, 4)}***********` : "",
-    PAGSCHOOL_PASSWORD_SET: !!PAGSCHOOL_PASSWORD,
-    PAGSCHOOL_TOKEN_SET: !!PAGSCHOOL_TOKEN_FIXO,
-    FACILITAFLOW_SENDWEBHOOK_URL,
-    FACILITAFLOW_API_TOKEN_SET: !!FACILITAFLOW_API_TOKEN,
-    FACILITAFLOW_TOKENWEBHOOK_SET: !!FACILITAFLOW_TOKENWEBHOOK,
-    PUBLIC_BASE_URL: PUBLIC_BASE_URL || "",
-    INBOUND_SECRET_SET: !!INBOUND_SECRET,
+    service: "pagschool-meta-bot",
+    webhook: "/meta/webhook",
+    time: new Date().toISOString(),
   });
 });
 
-app.get("/debug/pagschool/auth", async (req, res) => {
+app.get("/health", (_req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
+
+app.get("/debug/routes", (_req, res) => {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push({
+        path: middleware.route.path,
+        methods: Object.keys(middleware.route.methods),
+      });
+    }
+  });
+  res.json({ ok: true, routes });
+});
+
+app.get("/meta/webhook", (req, res) => {
   try {
-    mustHaveEnv();
-    const token = await getPagSchoolToken();
-    res.json({ ok: true, tokenPreview: token ? `${token.slice(0, 12)}...` : "" });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+
+    if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
+      return res.status(200).send(challenge);
+    }
+
+    return res.status(403).send("Forbidden");
+  } catch (error) {
+    return res.status(500).send(String(error.message || error));
   }
 });
 
-app.post("/webhook", (req, res) => {
-  res.json({ ok: true });
+app.post("/meta/webhook", async (req, res) => {
+  res.status(200).send("EVENT_RECEIVED");
 
-  setImmediate(() => {
-    try {
-      console.log("[WEBHOOK PAGSCHOOL]", JSON.stringify(req.body || {}));
-    } catch {}
-  });
-});
-
-app.post("/ff/inbound", async (req, res) => {
-  if (INBOUND_SECRET) {
-    const secret = req.headers["x-inbound-secret"];
-    if (secret !== INBOUND_SECRET) {
-      return res.status(401).json({ ok: false, error: "unauthorized" });
-    }
+  try {
+    await handleMetaWebhook(req.body);
+  } catch (error) {
+    console.error("[META WEBHOOK ERROR]", error?.message || error);
   }
-
-  res.json({ ok: true });
-
-  setImmediate(async () => {
-    let inbound = { phone: "", message: "", cpf: "", fromMe: false, pushName: "" };
-
-    try {
-      mustHaveEnv();
-
-      inbound = parseInbound(req.body);
-
-      console.log("[FF INBOUND RAW]");
-      console.log(shortJson(req.body || {}, 3000));
-      console.log("[FF INBOUND PARSED]", JSON.stringify(inbound));
-
-      if (inbound.fromMe) {
-        console.log("[FF INBOUND] ignorado: mensagem enviada pelo próprio bot");
-        return;
-      }
-
-      if (!inbound.phone) {
-        console.warn("[FF INBOUND] sem phone. body=", shortJson(req.body || {}, 2000));
-        return;
-      }
-
-      const pediuBoleto = /\bboleto\b/i.test(inbound.message);
-      const cpfValido = inbound.cpf && inbound.cpf.length === 11;
-
-      console.log(
-        "[FF FLOW] phone=",
-        inbound.phone,
-        "message=",
-        inbound.message,
-        "cpf=",
-        inbound.cpf,
-        "pediuBoleto=",
-        pediuBoleto,
-        "cpfValido=",
-        cpfValido,
-        "pending=",
-        isPendingCpf(inbound.phone)
-      );
-
-      if (pediuBoleto && !cpfValido) {
-        setPendingCpf(inbound.phone);
-
-        await sendToFacilitaFlow({
-          phone: inbound.phone,
-          message: 'Para eu puxar a 2ª via, me envie seu CPF assim: "CPF 12345678901" (11 números). 😊',
-        });
-
-        console.log("[FF FLOW] pediu boleto sem CPF -> mensagem de solicitação enviada");
-        return;
-      }
-
-      if ((isPendingCpf(inbound.phone) || pediuBoleto || cpfValido) && cpfValido) {
-        clearPendingCpf(inbound.phone);
-
-        console.log("[FF FLOW] iniciando busca do boleto para CPF", inbound.cpf);
-
-        await sendToFacilitaFlow({
-          phone: inbound.phone,
-          message: "Só um instante… vou buscar seu boleto 😊",
-        });
-
-        const aluno = await buscarAlunoPorCpf(inbound.cpf);
-
-        if (!aluno) {
-          await sendToFacilitaFlow({
-            phone: inbound.phone,
-            message: "Não encontrei esse CPF na PagSchool. Confere se digitou certinho com 11 números.",
-          });
-          console.log("[FF FLOW] aluno não encontrado");
-          return;
-        }
-
-        console.log("[FF FLOW] aluno ok id=", aluno.id, "nome=", aluno.nome || aluno.nomeAluno || "");
-
-        const contratos = await buscarContratosPorAluno(aluno.id);
-
-        if (!contratos.length) {
-          await sendToFacilitaFlow({
-            phone: inbound.phone,
-            message: "Achei seu cadastro, mas não encontrei contrato. Vou precisar verificar. 😊",
-          });
-          console.log("[FF FLOW] sem contratos");
-          return;
-        }
-
-        const { contrato, parcela } = escolherParcelaParaBoleto(contratos);
-
-        console.log(
-          "[FF FLOW] contrato escolhido=",
-          shortJson(
-            contrato
-              ? { id: contrato.id, status: contrato.status, parcelas: Array.isArray(contrato.parcelas) ? contrato.parcelas.length : 0 }
-              : null,
-            300
-          )
-        );
-
-        console.log(
-          "[FF FLOW] parcela escolhida=",
-          shortJson(
-            parcela
-              ? {
-                  id: parcela.id,
-                  status: parcela.status,
-                  vencimento: parcela.vencimento,
-                  nossoNumero: parcela.nossoNumero,
-                  numeroBoleto: parcela.numeroBoleto,
-                }
-              : null,
-            300
-          )
-        );
-
-        if (!contrato || !parcela?.id) {
-          await sendToFacilitaFlow({
-            phone: inbound.phone,
-            message: "Encontrei seu contrato, mas não consegui identificar uma parcela válida. Vou verificar. 😊",
-          });
-          console.log("[FF FLOW] sem parcela válida");
-          return;
-        }
-
-        const gerada = await gerarBoletoDaParcela(parcela.id);
-
-        const nossoNumero = gerada?.nossoNumero || parcela?.nossoNumero || "";
-        const numeroBoleto = gerada?.numeroBoleto || parcela?.numeroBoleto || "";
-
-        console.log(
-          "[FF FLOW] boleto gerado dados=",
-          shortJson({ nossoNumero, numeroBoleto, gerada }, 500)
-        );
-
-        if (!nossoNumero) {
-          await sendToFacilitaFlow({
-            phone: inbound.phone,
-            message: "Gerei a solicitação, mas não recebi o nosso número do boleto. Vou verificar. 😊",
-          });
-          console.log("[FF FLOW] sem nossoNumero");
-          return;
-        }
-
-        const publicBase = (PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
-        const pdfUrl = `${publicBase}/boleto/pdf/${parcela.id}/${encodeURIComponent(nossoNumero)}`;
-
-        console.log("[FF FLOW] pdfUrl=", pdfUrl);
-
-        const texto =
-          `✅ Aqui está a 2ª via do seu boleto:\n${pdfUrl}` +
-          (numeroBoleto ? `\n\nLinha digitável:\n${numeroBoleto}` : "");
-
-        await sendToFacilitaFlow({
-          phone: inbound.phone,
-          message: texto,
-        });
-
-        console.log("[FF FLOW] boleto enviado com sucesso");
-        return;
-      }
-
-      console.log("[FF FLOW] mensagem ignorada: não entrou em boleto/cpf");
-      return;
-    } catch (e) {
-      console.error("[FF INBOUND] erro:", e.message);
-      if (e.stack) {
-        console.error("[FF INBOUND] stack:", e.stack);
-      }
-
-      if (inbound.phone) {
-        try {
-          await sendToFacilitaFlow({
-            phone: inbound.phone,
-            message: "Tive um erro ao buscar seu boleto agora. Me chama novamente em instantes. 😊",
-          });
-        } catch (sendErr) {
-          console.error("[FF INBOUND] erro ao enviar mensagem de falha:", sendErr.message);
-        }
-      }
-    }
-  });
 });
 
 app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
   try {
-    mustHaveEnv();
+    const parcelaId = String(req.params.parcelaId || "");
+    const nossoNumero = String(req.params.nossoNumero || "");
 
-    const { parcelaId, nossoNumero } = req.params;
-
-    console.log("[PDF] solicitando PDF parcelaId=", parcelaId, "nossoNumero=", nossoNumero);
-
-    const resp = await pagschoolRequest(
-      "GET",
-      `/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
-      { responseType: "arraybuffer" }
-    );
-
-    if (resp.status < 200 || resp.status >= 300) {
-      console.log("[PDF] erro status=", resp.status);
-      return res.status(resp.status).send(Buffer.from(resp.data || ""));
+    if (!parcelaId) {
+      return res.status(400).send("parcelaId é obrigatório");
     }
 
-    console.log("[PDF] sucesso tamanho=", resp.data?.length || 0);
+    const candidates = [
+      { method: "get", url: `/boleto/pdf/${parcelaId}/${nossoNumero}`, responseType: "arraybuffer" },
+      { method: "get", url: "/boleto/pdf", params: { parcelaId, nossoNumero }, responseType: "arraybuffer" },
+      { method: "get", url: `/parcela/${parcelaId}/boleto/pdf`, params: { nossoNumero }, responseType: "arraybuffer" },
+      { method: "post", url: "/boleto/pdf", data: { parcelaId, nossoNumero }, responseType: "arraybuffer" },
+    ];
 
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", "inline; filename=boleto.pdf");
-    return res.status(200).send(Buffer.from(resp.data));
-  } catch (e) {
-    console.error("[PDF] erro:", e.message);
-    return res.status(500).send("Erro ao gerar PDF");
+    for (const candidate of candidates) {
+      const resp = await pagSchoolHttp(candidate);
+      const contentType = String(resp?.headers?.["content-type"] || "").toLowerCase();
+
+      if (contentType.includes("application/pdf")) {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="boleto-${nossoNumero || parcelaId}.pdf"`);
+        return res.status(200).send(resp.data);
+      }
+
+      const maybeJson = Buffer.isBuffer(resp.data)
+        ? (() => {
+            try {
+              return JSON.parse(resp.data.toString("utf8"));
+            } catch (_e) {
+              return null;
+            }
+          })()
+        : resp.data;
+
+      const boleto = extractBoletoFromResponse(maybeJson, { id: parcelaId, nossoNumero });
+      if (boleto?.pdfUrl) {
+        return res.redirect(boleto.pdfUrl);
+      }
+    }
+
+    return res.status(404).send("PDF do boleto não encontrado");
+  } catch (error) {
+    return res.status(500).send(String(error.message || error));
+  }
+});
+
+app.get("/debug/pagschool/test-auth", async (_req, res) => {
+  try {
+    const token = await getPagSchoolToken(false);
+    res.json({
+      ok: true,
+      tokenPreview: `${String(token).slice(0, 12)}...`,
+      codigoEscola: tokenCache.codigoEscola || null,
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error.message || error) });
+  }
+});
+
+app.get("/debug/pagschool/test-cpf/:cpf", async (req, res) => {
+  try {
+    const result = await buildBoletoResultFromCpf(req.params.cpf);
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error.message || error) });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`[OK] Online na porta ${PORT}`);
-  console.log(`PAGSCHOOL_ENDPOINT = ${PAGSCHOOL_ENDPOINT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
