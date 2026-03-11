@@ -71,6 +71,68 @@ const conversations = new Map();
 const processedMessageIds = new Map();
 
 /* =========================
+   HUMAN MESSAGES
+========================= */
+
+const HUMAN_MESSAGES = {
+  welcome:
+    "Olá 😊\nSeja bem-vindo(a).\nSou a assistente virtual responsável pela 2ª via de boletos.\n\nPara continuar, digite *boleto*.",
+
+  askCpf:
+    "Perfeito.\nMe envie o *CPF do aluno* para eu localizar a 2ª via do boleto.\n\nPode mandar apenas os números.",
+
+  invalidCpf:
+    "O CPF informado parece estar incompleto.\n\nMe envie novamente com os *11 números*, por favor.",
+
+  processing:
+    "Só um instante... estou localizando o boleto para você. ⏳",
+
+  fallback:
+    "Para solicitar a 2ª via, digite *boleto*.",
+
+  pdfOnlyFallback:
+    "Localizei o boleto, mas não consegui gerar o PDF neste momento.\n\nTente novamente em alguns instantes.",
+
+  alunoNotFound:
+    "Não localizei nenhum aluno com esse CPF no momento.\n\nConfira os números enviados e tente novamente.",
+
+  noOpenBoleto:
+    "Verifiquei aqui e, no momento, não encontrei boleto em aberto para esse CPF. ✅",
+
+  genericError:
+    "No momento não consegui concluir sua solicitação por aqui.\n\nTente novamente em alguns minutos.",
+
+  paymentReceived(name, valor, dataPagamento, nossoNumero) {
+    const lines = [];
+    lines.push(`Olá, ${name}.`);
+    lines.push("Recebemos a confirmação do pagamento do seu boleto com sucesso ✅");
+    if (valor) lines.push(`Valor: ${valor}`);
+    if (dataPagamento) lines.push(`Pagamento: ${dataPagamento}`);
+    if (nossoNumero) lines.push(`Nosso número: ${nossoNumero}`);
+    lines.push("Obrigado.");
+    return lines.join("\n");
+  },
+
+  boletoFound(result) {
+    const lines = [];
+    lines.push("Pronto. Localizei o boleto ✅");
+    lines.push("");
+    lines.push(`*Aluno:* ${result.aluno.nome}`);
+    if (result.vencimento) lines.push(`*Vencimento:* ${formatDateBR(result.vencimento)}`);
+    if (result.valor) lines.push(`*Valor:* ${formatCurrencyBR(result.valor)}`);
+    if (result.linhaDigitavel) lines.push(`*Linha digitável:* ${result.linhaDigitavel}`);
+    if (result.pdfUrl) {
+      lines.push("");
+      lines.push("Estou enviando o PDF logo abaixo.");
+    }
+    return lines.join("\n");
+  },
+
+  pdfCaption:
+    "Segue a 2ª via do boleto em PDF. 📄",
+};
+
+/* =========================
    LOGS
 ========================= */
 
@@ -383,7 +445,7 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     document: {
       link: documentUrl,
       filename: filename || "boleto.pdf",
-      caption: caption || "Segue o seu boleto em PDF.",
+      caption: caption || HUMAN_MESSAGES.pdfCaption,
     },
   };
 
@@ -987,10 +1049,7 @@ async function processUserMessage(phone, text) {
 
   if (looksLikeHello(cleanText)) {
     resetConversation(phone);
-    await sendMetaText(
-      phone,
-      "Olá. Eu sou a assistente de boletos.\n\nDigite *boleto* para solicitar a 2ª via."
-    );
+    await sendMetaText(phone, HUMAN_MESSAGES.welcome);
     return;
   }
 
@@ -998,19 +1057,13 @@ async function processUserMessage(phone, text) {
     convo.step = "awaiting_cpf";
     convo.updatedAt = Date.now();
 
-    await sendMetaText(
-      phone,
-      "Perfeito. Me envie o *CPF do aluno* para eu localizar a 2ª via."
-    );
+    await sendMetaText(phone, HUMAN_MESSAGES.askCpf);
     return;
   }
 
   if (convo.step === "awaiting_cpf" || isCpf(digits)) {
     if (!isCpf(digits)) {
-      await sendMetaText(
-        phone,
-        "O CPF precisa ter *11 números*. Me envie novamente apenas com os números."
-      );
+      await sendMetaText(phone, HUMAN_MESSAGES.invalidCpf);
       return;
     }
 
@@ -1018,7 +1071,7 @@ async function processUserMessage(phone, text) {
     convo.lastCpf = digits;
     convo.updatedAt = Date.now();
 
-    await sendMetaText(phone, "Estou localizando o boleto. Aguarde um instante.");
+    await sendMetaText(phone, HUMAN_MESSAGES.processing);
 
     try {
       const result = await buildBoletoResultFromCpf(digits);
@@ -1032,27 +1085,17 @@ async function processUserMessage(phone, text) {
         nossoNumero: result.nossoNumero,
       });
 
-      const lines = [];
-      lines.push(`Aluno: ${result.aluno.nome}`);
-      if (result.vencimento) lines.push(`Vencimento: ${formatDateBR(result.vencimento)}`);
-      if (result.valor) lines.push(`Valor: ${formatCurrencyBR(result.valor)}`);
-      if (result.linhaDigitavel) lines.push(`Linha digitável: ${result.linhaDigitavel}`);
-      if (result.pdfUrl) lines.push("Segue o PDF do boleto logo abaixo.");
-
-      await sendMetaText(phone, lines.join("\n"));
+      await sendMetaText(phone, HUMAN_MESSAGES.boletoFound(result));
 
       if (result.pdfUrl) {
         await sendMetaDocument(
           phone,
           result.pdfUrl,
           `boleto-${result.nossoNumero || result.parcela.id}.pdf`,
-          "Segue o seu boleto em PDF."
+          HUMAN_MESSAGES.pdfCaption
         );
       } else {
-        await sendMetaText(
-          phone,
-          "Localizei o boleto, mas não consegui montar o PDF agora. Se precisar, tente novamente em alguns instantes."
-        );
+        await sendMetaText(phone, HUMAN_MESSAGES.pdfOnlyFallback);
       }
 
       resetConversation(phone);
@@ -1069,33 +1112,21 @@ async function processUserMessage(phone, text) {
       const lower = String(error.message || error).toLowerCase();
 
       if (lower.includes("aluno não encontrado")) {
-        await sendMetaText(
-          phone,
-          "Não localizei aluno para esse CPF. Confira os números e tente novamente."
-        );
+        await sendMetaText(phone, HUMAN_MESSAGES.alunoNotFound);
         return;
       }
 
       if (lower.includes("nenhuma parcela")) {
-        await sendMetaText(
-          phone,
-          "Não encontrei boleto em aberto para esse CPF no momento."
-        );
+        await sendMetaText(phone, HUMAN_MESSAGES.noOpenBoleto);
         return;
       }
 
-      await sendMetaText(
-        phone,
-        "Não consegui concluir sua solicitação agora. Tente novamente em alguns minutos."
-      );
+      await sendMetaText(phone, HUMAN_MESSAGES.genericError);
       return;
     }
   }
 
-  await sendMetaText(
-    phone,
-    "Digite *boleto* para solicitar a 2ª via."
-  );
+  await sendMetaText(phone, HUMAN_MESSAGES.fallback);
 }
 
 async function handleMetaWebhook(body) {
@@ -1275,15 +1306,14 @@ app.post("/webhook", async (req, res) => {
     });
 
     if (event.phone) {
-      const lines = [];
-      lines.push(`Olá, ${event.nome}.`);
-      lines.push("Recebemos a confirmação de pagamento do seu boleto.");
-      if (event.valorPago || event.valor) lines.push(`Valor: ${formatCurrencyBR(event.valorPago || event.valor)}`);
-      if (event.dataPagamento) lines.push(`Pagamento: ${formatDateBR(event.dataPagamento)}`);
-      if (event.nossoNumero) lines.push(`Nosso número: ${event.nossoNumero}`);
-      lines.push("Obrigado.");
+      const textoPagamento = HUMAN_MESSAGES.paymentReceived(
+        event.nome,
+        event.valorPago || event.valor ? formatCurrencyBR(event.valorPago || event.valor) : "",
+        event.dataPagamento ? formatDateBR(event.dataPagamento) : "",
+        event.nossoNumero || ""
+      );
 
-      await sendMetaText(event.phone, lines.join("\n"));
+      await sendMetaText(event.phone, textoPagamento);
     }
   } catch (error) {
     logError("Falha ao processar webhook da PagSchool.", String(error.message || error));
