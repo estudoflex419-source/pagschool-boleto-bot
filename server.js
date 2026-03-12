@@ -436,7 +436,12 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
 ========================= */
 
 function buildOpenAIMessageContent(text) {
-  return [{ type: "text", text: String(text || "") }];
+  return [
+    {
+      type: "input_text",
+      text: String(text || ""),
+    },
+  ];
 }
 
 function getAIHistoryForOpenAI(phone, maxItems = 8) {
@@ -454,23 +459,28 @@ function pushAIHistory(phone, role, text) {
     text: String(text || "").slice(0, 2000),
     at: Date.now(),
   });
+
   if (convo.aiHistory.length > 12) {
     convo.aiHistory = convo.aiHistory.slice(-12);
   }
+
   convo.updatedAt = Date.now();
   scheduleSaveConversations();
 }
 
 function extractOpenAIText(data) {
-  const outputText = String(data?.output_text || "").trim();
-  if (outputText) return outputText;
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
 
   const output = Array.isArray(data?.output) ? data.output : [];
+
   for (const item of output) {
     if (item?.type !== "message") continue;
+
     const content = Array.isArray(item?.content) ? item.content : [];
     for (const c of content) {
-      if ((c?.type === "output_text" || c?.type === "text") && String(c?.text || "").trim()) {
+      if (c?.type === "output_text" && String(c?.text || "").trim()) {
         return String(c.text).trim();
       }
     }
@@ -1098,7 +1108,6 @@ function extractIncomingText(message) {
     );
   }
 
-  if (message.type === "order") return "";
   if (message.type === "image") return message.image?.caption || "";
   if (message.type === "document") return message.document?.caption || "";
 
