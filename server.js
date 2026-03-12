@@ -250,34 +250,16 @@ function toTitleCase(text) {
     .join(" ");
 }
 
-function extractLikelyName(text) {
-  const clean = String(text || "").trim();
-  if (!clean) return "";
-  if (clean.length < 6) return "";
-  if (!/\s+/.test(clean)) return "";
-  if (isCpf(clean)) return "";
-  if (looksLikeBoletoRequest(clean)) return "";
-  if (detectCourseMention(clean)) return "";
-  if (extractPaymentMethod(clean)) return "";
-  if (/(quero|valor|preco|preço|curso|boleto|pix|cartao|cartão|sim|nao|não|ok)/i.test(clean)) return "";
-  return toTitleCase(clean);
-}
-
 function clampText(text, max = 2500) {
   return String(text || "").slice(0, max);
 }
 
 function normalizeAiReply(text) {
   let t = String(text || "").trim();
-
   t = t.replace(/\n{3,}/g, "\n\n");
   t = t.replace(/[ \t]+\n/g, "\n");
   t = t.replace(/\s{2,}/g, " ").trim();
-
-  if (t.length > 1400) {
-    t = t.slice(0, 1400).trim();
-  }
-
+  if (t.length > 1400) t = t.slice(0, 1400).trim();
   return t;
 }
 
@@ -354,6 +336,7 @@ function createDefaultConversation() {
     lastUserTextAt: 0,
     lastBotTextNormalized: "",
     lastBotTextAt: 0,
+    lastSalesPromptType: "",
     salesLead: {
       name: "",
       course: "",
@@ -758,6 +741,25 @@ function looksLikeThinking(text) {
   );
 }
 
+function looksLikeSoftYes(text) {
+  return /^(sim|s|isso|claro|pode|pode sim|quero|quero sim|ok|okk|blz|beleza|aham|uhum|bora|com certeza)$/i.test(
+    String(text || "").trim()
+  );
+}
+
+function extractLikelyName(text) {
+  const clean = String(text || "").trim();
+  if (!clean) return "";
+  if (clean.length < 6) return "";
+  if (!/\s+/.test(clean)) return "";
+  if (isCpf(clean)) return "";
+  if (looksLikeBoletoRequest(clean)) return "";
+  if (detectCourseMention(clean)) return "";
+  if (extractPaymentMethod(clean)) return "";
+  if (/(quero|valor|preco|preço|curso|boleto|pix|cartao|cartão|sim|nao|não|ok)/i.test(clean)) return "";
+  return toTitleCase(clean);
+}
+
 function detectLeadTemperature(lead) {
   const score = Number(lead?.warmScore || 0);
   if (score >= 7) return "quente";
@@ -846,6 +848,72 @@ function buildEnrollmentCollectionMessage(phone) {
     "💳 Cartão\n" +
     "💵 Pix / à vista"
   );
+}
+
+function setLastSalesPromptType(phone, type) {
+  const convo = getConversation(phone);
+  convo.lastSalesPromptType = String(type || "");
+  convo.updatedAt = nowTs();
+  scheduleSaveConversations();
+}
+
+function buildCourseDeepDiveMessage(course) {
+  return (
+    `Perfeito 😊\n\n` +
+    `O curso de ${course} funciona de forma totalmente online, então você consegue estudar no seu ritmo, sem precisar sair de casa.\n\n` +
+    `Na plataforma, você tem acesso a videoaulas, materiais digitais, atividades, exercícios e avaliações para ir acompanhando seu desenvolvimento.\n\n` +
+    `A plataforma fica disponível 24 horas, o que ajuda muito quem tem rotina corrida. A recomendação é fazer 2 aulas por semana para manter um bom progresso.\n\n` +
+    `Além disso, é uma ótima opção para quem quer se qualificar, melhorar o currículo e desenvolver conhecimento na área.\n\n` +
+    `Me diz uma coisa: você quer esse curso mais para começar do zero ou para entrar logo na área?`
+  );
+}
+
+async function handleContextualShortReply(phone, text) {
+  const convo = getConversation(phone);
+  const lead = convo.salesLead || {};
+  const clean = String(text || "").trim();
+
+  if (!looksLikeSoftYes(clean)) return false;
+
+  if (convo.lastSalesPromptType === "offer_more_info" && lead.course) {
+    lead.askedContent = true;
+    lead.stage = "value_building";
+    scheduleSaveConversations();
+
+    await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(lead.course));
+    setLastSalesPromptType(phone, "ask_objective_after_explaining_course");
+    return true;
+  }
+
+  if (convo.lastSalesPromptType === "ask_objective_after_explaining_course" && lead.course) {
+    await sendMetaTextSmart(
+      phone,
+      `Perfeito 😊\n\n` +
+        `Então o curso de ${lead.course} pode fazer muito sentido para você.\n\n` +
+        `Ele ajuda bastante quem quer adquirir conhecimento prático, estudar com flexibilidade e ter uma qualificação que soma no currículo.\n\n` +
+        `Se você quiser, eu também posso te explicar como ficam as condições para começar.`
+    );
+    setLastSalesPromptType(phone, "offer_price_after_value");
+    return true;
+  }
+
+  if (convo.lastSalesPromptType === "offer_price_after_value" && lead.course) {
+    await sendMetaTextSmart(
+      phone,
+      `Claro 😊\n\n` +
+        `O curso não possui mensalidade.\n` +
+        `É cobrada apenas uma taxa referente ao material didático digital e ao acesso à plataforma.\n\n` +
+        `Hoje temos estas condições:\n` +
+        `💰 Boleto: R$960,00 em 12x de R$80,00\n` +
+        `${buildCardConditionText()}\n` +
+        `💵 Pix / à vista: R$550,00\n\n` +
+        `Qual forma você acha que ficaria melhor para você?`
+    );
+    setLastSalesPromptType(phone, "ask_payment_preference");
+    return true;
+  }
+
+  return false;
 }
 
 async function tryCollectEnrollmentData(phone, text) {
@@ -1027,6 +1095,7 @@ function buildSalesSystemPrompt(convo) {
     `Temperatura do lead: ${temperature}.`,
     lead.askedPrice ? "A pessoa já demonstrou interesse em valor." : "",
     lead.askedContent ? "A pessoa já perguntou sobre funcionamento ou conteúdo." : "",
+    convo.lastSalesPromptType ? `Último contexto comercial: ${convo.lastSalesPromptType}.` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1054,6 +1123,9 @@ REGRAS OBRIGATÓRIAS:
 - Nunca peça CPF fora do fluxo de boleto.
 - Se o assunto for boleto, 2ª via, mensalidade, pagamento de parcela, fatura ou CPF para consulta, oriente a pessoa a digitar BOLETO.
 - Se pedirem preço, explique primeiro o valor percebido e depois a condição.
+- Se a pessoa responder apenas “sim”, “quero”, “ok”, “claro” ou algo curto, continue exatamente do ponto anterior da conversa.
+- Nunca reinicie a conversa sem necessidade.
+- Nunca pergunte novamente qual curso a pessoa quer se ela já informou o curso.
 - Nunca use a palavra “mensalidade” para vender. Diga que o curso não possui mensalidade e que existe apenas a taxa do material didático digital e acesso à plataforma.
 
 COMO EXPLICAR O CURSO:
@@ -1171,6 +1243,10 @@ function fallbackSalesReply(phone, userText) {
     );
   }
 
+  if (looksLikeSoftYes(userText) && course) {
+    return buildCourseDeepDiveMessage(course);
+  }
+
   if (looksLikeObjectionNoTime(userText)) {
     return (
       "Entendo você 😊\n\n" +
@@ -1201,17 +1277,17 @@ function fallbackSalesReply(phone, userText) {
 
   if (course) {
     return (
-      `Que legal 😊 O curso de ${course} chama bastante atenção de quem quer se qualificar com mais flexibilidade.\n\n` +
-      "Como ele é online, você consegue estudar no seu ritmo, com acesso à plataforma, materiais digitais, videoaulas, atividades e avaliações.\n\n" +
-      "Me conta: você quer esse curso para começar na área ou para se aperfeiçoar?"
+      `Ótima escolha 😊 O curso de ${course} é totalmente online, com acesso à plataforma 24 horas.\n\n` +
+      "Você estuda no seu ritmo, com videoaulas, materiais digitais, atividades, exercícios e avaliações.\n\n" +
+      "Se quiser, eu posso te explicar melhor como ele funciona e para quem esse curso costuma ser mais indicado."
     );
   }
 
   if (intent === "price") {
     return (
-      "Claro 😊 Eu te explico sim.\n\n" +
-      "Antes de te passar a condição ideal, me diz qual curso ou área chamou sua atenção.\n" +
-      "Assim eu consigo te orientar melhor."
+      "Claro 😊\n\n" +
+      "Antes de te passar a melhor condição, me fala qual curso ou área chamou sua atenção.\n" +
+      "Assim eu consigo te orientar de forma mais certa para o seu objetivo."
     );
   }
 
@@ -1975,6 +2051,7 @@ async function processUserMessage(phone, text) {
     text: cleanText,
     step: convo.step,
     salesStage: convo.salesLead?.stage,
+    lastSalesPromptType: convo.lastSalesPromptType,
   });
 
   if (looksLikeCancel(cleanText) && convo.step === "awaiting_confirmation") {
@@ -2017,6 +2094,7 @@ async function processUserMessage(phone, text) {
     convo.salesLead.stage = "collecting_enrollment";
     scheduleSaveConversations();
     await sendMetaTextSmart(phone, buildEnrollmentCollectionMessage(phone));
+    setLastSalesPromptType(phone, "collecting_enrollment");
     return;
   }
 
@@ -2024,13 +2102,13 @@ async function processUserMessage(phone, text) {
     return;
   }
 
+  if (await handleContextualShortReply(phone, cleanText)) {
+    return;
+  }
+
   if (looksLikeAskingContent(cleanText) && convo.salesLead.course) {
-    await sendMetaTextSmart(
-      phone,
-      `Claro 😊 O curso de ${convo.salesLead.course} é totalmente online, então você consegue estudar no seu ritmo, com acesso à plataforma 24 horas, materiais digitais, videoaulas, atividades e avaliações.\n\n` +
-        "A recomendação é fazer 2 aulas por semana, e isso ajuda bastante quem tem rotina corrida.\n\n" +
-        "Você quer esse curso para começar na área ou para se aperfeiçoar?"
-    );
+    await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(convo.salesLead.course));
+    setLastSalesPromptType(phone, "ask_objective_after_explaining_course");
     return;
   }
 
@@ -2038,11 +2116,35 @@ async function processUserMessage(phone, text) {
     try {
       const aiReply = await generateOpenAIReply(phone, cleanText);
       await sendMetaTextSmart(phone, aiReply);
+
+      if (convo.salesLead?.course && /posso te explicar|posso te contar|quer que eu te explique|como funciona/i.test(aiReply)) {
+        setLastSalesPromptType(phone, "offer_more_info");
+      } else if (/como você pretende usar|para começar do zero|para entrar na área|para se aperfeiçoar/i.test(aiReply)) {
+        setLastSalesPromptType(phone, "ask_objective_after_explaining_course");
+      } else if (/posso te passar as condições|explicar valores|condições para começar/i.test(aiReply)) {
+        setLastSalesPromptType(phone, "offer_price_after_value");
+      } else if (/qual forma você acha que ficaria melhor|qual forma ficaria melhor|forma de pagamento/i.test(aiReply)) {
+        setLastSalesPromptType(phone, "ask_payment_preference");
+      } else {
+        setLastSalesPromptType(phone, "");
+      }
+
       return;
     } catch (error) {
       console.error("[OPENAI ERROR]", error?.message || error);
       const fallback = fallbackSalesReply(phone, cleanText);
       await sendMetaTextSmart(phone, fallback);
+
+      if (convo.salesLead?.course && /posso te explicar|posso te contar|como funciona/i.test(fallback)) {
+        setLastSalesPromptType(phone, "offer_more_info");
+      } else if (/para começar do zero|para entrar na área|para se aperfeiçoar/i.test(fallback)) {
+        setLastSalesPromptType(phone, "ask_objective_after_explaining_course");
+      } else if (/condições|valores|forma ficaria melhor/i.test(fallback)) {
+        setLastSalesPromptType(phone, "offer_price_after_value");
+      } else {
+        setLastSalesPromptType(phone, "");
+      }
+
       return;
     }
   }
@@ -2052,6 +2154,7 @@ async function processUserMessage(phone, text) {
     "Claro 😊\n\n" +
       "Me fala qual curso ou área você tem interesse que eu te explico direitinho e te ajudo a escolher a melhor opção."
   );
+  setLastSalesPromptType(phone, "ask_course_area");
 }
 
 /* =========================================================
