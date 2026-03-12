@@ -526,40 +526,47 @@ async function pagSchoolRequestMany({ method = "get", docPaths = [], params, dat
    PAGSCHOOL PARSERS
 ========================= */
 
-function normalizeAluno(raw, cpf) {
+function normalizeAluno(raw) {
   if (!raw || typeof raw !== "object") return null;
 
   const id = getByKeys(raw, ["id", "alunoId", "idAluno", "pessoaId", "userId"]);
-  const nome = getByKeys(raw, ["nome", "nomeAluno", "name"]);
-  const rawCpf = getByKeys(raw, ["cpf", "documento", "cpfAluno"]);
-
   if (!id) return null;
 
-  const normalizedCpf = onlyDigits(rawCpf || cpf);
-  if (cpf && normalizedCpf !== onlyDigits(cpf)) return null;
+  const nome = getByKeys(raw, ["nome", "nomeAluno", "name"]) || "Aluno";
+  const rawCpf = getByKeys(raw, ["cpf", "documento", "cpfAluno"]);
+  const cpf = onlyDigits(rawCpf || "");
+
+  if (!cpf || cpf.length !== 11) {
+    return null;
+  }
 
   return {
     id,
-    nome: nome || "Aluno",
-    cpf: normalizedCpf,
+    nome,
+    cpf,
     telefone: getByKeys(raw, ["telefoneCelular", "telefone", "celular", "whatsapp", "fone"]) || "",
     raw,
   };
 }
 
-function extractAlunoFromResponse(data, cpf) {
-  const cpfDigits = onlyDigits(cpf);
-  const objects = collectObjects(data);
+function extractAlunoFromResponse(data, cpfBuscado) {
+  const cpfDigits = onlyDigits(cpfBuscado);
+  if (!cpfDigits || cpfDigits.length !== 11) return null;
 
+  const objects = collectObjects(data);
   for (const obj of objects) {
-    const aluno = normalizeAluno(obj, cpfDigits);
-    if (aluno) return aluno;
+    const aluno = normalizeAluno(obj);
+    if (aluno && aluno.cpf === cpfDigits) {
+      return aluno;
+    }
   }
 
   const arr = findFirstArray(data);
   for (const item of arr) {
-    const aluno = normalizeAluno(item, cpfDigits);
-    if (aluno) return aluno;
+    const aluno = normalizeAluno(item);
+    if (aluno && aluno.cpf === cpfDigits) {
+      return aluno;
+    }
   }
 
   return null;
@@ -661,13 +668,16 @@ function selectBestParcela(contrato) {
 async function findAlunoByCpf(cpf) {
   const cpfDigits = onlyDigits(cpf);
 
+  if (!cpfDigits || cpfDigits.length !== 11) {
+    throw new Error("CPF inválido para busca.");
+  }
+
   const endpointAttempts = ["/api/aluno/all", "/aluno/all"];
   const paramAttempts = [
     { cpf: cpfDigits, list: false, limit: 20 },
     { filtro: cpfDigits, list: false, limit: 20 },
     { filters: cpfDigits, list: false, limit: 20 },
     { cpfResponsavel: cpfDigits, list: false, limit: 20 },
-    { list: false, limit: 100 },
   ];
 
   const errors = [];
@@ -688,7 +698,7 @@ async function findAlunoByCpf(cpf) {
           docPath,
           params,
           triedUrl: resp.triedUrl,
-          result: "CPF não encontrado nessa tentativa",
+          result: "Nenhum aluno com CPF exato encontrado nessa tentativa",
         });
       } catch (error) {
         errors.push({
@@ -905,7 +915,7 @@ async function startCpfLookup(phone, cpf) {
     resetConversation(phone);
     await sendMetaText(
       phone,
-      "Não consegui localizar um boleto em aberto para esse CPF agora. Confira o CPF e tente novamente."
+      "Não encontrei nenhum boleto em aberto para esse CPF. Confira o número e tente novamente."
     );
   }
 }
