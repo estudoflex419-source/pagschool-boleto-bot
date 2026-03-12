@@ -59,6 +59,11 @@ const PAGSCHOOL_ENDPOINT = readEnv("PAGSCHOOL_ENDPOINT", "PAGSCHOOL_BASE_URL").r
 const PAGSCHOOL_EMAIL = readEnv("PAGSCHOOL_EMAIL");
 const PAGSCHOOL_PASSWORD = readEnv("PAGSCHOOL_PASSWORD");
 
+const OPENAI_API_KEY = readEnv("OPENAI_API_KEY");
+const OPENAI_MODEL = readEnv("OPENAI_MODEL") || "gpt-5-mini";
+const OPENAI_ENABLED = /^(1|true|yes|on|sim)$/i.test(readEnv("OPENAI_ENABLED") || "true");
+const OPENAI_TIMEOUT_MS = Number(readEnv("OPENAI_TIMEOUT_MS") || 25000);
+
 const tokenCache = {
   token: "",
   exp: 0,
@@ -228,11 +233,13 @@ function getConversation(phone) {
       step: "idle",
       lastCpf: "",
       pendingBoleto: null,
+      aiHistory: [],
       updatedAt: Date.now(),
     });
   }
   const state = conversations.get(key);
   state.updatedAt = Date.now();
+  if (!Array.isArray(state.aiHistory)) state.aiHistory = [];
   return state;
 }
 
@@ -241,6 +248,7 @@ function resetConversation(phone) {
     step: "idle",
     lastCpf: "",
     pendingBoleto: null,
+    aiHistory: [],
     updatedAt: Date.now(),
   });
 }
@@ -255,6 +263,11 @@ function requirePagSchoolEnv() {
   if (!PAGSCHOOL_ENDPOINT) throw new Error("Faltou PAGSCHOOL_ENDPOINT ou PAGSCHOOL_BASE_URL no Render.");
   if (!PAGSCHOOL_EMAIL) throw new Error("Faltou PAGSCHOOL_EMAIL no Render.");
   if (!PAGSCHOOL_PASSWORD) throw new Error("Faltou PAGSCHOOL_PASSWORD no Render.");
+}
+
+function requireOpenAIEnv() {
+  if (!OPENAI_ENABLED) throw new Error("OpenAI desativada por OPENAI_ENABLED.");
+  if (!OPENAI_API_KEY) throw new Error("Faltou OPENAI_API_KEY no Render.");
 }
 
 /* =========================
@@ -326,6 +339,117 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
   }
 
   return resp.data;
+}
+
+/* =========================
+   OPENAI
+========================= */
+
+function getAIHistoryForOpenAI(phone, maxItems = 8) {
+  const convo = getConversation(phone);
+  return (convo.aiHistory || []).slice(-maxItems).map((item) => ({
+    role: item.role,
+    content: [
+      {
+        type: "input_text",
+        text: item.text,
+      },
+    ],
+  }));
+}
+
+function pushAIHistory(phone, role, text) {
+  const convo = getConversation(phone);
+  convo.aiHistory.push({
+    role,
+    text: String(text || "").slice(0, 2000),
+    at: Date.now(),
+  });
+  if (convo.aiHistory.length > 12) {
+    convo.aiHistory = convo.aiHistory.slice(-12);
+  }
+  convo.updatedAt = Date.now();
+}
+
+async function generateOpenAIReply(phone, userText) {
+  requireOpenAIEnv();
+
+  const conversationContext = getAIHistoryForOpenAI(phone, 8);
+
+  const input = [
+    {
+      role: "system",
+      content: [
+        {
+          type: "input_text",
+          text:
+            "Você é uma consultora educacional virtual da Estudo Flex no WhatsApp. " +
+            "Responda sempre em português do Brasil, com tom humano, acolhedor, persuasivo, natural e profissional. " +
+            "Seu objetivo principal é ajudar o interessado a conhecer os cursos, entender benefícios, tirar dúvidas e avançar para a matrícula. " +
+            "Você deve conversar como uma consultora comercial de cursos profissionalizantes online, evitando respostas robóticas. " +
+            "Explique de forma simples que os cursos são online, flexíveis e pensados para quem quer estudar no próprio ritmo. " +
+            "Estimule a continuidade da conversa com perguntas leves e úteis, mas sem ficar invasiva. " +
+            "Nunca invente boletos, valores, vencimentos, contratos, alunos, documentos ou dados financeiros. " +
+            "Quando o assunto for 2ª via, boleto, CPF, confirmação, cancelar, pagamento ou financeiro, diga de forma curta e clara para a pessoa digitar BOLETO e seguir o fluxo automático. " +
+            "Não peça CPF nem dados sensíveis fora do fluxo de boleto. " +
+            "Se perguntarem sobre cursos, responda como consultora comercial. Se a pergunta estiver vaga, convide a pessoa a dizer qual área tem interesse. " +
+            "Mantenha respostas curtas e apropriadas para WhatsApp, mas com calor humano e foco em conversão."
+        }
+      ]
+    },
+    ...conversationContext,
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: String(userText || "")
+        }
+      ]
+    }
+  ];
+
+  const payload = {
+    model: OPENAI_MODEL,
+    input,
+    text: {
+      verbosity: "low"
+    },
+    reasoning: {
+      effort: "low"
+    },
+    max_output_tokens: 220
+  };
+
+  const resp = await axios.post("https://api.openai.com/v1/responses", payload, {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    timeout: OPENAI_TIMEOUT_MS,
+    validateStatus: () => true,
+  });
+
+  logVerbose("[OPENAI]", resp.status, safeJson(resp.data));
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`OpenAI falhou (${resp.status}): ${safeJson(resp.data)}`);
+  }
+
+  const text =
+    String(resp.data?.output_text || "").trim() ||
+    String(
+      resp.data?.output?.[0]?.content?.find((c) => c.type === "output_text")?.text || ""
+    ).trim();
+
+  if (!text) {
+    throw new Error("A OpenAI respondeu sem texto.");
+  }
+
+  pushAIHistory(phone, "user", userText);
+  pushAIHistory(phone, "assistant", text);
+
+  return text;
 }
 
 /* =========================
@@ -846,6 +970,23 @@ function looksLikeCancel(text) {
   return /^(cancelar|cancelo|cancela|nao|não|errado|trocar|corrigir)$/i.test(String(text || "").trim());
 }
 
+function shouldUseAI(text, convo) {
+  const cleanText = String(text || "").trim();
+  const digits = onlyDigits(cleanText);
+
+  if (!OPENAI_ENABLED || !OPENAI_API_KEY) return false;
+  if (!cleanText) return false;
+  if (looksLikeHello(cleanText)) return false;
+  if (looksLikeBoletoRequest(cleanText)) return false;
+  if (looksLikeConfirm(cleanText)) return false;
+  if (looksLikeCancel(cleanText)) return false;
+  if (isCpf(digits)) return false;
+  if (convo.step === "awaiting_cpf") return false;
+  if (convo.step === "awaiting_confirmation") return false;
+
+  return true;
+}
+
 function extractIncomingText(message) {
   if (!message || typeof message !== "object") return "";
 
@@ -1009,7 +1150,22 @@ async function processUserMessage(phone, text) {
     return;
   }
 
-  await sendMetaText(phone, "Digite *boleto* para solicitar a 2ª via.");
+  if (shouldUseAI(cleanText, convo)) {
+    try {
+      const aiReply = await generateOpenAIReply(phone, cleanText);
+      await sendMetaText(phone, aiReply);
+      return;
+    } catch (error) {
+      console.error("[OPENAI ERROR]", error?.message || error);
+      await sendMetaText(
+        phone,
+        "Posso te ajudar com informações sobre cursos e também com a 2ª via. Se quiser o boleto, digite *boleto*."
+      );
+      return;
+    }
+  }
+
+  await sendMetaText(phone, "Posso te ajudar com cursos e matrículas. Se quiser a 2ª via, digite *boleto*.");
 }
 
 async function handleMetaWebhook(body) {
@@ -1120,8 +1276,25 @@ app.get("/debug/env", (_req, res) => {
       PAGSCHOOL_ENDPOINT_SOURCE: envSource("PAGSCHOOL_ENDPOINT", "PAGSCHOOL_BASE_URL") || null,
       PAGSCHOOL_EMAIL: Boolean(PAGSCHOOL_EMAIL),
       PAGSCHOOL_PASSWORD: Boolean(PAGSCHOOL_PASSWORD),
+      OPENAI_ENABLED: OPENAI_ENABLED,
+      OPENAI_API_KEY: Boolean(OPENAI_API_KEY),
+      OPENAI_MODEL: OPENAI_MODEL,
     },
   });
+});
+
+app.get("/debug/openai/test", async (req, res) => {
+  try {
+    const prompt = String(req.query.q || "Me responda apenas: integração ok.");
+    const reply = await generateOpenAIReply("debug-openai", prompt);
+    res.json({ ok: true, model: OPENAI_MODEL, reply });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: String(error.message || error),
+      model: OPENAI_MODEL,
+    });
+  }
 });
 
 app.get("/meta/webhook", (req, res) => {
