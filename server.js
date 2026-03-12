@@ -131,7 +131,21 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function splitMessage(text, max = 400) {
+function removeAccents(text) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeText(text) {
+  return removeAccents(String(text || "").toLowerCase()).replace(/\s+/g, " ").trim();
+}
+
+function normalizeForCompare(text) {
+  return normalizeText(text).replace(/[^\w\s]/g, "");
+}
+
+function splitMessage(text, max = 380) {
   const clean = String(text || "").trim();
   if (!clean) return [];
   if (clean.length <= max) return [clean];
@@ -143,9 +157,7 @@ function splitMessage(text, max = 400) {
   for (const paragraph of paragraphs) {
     const p = paragraph.trim();
     if (!p) {
-      if (current.length + 1 <= max) {
-        current += "\n";
-      }
+      if ((current + "\n").length <= max) current += "\n";
       continue;
     }
 
@@ -156,11 +168,12 @@ function splitMessage(text, max = 400) {
 
     const words = p.split(/\s+/);
     for (const word of words) {
-      if ((current + " " + word).trim().length > max) {
+      const candidate = `${current} ${word}`.trim();
+      if (candidate.length > max) {
         if (current.trim()) parts.push(current.trim());
         current = word;
       } else {
-        current = `${current} ${word}`.trim();
+        current = candidate;
       }
     }
   }
@@ -169,7 +182,7 @@ function splitMessage(text, max = 400) {
   return parts.length ? parts : [clean];
 }
 
-function collectObjects(input, maxItems = 400) {
+function collectObjects(input, maxItems = 500) {
   const result = [];
   const stack = [input];
   const seen = new Set();
@@ -224,18 +237,30 @@ function findFirstArray(input) {
   return [];
 }
 
-function removeAccents(text) {
+function nowTs() {
+  return Date.now();
+}
+
+function toTitleCase(text) {
   return String(text || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
-function normalizeText(text) {
-  return removeAccents(String(text || "").toLowerCase()).replace(/\s+/g, " ").trim();
-}
-
-function normalizeForCompare(text) {
-  return normalizeText(text).replace(/[^\w\s]/g, "");
+function extractLikelyName(text) {
+  const clean = String(text || "").trim();
+  if (!clean) return "";
+  if (clean.length < 6) return "";
+  if (!/\s+/.test(clean)) return "";
+  if (isCpf(clean)) return "";
+  if (looksLikeBoletoRequest(clean)) return "";
+  if (detectCourseMention(clean)) return "";
+  if (extractPaymentMethod(clean)) return "";
+  if (/(quero|valor|preco|preço|curso|boleto|pix|cartao|cartão|sim|nao|não|ok)/i.test(clean)) return "";
+  return toTitleCase(clean);
 }
 
 /* =========================================================
@@ -257,24 +282,30 @@ const PAGSCHOOL_EMAIL = readEnv("PAGSCHOOL_EMAIL");
 const PAGSCHOOL_PASSWORD = readEnv("PAGSCHOOL_PASSWORD");
 
 const OPENAI_API_KEY = readEnv("OPENAI_API_KEY");
-const OPENAI_MODEL = readEnv("OPENAI_MODEL") || "gpt-4.1-mini";
 const OPENAI_ENABLED = /^(1|true|yes|on|sim)$/i.test(readEnv("OPENAI_ENABLED") || "true");
-const OPENAI_TIMEOUT_MS = Number(readEnv("OPENAI_TIMEOUT_MS") || 25000);
+const OPENAI_MODEL = readEnv("OPENAI_MODEL") || "gpt-4.1-mini";
+const OPENAI_TIMEOUT_MS = Number(readEnv("OPENAI_TIMEOUT_MS") || 30000);
+const OPENAI_MAX_OUTPUT_TOKENS = Number(readEnv("OPENAI_MAX_OUTPUT_TOKENS") || 380);
 
 const CONVERSATIONS_FILE = readEnv("CONVERSATIONS_FILE") || path.join(__dirname, "conversations.json");
 
-const META_SEND_DELAY_MS = Number(readEnv("META_SEND_DELAY_MS") || 1100);
+const META_SEND_DELAY_MS = Number(readEnv("META_SEND_DELAY_MS") || 950);
 const DUPLICATE_WINDOW_MS = Number(readEnv("DUPLICATE_WINDOW_MS") || 15000);
-const AI_HISTORY_LIMIT = Number(readEnv("AI_HISTORY_LIMIT") || 12);
+const AI_HISTORY_LIMIT = Number(readEnv("AI_HISTORY_LIMIT") || 10);
+
+const CARD_TOTAL = Number(readEnv("CARD_TOTAL") || 0);
+const CARD_INSTALLMENTS = Number(readEnv("CARD_INSTALLMENTS") || 12);
+const CARD_INSTALLMENT_VALUE = Number(readEnv("CARD_INSTALLMENT_VALUE") || 0);
+
+const ENROLL_REDIRECT_PHONE = normalizePhone(readEnv("ENROLL_REDIRECT_PHONE", "SALES_CLOSER_PHONE"));
+const ENROLL_REDIRECT_TAG = readEnv("ENROLL_REDIRECT_TAG") || "#AGORASOUTECNICO";
 
 /* =========================================================
    LOG
 ========================================================= */
 
 function logVerbose(...args) {
-  if (LOG_VERBOSE) {
-    console.log(...args);
-  }
+  if (LOG_VERBOSE) console.log(...args);
 }
 
 /* =========================================================
@@ -311,8 +342,10 @@ function createDefaultConversation() {
       askedPrice: false,
       askedContent: false,
       askedEnrollment: false,
+      lastObjection: "",
+      warmScore: 0,
     },
-    updatedAt: Date.now(),
+    updatedAt: nowTs(),
   };
 }
 
@@ -356,12 +389,12 @@ function scheduleSaveConversations() {
   saveConversationsTimer = setTimeout(() => {
     saveConversationsNow();
     saveConversationsTimer = null;
-  }, 500);
+  }, 400);
   if (saveConversationsTimer.unref) saveConversationsTimer.unref();
 }
 
 function cleanupMaps() {
-  const now = Date.now();
+  const now = nowTs();
   let changedConversations = false;
 
   for (const [key, value] of conversations.entries()) {
@@ -389,27 +422,15 @@ function getConversation(phone) {
   }
 
   const state = conversations.get(key);
-  state.updatedAt = Date.now();
+  state.updatedAt = nowTs();
 
   if (!Array.isArray(state.aiHistory)) state.aiHistory = [];
-  if (!state.salesLead || typeof state.salesLead !== "object") {
-    state.salesLead = createDefaultConversation().salesLead;
-  } else {
-    state.salesLead = {
-      ...createDefaultConversation().salesLead,
-      ...state.salesLead,
-    };
-  }
+  state.salesLead = {
+    ...createDefaultConversation().salesLead,
+    ...(state.salesLead && typeof state.salesLead === "object" ? state.salesLead : {}),
+  };
 
   return state;
-}
-
-function resetSalesLead(phone, preserveHistory = true) {
-  const convo = getConversation(phone);
-  convo.salesLead = createDefaultConversation().salesLead;
-  if (!preserveHistory) convo.aiHistory = [];
-  convo.updatedAt = Date.now();
-  scheduleSaveConversations();
 }
 
 function resetConversation(phone) {
@@ -422,18 +443,18 @@ function pushAIHistory(phone, role, text) {
   convo.aiHistory.push({
     role,
     text: String(text || "").slice(0, 2500),
-    at: Date.now(),
+    at: nowTs(),
   });
 
   if (convo.aiHistory.length > AI_HISTORY_LIMIT) {
     convo.aiHistory = convo.aiHistory.slice(-AI_HISTORY_LIMIT);
   }
 
-  convo.updatedAt = Date.now();
+  convo.updatedAt = nowTs();
   scheduleSaveConversations();
 }
 
-function getAIHistoryForOpenAI(phone, maxItems = 10) {
+function getAIHistoryForOpenAI(phone, maxItems = 8) {
   const convo = getConversation(phone);
   return (convo.aiHistory || []).slice(-maxItems).map((item) => ({
     role: item.role,
@@ -467,7 +488,6 @@ function requireOpenAIEnv() {
 ========================================================= */
 
 const SALES_COURSE_KEYWORDS = [
-  "farmácia",
   "farmacia",
   "administração",
   "administracao",
@@ -477,75 +497,90 @@ const SALES_COURSE_KEYWORDS = [
   "enfermagem",
   "radiologia",
   "odontologia",
+  "saude bucal",
   "nutrição",
   "nutricao",
-  "análises clínicas",
   "analises clinicas",
-  "auxiliar veterinário",
+  "análises clínicas",
   "auxiliar veterinario",
+  "auxiliar veterinário",
   "socorrista",
   "recepcionista hospitalar",
   "cuidador de idosos",
-  "instrumentação cirúrgica",
   "instrumentacao cirurgica",
-  "agente de saúde",
+  "instrumentação cirúrgica",
   "agente de saude",
+  "agente de saúde",
   "beleza",
   "barbeiro",
   "cabeleireiro",
   "designer de unhas",
   "designer de sobrancelhas",
-  "depilação",
   "depilacao",
-  "extensão de cílios",
+  "depilação",
   "extensao de cilios",
+  "extensão de cílios",
   "maquiagem",
   "mega hair",
-  "micropigmentação",
   "micropigmentacao",
-  "informática",
+  "micropigmentação",
   "informatica",
+  "informática",
   "marketing digital",
-  "inteligência artificial",
   "inteligencia artificial",
+  "inteligência artificial",
   "chatgpt",
-  "design gráfico",
   "design grafico",
+  "design gráfico",
   "photoshop",
   "canva",
   "capcut",
-  "robótica",
   "robotica",
+  "robótica",
   "games",
-  "mecânica",
+  "criacao de games",
+  "criação de games",
   "mecanica",
+  "mecânica",
   "ar condicionado",
-  "auto elétrica",
   "auto eletrica",
-  "automação industrial",
+  "auto elétrica",
   "automacao industrial",
+  "automação industrial",
   "mestre de obras",
   "soldador",
-  "torneiro mecânico",
   "torneiro mecanico",
-  "logística",
+  "torneiro mecânico",
   "logistica",
-  "gestão",
+  "logística",
   "gestao",
-  "segurança do trabalho",
+  "gestão",
   "seguranca do trabalho",
+  "segurança do trabalho",
   "libras",
   "pedagogia",
   "jovem aprendiz",
-  "concurso público",
   "concurso publico",
-  "preparatório militar",
+  "concurso público",
   "preparatorio militar",
-  "inglês",
+  "preparatório militar",
   "ingles",
+  "inglês",
   "operador de caixa",
   "portaria",
   "topografia",
+  "auxiliar de necropsia",
+  "bombeiro civil",
+  "massoterapia",
+  "optica",
+  "óptica",
+  "psicologia",
+  "gastronomia",
+  "confeitaria",
+  "assistente social",
+  "digital influencer",
+  "manutencao de celulares",
+  "manutenção de celulares",
 ];
 
 const COURSE_LABEL_MAP = {
@@ -554,9 +589,10 @@ const COURSE_LABEL_MAP = {
   contabilidade: "Contabilidade",
   "recursos humanos": "Recursos Humanos",
   rh: "Recursos Humanos",
-  enfermagem: "Enfermagem",
-  radiologia: "Radiologia",
-  odontologia: "Odontologia",
+  enfermagem: "Enfermagem Livre",
+  radiologia: "Radiologia e Ultrassonografia",
+  odontologia: "Odontologia & Saúde Bucal",
+  "saude bucal": "Odontologia & Saúde Bucal",
   nutricao: "Nutrição",
   "analises clinicas": "Análises Clínicas",
   "auxiliar veterinario": "Auxiliar Veterinário",
@@ -565,35 +601,36 @@ const COURSE_LABEL_MAP = {
   "cuidador de idosos": "Cuidador de Idosos",
   "instrumentacao cirurgica": "Instrumentação Cirúrgica",
   "agente de saude": "Agente de Saúde",
-  beleza: "Beleza",
+  beleza: "Beleza e Estética",
   barbeiro: "Barbeiro",
-  cabeleireiro: "Cabeleireiro",
+  cabeleireiro: "Cabeleireiro(a)",
   "designer de unhas": "Designer de Unhas",
   "designer de sobrancelhas": "Designer de Sobrancelhas",
-  depilacao: "Depilação",
+  depilacao: "Depilação Profissional",
   "extensao de cilios": "Extensão de Cílios",
-  maquiagem: "Maquiagem",
+  maquiagem: "Maquiagem Profissionalizante",
   "mega hair": "Mega Hair",
-  micropigmentacao: "Micropigmentação",
+  micropigmentacao: "Micropigmentação Labial",
   informatica: "Informática",
   "marketing digital": "Marketing Digital",
-  "inteligencia artificial": "Inteligência Artificial",
-  chatgpt: "ChatGPT",
-  "design grafico": "Design Gráfico",
-  photoshop: "Photoshop",
-  canva: "Canva",
+  "inteligencia artificial": "Inteligência Artificial (ChatGPT)",
+  chatgpt: "Inteligência Artificial (ChatGPT)",
+  "design grafico": "Designer Gráfico",
+  photoshop: "Designer Gráfico Photoshop",
+  canva: "Designer Gráfico Canva",
   capcut: "CapCut",
   robotica: "Robótica",
-  games: "Games",
-  mecanica: "Mecânica",
+  games: "Criação de Games",
+  "criacao de games": "Criação de Games",
+  mecanica: "Mecânica Industrial",
   "ar condicionado": "Ar Condicionado",
   "auto eletrica": "Auto Elétrica",
   "automacao industrial": "Automação Industrial",
   "mestre de obras": "Mestre de Obras",
   soldador: "Soldador",
   "torneiro mecanico": "Torneiro Mecânico",
-  logistica: "Logística",
-  gestao: "Gestão",
+  logistica: "Gestão & Logística",
+  gestao: "Gestão & Logística",
   "seguranca do trabalho": "Segurança do Trabalho",
   libras: "Libras",
   pedagogia: "Pedagogia",
@@ -604,6 +641,16 @@ const COURSE_LABEL_MAP = {
   "operador de caixa": "Operador de Caixa",
   portaria: "Portaria",
   topografia: "Topografia",
+  "auxiliar de necropsia": "Auxiliar de Necropsia",
+  "bombeiro civil": "Bombeiro Civil",
+  massoterapia: "Massoterapia",
+  optica: "Óptica",
+  psicologia: "Psicologia",
+  gastronomia: "Gastronomia & Confeitaria",
+  confeitaria: "Gastronomia & Confeitaria",
+  "assistente social": "Assistente Social",
+  "digital influencer": "Digital Influencer",
+  "manutencao de celulares": "Manutenção de Celulares",
 };
 
 function detectCourseMention(text) {
@@ -613,10 +660,9 @@ function detectCourseMention(text) {
   for (const keyword of SALES_COURSE_KEYWORDS) {
     const normalizedKeyword = normalizeForCompare(keyword);
     if (t.includes(normalizedKeyword)) {
-      return COURSE_LABEL_MAP[normalizedKeyword] || keyword;
+      return COURSE_LABEL_MAP[normalizedKeyword] || toTitleCase(keyword);
     }
   }
-
   return "";
 }
 
@@ -630,22 +676,25 @@ function extractPaymentMethod(text) {
 
 function looksLikeStrongEnrollmentIntent(text) {
   const t = normalizeText(text);
-  return /(quero me inscrever|quero fazer|quero começar|quero comecar|quero fechar|quero garantir|pode fazer minha inscricao|pode fazer minha inscrição|tenho interesse|quero entrar|como faco para entrar|como faço para entrar|quero essa opcao|quero essa opção|como faco a matricula|como faço a matrícula|matricula|matrícula)/.test(t);
+  return /(quero me inscrever|quero fazer|quero começar|quero comecar|quero fechar|quero garantir|pode fazer minha inscricao|pode fazer minha inscrição|tenho interesse|quero entrar|como faco para entrar|como faço para entrar|quero essa opcao|quero essa opção|como faco a matricula|como faço a matrícula|matricula|matrícula)/.test(
+    t
+  );
 }
 
 function looksLikeAskingContent(text) {
   const t = normalizeText(text);
-  return /(conteudo|conteúdo|grade|grade curricular|materias|matérias|assuntos|o que aprende|oque aprende|como funciona)/.test(t);
+  return /(conteudo|conteúdo|grade|grade curricular|materias|matérias|assuntos|o que aprende|oque aprende|como funciona|funciona como)/.test(
+    t
+  );
 }
 
 function detectIntent(text) {
   const t = normalizeText(text);
 
   if (/(boleto|segunda via|2 via|2a via|mensalidade|fatura)/.test(t)) return "boleto";
-  if (/(valor|preco|preço|quanto custa|mensalidade)/.test(t)) return "price";
-  if (/(curso|estudar|certificado|formacao|formação|area|área)/.test(t)) return "course";
+  if (/(valor|preco|preço|quanto custa|quanto fica|forma de pagamento|pagamento)/.test(t)) return "price";
+  if (/(curso|estudar|certificado|formacao|formação|area|área|plataforma|material)/.test(t)) return "course";
   if (/(matricula|matrícula|inscrever|inscricao|inscrição|quero fazer|quero comecar|quero começar|tenho interesse)/.test(t)) return "enroll";
-
   return "general";
 }
 
@@ -660,17 +709,40 @@ function looksLikeBoletoRequest(text) {
 }
 
 function looksLikeConfirm(text) {
-  return /^(confirmar|confirmo|pode enviar|enviar|sim|ok|pode mandar|confirma)$/i.test(String(text || "").trim());
+  return /^(confirmar|confirmo|pode enviar|enviar|sim|ok|pode mandar|confirma)$/i.test(
+    String(text || "").trim()
+  );
 }
 
 function looksLikeCancel(text) {
-  return /^(cancelar|cancelo|cancela|nao|não|errado|trocar|corrigir)$/i.test(String(text || "").trim());
+  return /^(cancelar|cancelo|cancela|nao|não|errado|trocar|corrigir)$/i.test(
+    String(text || "").trim()
+  );
+}
+
+function looksLikeObjectionNoTime(text) {
+  return /(nao tenho tempo|não tenho tempo|sem tempo|corrido|correria|trabalho muito|rotina puxada)/i.test(
+    String(text || "")
+  );
+}
+
+function looksLikeObjectionExpensive(text) {
+  return /(caro|muito caro|achei caro|pesado|ta caro|tá caro|valor alto)/i.test(String(text || ""));
+}
+
+function looksLikeThinking(text) {
+  return /(vou pensar|depois vejo|vou ver|preciso pensar|vou analisar|qualquer coisa volto)/i.test(
+    String(text || "")
+  );
 }
 
 function updateLeadFromText(phone, text) {
   const convo = getConversation(phone);
   const lead = convo.salesLead;
   const clean = String(text || "").trim();
+
+  const foundName = extractLikelyName(clean);
+  if (foundName && !lead.name) lead.name = foundName;
 
   const course = detectCourseMention(clean);
   if (course && !lead.course) lead.course = course;
@@ -682,7 +754,7 @@ function updateLeadFromText(phone, text) {
     const t = normalizeText(clean);
     if (/curriculo|currículo/.test(t)) lead.objective = "Melhorar currículo";
     else if (/trabalhar|emprego|vaga/.test(t)) lead.objective = "Trabalhar na área";
-    else if (/comecar do zero|comecar do zero|iniciante|começar do zero/.test(t)) lead.objective = "Começar do zero";
+    else if (/iniciante|começar do zero|comecar do zero/.test(t)) lead.objective = "Começar do zero";
     else if (/mudar de profissao|mudar de profissão/.test(t)) lead.objective = "Mudar de profissão";
     else if (/concurso/.test(t)) lead.objective = "Concurso";
   }
@@ -690,8 +762,26 @@ function updateLeadFromText(phone, text) {
   if (detectIntent(clean) === "price") lead.askedPrice = true;
   if (looksLikeAskingContent(clean)) lead.askedContent = true;
 
-  convo.updatedAt = Date.now();
+  if (course) lead.warmScore += 2;
+  if (lead.askedPrice) lead.warmScore += 1;
+  if (looksLikeStrongEnrollmentIntent(clean)) lead.warmScore += 3;
+
+  if (looksLikeObjectionNoTime(clean)) lead.lastObjection = "tempo";
+  else if (looksLikeObjectionExpensive(clean)) lead.lastObjection = "preco";
+  else if (looksLikeThinking(clean)) lead.lastObjection = "pensando";
+
+  convo.updatedAt = nowTs();
   scheduleSaveConversations();
+}
+
+function buildCardConditionText() {
+  if (CARD_TOTAL > 0 && CARD_INSTALLMENT_VALUE > 0) {
+    return `💳 No cartão: ${formatCurrencyBR(CARD_TOTAL)} em ${CARD_INSTALLMENTS}x de ${formatCurrencyBR(CARD_INSTALLMENT_VALUE)}`;
+  }
+  if (CARD_TOTAL > 0) {
+    return `💳 No cartão: ${formatCurrencyBR(CARD_TOTAL)}`;
+  }
+  return "💳 No cartão: eu confirmo a condição certinha no fechamento";
 }
 
 function buildEnrollmentCollectionMessage(phone) {
@@ -715,7 +805,7 @@ function buildEnrollmentCollectionMessage(phone) {
 
   return (
     "Perfeito 😊\n" +
-    "Para eu deixar sua matrícula encaminhada, me envie por favor:\n\n" +
+    "Para eu deixar sua inscrição encaminhada, me envie por favor:\n\n" +
     missing.join("\n") +
     "\n\nAs opções de pagamento são:\n" +
     "💰 Boleto\n" +
@@ -731,8 +821,9 @@ async function tryCollectEnrollmentData(phone, text) {
 
   if (lead.stage !== "collecting_enrollment") return false;
 
-  if (!lead.name && trimmed && trimmed.length >= 6 && /\s+/.test(trimmed) && !detectCourseMention(trimmed) && !extractPaymentMethod(trimmed)) {
-    lead.name = trimmed;
+  if (!lead.name) {
+    const extracted = extractLikelyName(trimmed);
+    if (extracted) lead.name = extracted;
   }
 
   const course = detectCourseMention(trimmed);
@@ -741,7 +832,7 @@ async function tryCollectEnrollmentData(phone, text) {
   const paymentMethod = extractPaymentMethod(trimmed);
   if (paymentMethod && !lead.paymentMethod) lead.paymentMethod = paymentMethod;
 
-  convo.updatedAt = Date.now();
+  convo.updatedAt = nowTs();
   scheduleSaveConversations();
 
   if (lead.name && lead.course && lead.paymentMethod) {
@@ -749,15 +840,32 @@ async function tryCollectEnrollmentData(phone, text) {
     lead.askedEnrollment = true;
     scheduleSaveConversations();
 
-    await sendMetaTextSmart(
-      phone,
+    const finalMessage =
       "Perfeito 😊\n" +
-        "Recebi suas informações:\n" +
-        `• Nome: ${lead.name}\n` +
-        `• Curso: ${lead.course}\n` +
-        `• Pagamento: ${lead.paymentMethod}\n\n` +
-        "Agora vou deixar seu atendimento encaminhado para o fechamento da matrícula. Se quiser, também posso te explicar mais um pouquinho sobre como funciona o curso."
-    );
+      "Recebi suas informações:\n" +
+      `• Nome: ${lead.name}\n` +
+      `• Curso: ${lead.course}\n` +
+      `• Pagamento: ${lead.paymentMethod}\n\n` +
+      "Agora vou deixar seu atendimento encaminhado para o fechamento da matrícula.";
+
+    await sendMetaTextSmart(phone, finalMessage);
+
+    if (ENROLL_REDIRECT_PHONE) {
+      const notifyText =
+        `${ENROLL_REDIRECT_TAG}\n` +
+        `Novo lead pronto para fechamento.\n\n` +
+        `Telefone: ${phone}\n` +
+        `Nome: ${lead.name}\n` +
+        `Curso: ${lead.course}\n` +
+        `Pagamento: ${lead.paymentMethod}\n` +
+        `Objetivo: ${lead.objective || "Não informado"}`;
+      try {
+        await sendMetaTextSmart(ENROLL_REDIRECT_PHONE, notifyText);
+      } catch (err) {
+        console.error("[ENROLL REDIRECT ERROR]", err?.message || err);
+      }
+    }
+
     return true;
   }
 
@@ -814,13 +922,13 @@ async function sendMetaTextSmart(phone, bodyText) {
   if (
     normalized &&
     convo.lastBotTextNormalized === normalized &&
-    Date.now() - Number(convo.lastBotTextAt || 0) < DUPLICATE_WINDOW_MS
+    nowTs() - Number(convo.lastBotTextAt || 0) < DUPLICATE_WINDOW_MS
   ) {
     logVerbose("[META SEND SKIPPED DUPLICATE BOT MESSAGE]", maskPhone(phone), normalized);
     return;
   }
 
-  const parts = splitMessage(bodyText, 390);
+  const parts = splitMessage(bodyText, 370);
 
   for (let i = 0; i < parts.length; i++) {
     if (i > 0) await delay(META_SEND_DELAY_MS);
@@ -828,8 +936,8 @@ async function sendMetaTextSmart(phone, bodyText) {
   }
 
   convo.lastBotTextNormalized = normalized;
-  convo.lastBotTextAt = Date.now();
-  convo.updatedAt = Date.now();
+  convo.lastBotTextAt = nowTs();
+  convo.updatedAt = nowTs();
   scheduleSaveConversations();
 }
 
@@ -873,49 +981,121 @@ function buildSalesSystemPrompt(convo) {
   const lead = convo.salesLead || {};
 
   const knownData = [
+    lead.name ? `Nome já identificado: ${lead.name}.` : "",
     lead.course ? `Curso já mencionado: ${lead.course}.` : "",
     lead.objective ? `Objetivo percebido: ${lead.objective}.` : "",
-    lead.name ? `Nome informado: ${lead.name}.` : "",
     lead.paymentMethod ? `Forma de pagamento mencionada: ${lead.paymentMethod}.` : "",
     lead.stage ? `Estágio comercial atual: ${lead.stage}.` : "",
-    lead.askedPrice ? `A pessoa já demonstrou interesse em preço.` : "",
-    lead.askedContent ? `A pessoa já perguntou sobre conteúdo ou funcionamento.` : "",
-  ].filter(Boolean).join(" ");
+    lead.lastObjection ? `Última objeção percebida: ${lead.lastObjection}.` : "",
+    typeof lead.warmScore === "number" ? `Lead score atual: ${lead.warmScore}.` : "",
+    lead.askedPrice ? "A pessoa já demonstrou interesse em valor." : "",
+    lead.askedContent ? "A pessoa já perguntou sobre funcionamento ou conteúdo." : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-  return (
-    "Você é uma consultora educacional virtual da Estudo Flex atendendo pelo WhatsApp. " +
-    "Seu tom é humano, acolhedor, confiante, leve, comercial e natural. " +
-    "Nunca fale como robô, FAQ, suporte técnico ou texto engessado. " +
-    "Seu papel é vender cursos profissionalizantes online de forma conversacional. " +
+  return `
+Você é uma consultora virtual de vendas da Estudo Flex atendendo pelo WhatsApp.
 
-    "REGRAS IMPORTANTES: " +
-    "1. Nunca despeje preço logo no começo, a menos que a pessoa insista. " +
-    "2. Primeiro descubra qual curso ou área chamou atenção e para qual objetivo a pessoa quer estudar. " +
-    "3. Faça perguntas curtas, humanas e estratégicas. " +
-    "4. Gere valor antes de preço: acesso online, liberdade de horário, plataforma, material digital, videoaulas, atividades, avaliações e suporte pedagógico. " +
-    "5. Quando falar de valores, use tato comercial. " +
-    "6. Condições quando necessário: boleto R$960,00 em 12x de R$80,00; Pix/à vista R$550,00; cartão: diga que confirma no fechamento, sem inventar parcela. " +
-    "7. Nunca invente bolsas, descontos, garantia de emprego ou estágio garantido. " +
-    "8. Se perguntarem estágio, diga que existe Carta de Estágio como benefício, com carga mínima de 60 horas, e que o local é por conta do aluno. " +
-    "9. Se o assunto for boleto, 2ª via, CPF, pagamento financeiro, confirmação ou cancelamento, oriente a digitar BOLETO para seguir o fluxo automático. " +
-    "10. Não peça CPF fora do fluxo de boleto. " +
-    "11. Respostas curtas a médias, naturais e fortes para WhatsApp. " +
-    "12. Quando fizer sentido, termine com uma pergunta que faça a conversa avançar. " +
+Fale sempre como uma humana real, acolhedora, simpática, comunicativa e persuasiva.
+Nunca fale como robô, FAQ, suporte técnico ou texto engessado.
 
-    "ORDEM IDEAL DE VENDA: " +
-    "cumprimente -> descubra o interesse -> entenda o objetivo -> gere valor -> responda dúvidas -> só depois preço -> conduza para matrícula. " +
+MISSÃO:
+Conduzir a conversa com naturalidade até a matrícula, sem parecer forçada.
 
-    "QUANDO HOUVER INTERESSE FORTE EM MATRICULAR: " +
-    "conduza para inscrição pedindo nome completo, curso escolhido e forma de pagamento. " +
+REGRAS OBRIGATÓRIAS:
+- Nunca jogue tudo de uma vez.
+- Nunca mande textão frio.
+- Sempre conduza para o próximo passo.
+- Sempre que fizer sentido, termine com uma pergunta curta.
+- Gere valor antes de preço.
+- Nunca prometa emprego garantido.
+- Nunca prometa estágio garantido.
+- Nunca peça CPF fora do fluxo financeiro de boleto.
+- Se for assunto financeiro, boleto, 2ª via, CPF, pagamento, parcela, fatura ou mensalidade, oriente a digitar BOLETO para seguir o fluxo automático.
+- Se a pessoa pedir preço, não diga “mensalidade”.
+- Diga que não há mensalidade; existe apenas taxa referente ao material didático digital e ao acesso à plataforma.
 
-    "SE A PESSOA MANDAR APENAS O NOME DO CURSO: " +
-    "responda valorizando essa área, explique de forma leve o que ela pode conquistar com esse curso e faça uma pergunta sobre objetivo. " +
+COMO EXPLICAR O CURSO:
+- curso online
+- plataforma 24 horas
+- materiais digitais
+- videoaulas
+- atividades
+- exercícios
+- avaliações
+- suporte pedagógico
+- recomendação de 2 aulas por semana
+- provas objetivas na plataforma
+- prova liberada após a 8ª aula
+- material digital, não físico
 
-    "SE A PESSOA PERGUNTAR COMO FUNCIONA: " +
-    "explique que o curso é online, com plataforma, materiais digitais, vídeos, atividades e avaliações, com liberdade de horário. " +
+BENEFÍCIOS IMPORTANTES:
+- flexibilidade
+- estudar no próprio ritmo
+- praticidade para quem tem rotina corrida
+- melhorar currículo
+- desenvolver novas habilidades
+- carta de estágio como diferencial
 
-    `DADOS JÁ CONHECIDOS DO ATENDIMENTO: ${knownData || "nenhum dado ainda."}`
-  );
+SOBRE ESTÁGIO:
+Explique que a instituição oferece Carta de Estágio como benefício.
+Ela ajuda na busca por oportunidades.
+A carga horária mínima é 60 horas.
+A escolha do local é por conta do aluno.
+Nunca diga que o estágio é garantido.
+
+SOBRE VALOR:
+Use este posicionamento:
+“O curso não possui mensalidade 😊
+É cobrada apenas uma taxa referente ao material didático digital e ao acesso à plataforma.”
+
+Condições:
+- boleto: R$960,00 em 12x de R$80,00
+- pix / à vista: R$550,00
+- cartão: use a condição oficial configurada, sem inventar
+- se a pessoa conseguir dar entrada de R$100,00, podemos descontar o equivalente a 2 parcelas
+
+Se perguntarem cartão e não houver valor oficial disponível no contexto, diga que confirma a condição certinha no fechamento.
+
+ORDEM IDEAL:
+1. Cumprimente
+2. Descubra curso ou área
+3. Descubra objetivo
+4. Gere valor
+5. Trate objeções
+6. Fale de valor com tato
+7. Conduza para matrícula
+
+QUANDO A PESSOA DEMONSTRAR INTERESSE FORTE:
+Conduza para coleta de:
+- nome completo
+- curso escolhido
+- forma de pagamento
+
+SE A PESSOA ESTIVER EM DÚVIDA:
+Ajude a escolher entre áreas.
+
+SE A PESSOA DISSER QUE NÃO TEM TEMPO:
+Valorize a flexibilidade e o acesso 24h.
+
+SE A PESSOA ACHAR CARO:
+Explique que não é mensalidade, e sim taxa de material/plataforma com acesso, vídeos, apostilas, atividades, avaliações e suporte.
+
+ESTILO:
+- respostas curtas ou médias
+- tom vendedor e humano
+- natural
+- envolvente
+- com leveza
+- sem parecer insistente demais
+
+DADOS JÁ CONHECIDOS:
+${knownData || "nenhum dado ainda."}
+
+CONDIÇÃO DO CARTÃO DISPONÍVEL:
+${buildCardConditionText()}
+`.trim();
 }
 
 function extractOpenAIText(data) {
@@ -942,25 +1122,63 @@ function fallbackSalesReply(phone, userText) {
   const course = detectCourseMention(userText) || convo.salesLead?.course || "";
   const intent = detectIntent(userText);
 
+  if (looksLikeObjectionNoTime(userText)) {
+    return (
+      "Entendo você 😊\n\n" +
+      "Inclusive esse é um dos pontos que mais ajudam nossos alunos, porque o curso é online e você pode estudar no dia e horário que preferir, no seu ritmo.\n\n" +
+      "A plataforma fica disponível 24 horas, então dá para encaixar bem na rotina.\n\n" +
+      "Você está buscando algo mais para começar do zero ou para se aperfeiçoar?"
+    );
+  }
+
+  if (looksLikeObjectionExpensive(userText)) {
+    return (
+      "Eu entendo 😊\n\n" +
+      "Mas esse valor não é mensalidade, tá?\n" +
+      "É referente ao material didático digital e ao acesso à plataforma, com videoaulas, apostilas, atividades, avaliações e suporte pedagógico.\n\n" +
+      `Hoje temos estas condições:\n💰 Boleto: R$960,00 em 12x de R$80,00\n${buildCardConditionText()}\n💵 Pix / à vista: R$550,00\n\n` +
+      "Qual forma ficaria mais leve para você?"
+    );
+  }
+
+  if (looksLikeThinking(userText)) {
+    return (
+      "Claro, sem problema 😊\n\n" +
+      "É importante analisar com calma mesmo.\n\n" +
+      "Mas me diz uma coisa: o que mais está pesando para você agora?\n" +
+      "A escolha do curso, a forma de pagamento ou o tempo para estudar?"
+    );
+  }
+
   if (course) {
     return (
-      `Que legal 😊 O curso de ${course} é uma área muito interessante e bastante procurada.\n\n` +
-      "Ele é uma ótima opção para quem quer se qualificar com mais flexibilidade, estudando online, no próprio ritmo, com acesso à plataforma, materiais digitais, videoaulas, atividades e avaliações.\n\n" +
-      "Me conta uma coisa: você quer esse curso para começar na área ou para se aperfeiçoar?"
+      `Que legal 😊 O curso de ${course} chama bastante atenção de quem quer se qualificar com mais flexibilidade.\n\n` +
+      "Como ele é online, você consegue estudar no seu ritmo, com acesso à plataforma, materiais digitais, videoaulas, atividades e avaliações.\n\n" +
+      "Me conta: você quer esse curso para começar na área ou para se aperfeiçoar?"
     );
   }
 
   if (intent === "price") {
     return (
-      "Claro 😊 Eu posso te passar as condições sim.\n\n" +
-      "Mas antes me diz: qual curso ou área você tem interesse?\n" +
-      "Assim eu te explico da forma certa e te indico a melhor opção pra você."
+      "Claro 😊 Eu te explico sim.\n\n" +
+      "Antes de te passar a condição ideal, me diz qual curso ou área chamou sua atenção.\n" +
+      "Assim eu consigo te orientar melhor."
+    );
+  }
+
+  if (looksLikeAskingContent(userText)) {
+    return (
+      "Claro 😊\n\n" +
+      "O curso é feito pela plataforma online da escola, e você estuda com materiais digitais, vídeos, atividades, exercícios e avaliações, tudo no seu ritmo.\n\n" +
+      "A plataforma fica disponível 24 horas e a recomendação é fazer 2 aulas por semana.\n\n" +
+      "Qual área chamou mais sua atenção?"
     );
   }
 
   return (
-    "Claro 😊 Posso te ajudar com informações sobre os cursos e também com a 2ª via do boleto.\n\n" +
-    "Se for sobre boleto, é só digitar *boleto*.\n" +
+    "Olá 😊\n\n" +
+    "Posso te ajudar tanto com informações sobre cursos quanto com a 2ª via do boleto.\n\n" +
+    "Se for sobre boleto, digite *boleto*.\n" +
     "Se for sobre curso, me fala qual área chamou sua atenção."
   );
 }
@@ -971,8 +1189,6 @@ async function generateOpenAIReply(phone, userText) {
   const convo = getConversation(phone);
   const systemPrompt = buildSalesSystemPrompt(convo);
 
-  pushAIHistory(phone, "user", userText);
-
   const payload = {
     model: OPENAI_MODEL,
     input: [
@@ -980,13 +1196,13 @@ async function generateOpenAIReply(phone, userText) {
         role: "system",
         content: systemPrompt,
       },
-      ...getAIHistoryForOpenAI(phone, 10),
+      ...getAIHistoryForOpenAI(phone, 8),
       {
         role: "user",
         content: String(userText || ""),
       },
     ],
-    max_output_tokens: 700,
+    max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS,
   };
 
   const resp = await axios.post("https://api.openai.com/v1/responses", payload, {
@@ -1004,8 +1220,23 @@ async function generateOpenAIReply(phone, userText) {
     throw new Error(`OpenAI falhou (${resp.status}): ${safeJson(resp.data)}`);
   }
 
-  const text = extractOpenAIText(resp.data) || fallbackSalesReply(phone, userText);
+  const incompleteReason =
+    resp.data?.incomplete_details?.reason ||
+    resp.data?.status;
+
+  let text = extractOpenAIText(resp.data);
+
+  if (!text && String(incompleteReason || "").includes("max_output_tokens")) {
+    text = fallbackSalesReply(phone, userText);
+  }
+
+  if (!text) {
+    text = fallbackSalesReply(phone, userText);
+  }
+
+  pushAIHistory(phone, "user", userText);
   pushAIHistory(phone, "assistant", text);
+
   return text;
 }
 
@@ -1034,7 +1265,6 @@ function shouldUseAI(text, convo) {
 function buildPagSchoolUrls(docPath) {
   const base = PAGSCHOOL_ENDPOINT.replace(/\/$/, "");
   const pathPart = `/${String(docPath || "").replace(/^\/+/, "")}`;
-
   const pathWithoutApi = pathPart.replace(/^\/api\b/, "") || "/";
   const isBaseApi = /\/api$/i.test(base);
 
@@ -1109,7 +1339,7 @@ function extractTokenFromAny(data) {
 async function getPagSchoolToken(forceRefresh = false) {
   requirePagSchoolEnv();
 
-  if (!forceRefresh && tokenCache.token && Date.now() < tokenCache.exp) {
+  if (!forceRefresh && tokenCache.token && nowTs() < tokenCache.exp) {
     return tokenCache.token;
   }
 
@@ -1133,7 +1363,7 @@ async function getPagSchoolToken(forceRefresh = false) {
       const token = extractTokenFromAny(resp.data);
       if (token) {
         tokenCache.token = token;
-        tokenCache.exp = Date.now() + 1000 * 60 * 50;
+        tokenCache.exp = nowTs() + 1000 * 60 * 50;
         return tokenCache.token;
       }
 
@@ -1153,10 +1383,7 @@ async function getPagSchoolToken(forceRefresh = false) {
   throw new Error(`Não consegui autenticar na PagSchool: ${safeJson(errors)}`);
 }
 
-async function pagSchoolRequest(
-  { method = "get", docPath, params, data, responseType = "json" },
-  retry = true
-) {
+async function pagSchoolRequest({ method = "get", docPath, params, data, responseType = "json" }, retry = true) {
   let token = await getPagSchoolToken(false);
   const urls = buildPagSchoolUrls(docPath);
   const errors = [];
@@ -1546,7 +1773,7 @@ async function startCpfLookup(phone, cpf) {
   convo.pendingBoleto = null;
   scheduleSaveConversations();
 
-  await sendMetaText(phone, "Estou localizando o boleto. Aguarde um instante.");
+  await sendMetaText(phone, "Estou localizando o boleto. Aguarde só um instante.");
 
   try {
     const result = await buildBoletoResultFromCpf(digits);
@@ -1561,7 +1788,7 @@ async function startCpfLookup(phone, cpf) {
       linhaDigitavel: result.linhaDigitavel,
       valor: result.valor,
       vencimento: result.vencimento,
-      createdAt: Date.now(),
+      createdAt: nowTs(),
     };
     scheduleSaveConversations();
 
@@ -1629,7 +1856,6 @@ function extractIncomingText(message) {
       ""
     );
   }
-
   if (message.type === "image") return message.image?.caption || "";
   if (message.type === "document") return message.document?.caption || "";
 
@@ -1645,7 +1871,7 @@ async function processUserMessage(phone, text) {
   if (
     normalizedUserText &&
     convo.lastUserTextNormalized === normalizedUserText &&
-    Date.now() - Number(convo.lastUserTextAt || 0) < DUPLICATE_WINDOW_MS
+    nowTs() - Number(convo.lastUserTextAt || 0) < DUPLICATE_WINDOW_MS
   ) {
     logVerbose("[USER MESSAGE SKIPPED DUPLICATE]", {
       phone: maskPhone(phone),
@@ -1655,7 +1881,7 @@ async function processUserMessage(phone, text) {
   }
 
   convo.lastUserTextNormalized = normalizedUserText;
-  convo.lastUserTextAt = Date.now();
+  convo.lastUserTextAt = nowTs();
 
   updateLeadFromText(phone, cleanText);
 
@@ -1674,9 +1900,9 @@ async function processUserMessage(phone, text) {
     await sendMetaTextSmart(
       phone,
       "Olá 😊 Seja muito bem-vindo(a)!\n\n" +
-        "Sou a consultora virtual da nossa escola.\n\n" +
-        "Temos cursos online em várias áreas, com acesso à plataforma, material digital, videoaulas, atividades, avaliações e suporte pedagógico.\n\n" +
-        "Me conta: qual curso ou área chamou mais sua atenção?"
+        "É um prazer falar com você.\n\n" +
+        "Temos cursos profissionalizantes online em várias áreas, com acesso à plataforma, materiais digitais, videoaulas, atividades, avaliações e suporte pedagógico.\n\n" +
+        "Me conta: qual curso ou área mais chamou sua atenção?"
     );
     return;
   }
@@ -1728,24 +1954,12 @@ async function processUserMessage(phone, text) {
     return;
   }
 
-  const intent = detectIntent(cleanText);
-
-  if (intent === "price") {
-    await sendMetaTextSmart(
-      phone,
-      "Claro 😊 Eu te explico sim.\n\n" +
-        "Antes de te passar as condições, me diz: qual curso ou área você tem interesse?\n" +
-        "Assim eu consigo te orientar de forma mais certinha e te indicar a melhor opção pra você."
-    );
-    return;
-  }
-
   if (looksLikeAskingContent(cleanText) && convo.salesLead.course) {
     await sendMetaTextSmart(
       phone,
       `Claro 😊 O curso de ${convo.salesLead.course} é totalmente online, então você consegue estudar no seu ritmo, com acesso à plataforma 24 horas, materiais digitais, videoaulas, atividades e avaliações.\n\n` +
-        "É uma opção muito interessante para quem quer se qualificar com mais praticidade, sem precisar sair da rotina.\n\n" +
-        "Me diz uma coisa: você quer esse curso para começar na área ou para se aperfeiçoar?"
+        "A recomendação é fazer 2 aulas por semana, e isso ajuda bastante quem tem rotina corrida.\n\n" +
+        "Você quer esse curso para começar na área ou para se aperfeiçoar?"
     );
     return;
   }
@@ -1765,7 +1979,8 @@ async function processUserMessage(phone, text) {
 
   await sendMetaTextSmart(
     phone,
-    "Claro 😊 Me fala qual curso ou área você tem interesse que eu te explico direitinho e te ajudo a escolher a melhor opção."
+    "Claro 😊\n\n" +
+      "Me fala qual curso ou área você tem interesse que eu te explico direitinho e te ajudo a escolher a melhor opção."
   );
 }
 
@@ -1791,7 +2006,7 @@ async function handleMetaWebhook(body) {
           continue;
         }
 
-        if (messageId) processedMetaMessages.set(messageId, Date.now());
+        if (messageId) processedMetaMessages.set(messageId, nowTs());
 
         const from = normalizePhone(message?.from || "");
         const text = extractIncomingText(message);
@@ -1885,10 +2100,17 @@ app.get("/debug/env", (_req, res) => {
       OPENAI_ENABLED: OPENAI_ENABLED,
       OPENAI_API_KEY: Boolean(OPENAI_API_KEY),
       OPENAI_MODEL: OPENAI_MODEL,
-      CONVERSATIONS_FILE: CONVERSATIONS_FILE,
+      OPENAI_TIMEOUT_MS,
+      OPENAI_MAX_OUTPUT_TOKENS,
+      CONVERSATIONS_FILE,
       META_SEND_DELAY_MS,
       DUPLICATE_WINDOW_MS,
       AI_HISTORY_LIMIT,
+      CARD_TOTAL,
+      CARD_INSTALLMENTS,
+      CARD_INSTALLMENT_VALUE,
+      ENROLL_REDIRECT_PHONE: Boolean(ENROLL_REDIRECT_PHONE),
+      ENROLL_REDIRECT_TAG,
     },
   });
 });
