@@ -367,13 +367,17 @@ function buildMetaUrl() {
 async function sendMetaText(phone, bodyText) {
   requireMetaEnv();
 
+  const finalBody = String(bodyText || "").slice(0, 4096);
+
+  console.log("[META SEND BODY]", finalBody);
+
   const payload = {
     messaging_product: "whatsapp",
     to: normalizePhone(phone),
     type: "text",
     text: {
       preview_url: false,
-      body: String(bodyText || "").slice(0, 4096),
+      body: finalBody,
     },
   };
 
@@ -458,6 +462,25 @@ function pushAIHistory(phone, role, text) {
   scheduleSaveConversations();
 }
 
+function extractOpenAIText(data) {
+  const outputText = String(data?.output_text || "").trim();
+  if (outputText) return outputText;
+
+  const output = Array.isArray(data?.output) ? data.output : [];
+
+  for (const item of output) {
+    if (item?.type !== "message") continue;
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const c of content) {
+      if (c?.type === "output_text" && String(c?.text || "").trim()) {
+        return String(c.text).trim();
+      }
+    }
+  }
+
+  return "";
+}
+
 async function generateOpenAIReply(phone, userText) {
   requireOpenAIEnv();
 
@@ -474,7 +497,7 @@ async function generateOpenAIReply(phone, userText) {
             "Responda sempre em português do Brasil, com tom humano, acolhedor, persuasivo, natural e profissional. " +
             "Seu objetivo principal é ajudar o interessado a conhecer os cursos, entender benefícios, tirar dúvidas e avançar para a matrícula. " +
             "Você deve conversar como uma consultora comercial de cursos profissionalizantes online, evitando respostas robóticas. " +
-            "Explique de forma simples que os cursos são online, flexíveis e pensados para quem quer estudar no próprio ritmo. " +
+            "Explique de forma simples que os cursos são 100% online, flexíveis e pensados para quem quer estudar no próprio ritmo. " +
             "Estimule a continuidade da conversa com perguntas leves e úteis, mas sem ficar invasiva. " +
             "Nunca invente boletos, valores, vencimentos, contratos, alunos, documentos ou dados financeiros. " +
             "Quando o assunto for 2ª via, boleto, CPF, confirmação, cancelar, pagamento ou financeiro, diga de forma curta e clara para a pessoa digitar BOLETO e seguir o fluxo automático. " +
@@ -525,11 +548,9 @@ async function generateOpenAIReply(phone, userText) {
     throw new Error(`OpenAI falhou (${resp.status}): ${safeJson(resp.data)}`);
   }
 
-  const text =
-    String(resp.data?.output_text || "").trim() ||
-    String(
-      resp.data?.output?.[0]?.content?.find((c) => c.type === "output_text")?.text || ""
-    ).trim();
+  const text = extractOpenAIText(resp.data);
+
+  console.log("[AI REPLY FINAL]", text);
 
   if (!text) {
     return "Posso te ajudar com informações sobre nossos cursos profissionalizantes ou com a 2ª via do boleto. Como posso ajudar?";
