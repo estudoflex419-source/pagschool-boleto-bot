@@ -61,7 +61,7 @@ const PAGSCHOOL_EMAIL = readEnv("PAGSCHOOL_EMAIL");
 const PAGSCHOOL_PASSWORD = readEnv("PAGSCHOOL_PASSWORD");
 
 const OPENAI_API_KEY = readEnv("OPENAI_API_KEY");
-const OPENAI_MODEL = readEnv("OPENAI_MODEL") || "gpt-5-mini";
+const OPENAI_MODEL = readEnv("OPENAI_MODEL") || "gpt-4.1-mini";
 const OPENAI_ENABLED = /^(1|true|yes|on|sim)$/i.test(readEnv("OPENAI_ENABLED") || "true");
 const OPENAI_TIMEOUT_MS = Number(readEnv("OPENAI_TIMEOUT_MS") || 25000);
 
@@ -435,16 +435,15 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
    OPENAI
 ========================= */
 
+function buildOpenAIMessageContent(text) {
+  return [{ type: "text", text: String(text || "") }];
+}
+
 function getAIHistoryForOpenAI(phone, maxItems = 8) {
   const convo = getConversation(phone);
   return (convo.aiHistory || []).slice(-maxItems).map((item) => ({
     role: item.role,
-    content: [
-      {
-        type: "input_text",
-        text: item.text,
-      },
-    ],
+    content: buildOpenAIMessageContent(item.text),
   }));
 }
 
@@ -467,12 +466,11 @@ function extractOpenAIText(data) {
   if (outputText) return outputText;
 
   const output = Array.isArray(data?.output) ? data.output : [];
-
   for (const item of output) {
     if (item?.type !== "message") continue;
     const content = Array.isArray(item?.content) ? item.content : [];
     for (const c of content) {
-      if (c?.type === "output_text" && String(c?.text || "").trim()) {
+      if ((c?.type === "output_text" || c?.type === "text") && String(c?.text || "").trim()) {
         return String(c.text).trim();
       }
     }
@@ -486,51 +484,38 @@ async function generateOpenAIReply(phone, userText) {
 
   const conversationContext = getAIHistoryForOpenAI(phone, 8);
 
-  const input = [
-    {
-      role: "system",
-      content: [
-        {
-          type: "input_text",
-          text:
-            "Você é uma consultora educacional virtual da Estudo Flex no WhatsApp. " +
-            "Responda sempre em português do Brasil, com tom humano, acolhedor, persuasivo, natural e profissional. " +
-            "Seu objetivo principal é ajudar o interessado a conhecer os cursos, entender benefícios, tirar dúvidas e avançar para a matrícula. " +
-            "Você deve conversar como uma consultora comercial de cursos profissionalizantes online, evitando respostas robóticas. " +
-            "Explique de forma simples que os cursos são 100% online, flexíveis e pensados para quem quer estudar no próprio ritmo. " +
-            "Estimule a continuidade da conversa com perguntas leves e úteis, mas sem ficar invasiva. " +
-            "Nunca invente boletos, valores, vencimentos, contratos, alunos, documentos ou dados financeiros. " +
-            "Quando o assunto for 2ª via, boleto, CPF, confirmação, cancelar, pagamento ou financeiro, diga de forma curta e clara para a pessoa digitar BOLETO e seguir o fluxo automático. " +
-            "Não peça CPF nem dados sensíveis fora do fluxo de boleto. " +
-            "Se perguntarem sobre cursos, responda como consultora comercial. Se a pergunta estiver vaga, convide a pessoa a dizer qual área tem interesse. " +
-            "Se perguntarem preço ou valor, responda de forma acolhedora e convide a pessoa a dizer qual curso ou área tem interesse. " +
-            "Se a pessoa demonstrar interesse em matrícula, conduza naturalmente para o próximo passo comercial. " +
-            "Mantenha respostas curtas e apropriadas para WhatsApp, mas com calor humano e foco em conversão."
-        }
-      ]
-    },
-    ...conversationContext,
-    {
-      role: "user",
-      content: [
-        {
-          type: "input_text",
-          text: String(userText || "")
-        }
-      ]
-    }
-  ];
+  const systemPrompt =
+    "Você é uma consultora educacional virtual da Estudo Flex no WhatsApp. " +
+    "Responda sempre em português do Brasil, com tom humano, acolhedor, persuasivo, natural e profissional. " +
+    "Seu objetivo principal é ajudar o interessado a conhecer os cursos, entender benefícios, tirar dúvidas e avançar para a matrícula. " +
+    "Você deve conversar como uma consultora comercial de cursos profissionalizantes online, evitando respostas robóticas. " +
+    "Explique de forma simples que os cursos são 100% online, flexíveis, com acesso 24 horas, material digital, vídeos, atividades, avaliações e suporte pedagógico. " +
+    "A recomendação é estudar duas aulas por semana. " +
+    "O curso não possui mensalidade. É cobrada apenas a taxa referente ao material didático digital e ao acesso à plataforma. " +
+    "Condições: boleto R$960,00 em 12x de R$80,00; Pix ou à vista R$550,00; cartão use linguagem neutra sem inventar parcela se não tiver certeza. " +
+    "Se a pessoa perguntar como funciona, explique de forma simples e curta. " +
+    "Se a pessoa perguntar preço, responda com acolhimento e convide a dizer qual curso ou área interessa. " +
+    "Se a pessoa demonstrar intenção de matrícula, peça nome completo, curso escolhido e forma de pagamento. " +
+    "Quando o assunto for 2ª via, boleto, CPF, confirmação, cancelar, pagamento ou financeiro, diga de forma curta e clara para a pessoa digitar BOLETO e seguir o fluxo automático. " +
+    "Nunca invente boletos, valores financeiros fora das condições informadas, vencimentos, contratos, alunos, documentos ou dados financeiros. " +
+    "Não peça CPF nem dados sensíveis fora do fluxo de boleto. " +
+    "Mantenha respostas curtas, naturais e apropriadas para WhatsApp. " +
+    "Sempre que fizer sentido, termine com uma pergunta leve para continuar a conversa.";
 
   const payload = {
     model: OPENAI_MODEL,
-    input,
-    text: {
-      verbosity: "medium"
-    },
-    reasoning: {
-      effort: "low"
-    },
-    max_output_tokens: 1000
+    input: [
+      {
+        role: "system",
+        content: buildOpenAIMessageContent(systemPrompt),
+      },
+      ...conversationContext,
+      {
+        role: "user",
+        content: buildOpenAIMessageContent(userText),
+      },
+    ],
+    max_output_tokens: 700,
   };
 
   const resp = await axios.post("https://api.openai.com/v1/responses", payload, {
@@ -1093,6 +1078,7 @@ function shouldUseAI(text, convo) {
   if (isCpf(digits)) return false;
   if (convo.step === "awaiting_cpf") return false;
   if (convo.step === "awaiting_confirmation") return false;
+  if (convo.step === "processing") return false;
 
   return true;
 }
@@ -1111,6 +1097,10 @@ function extractIncomingText(message) {
       ""
     );
   }
+
+  if (message.type === "order") return "";
+  if (message.type === "image") return message.image?.caption || "";
+  if (message.type === "document") return message.document?.caption || "";
 
   return "";
 }
@@ -1223,7 +1213,7 @@ async function processUserMessage(phone, text) {
     resetConversation(phone);
     await sendMetaText(
       phone,
-      "Olá. Eu sou a assistente de boletos.\n\nDigite *boleto* para solicitar a 2ª via."
+      "Olá 😊\nSou a assistente virtual da escola.\n\nPosso te ajudar com informações sobre os cursos ou com a 2ª via do boleto.\nSe quiser o boleto, digite *boleto*."
     );
     return;
   }
@@ -1269,7 +1259,7 @@ async function processUserMessage(phone, text) {
   if (intent === "price") {
     await sendMetaText(
       phone,
-      "Os cursos têm valores acessíveis e você pode estudar no seu ritmo. Me diga qual área ou curso te interessa que eu te explico melhor."
+      "O curso não tem mensalidade 😊 É cobrada apenas a taxa do material didático digital e do acesso à plataforma. Se você me disser qual curso ou área te interessa, eu te explico certinho as condições."
     );
     return;
   }
@@ -1296,7 +1286,10 @@ async function processUserMessage(phone, text) {
     }
   }
 
-  await sendMetaText(phone, "Posso te ajudar com cursos e matrículas. Se quiser a 2ª via, digite *boleto*.");
+  await sendMetaText(
+    phone,
+    "Posso te ajudar com cursos, matrícula e informações da plataforma. Se quiser a 2ª via, digite *boleto*."
+  );
 }
 
 async function handleMetaWebhook(body) {
