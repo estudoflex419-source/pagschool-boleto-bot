@@ -868,6 +868,40 @@ function buildCourseDeepDiveMessage(course) {
   );
 }
 
+function detectReplyStageFromText(text, hasCourse) {
+  const norm = normalizeText(text);
+
+  if (
+    /forma de pagamento|formas de pagamento|condicoes para comecar|condicoes para começar|condicoes|condições|explicar valores|passar os valores|te passar as condicoes|te passar as condições|qual forma ficaria melhor|qual forma voce acha que ficaria melhor|boleto|pix|cartao|cartão/.test(
+      norm
+    )
+  ) {
+    if (/qual forma ficaria melhor|qual forma voce acha que ficaria melhor|boleto|pix|cartao|cartão/.test(norm)) {
+      return "ask_payment_preference";
+    }
+    return "offer_price_after_value";
+  }
+
+  if (
+    /como voce pretende usar|para comecar do zero|para entrar na area|para se aperfeicoar|para se aperfeiçoar/.test(
+      norm
+    )
+  ) {
+    return "ask_objective_after_explaining_course";
+  }
+
+  if (
+    hasCourse &&
+    /posso te explicar melhor|posso te contar mais|quer que eu te explique melhor|quer que eu te conte mais|posso te explicar|posso te contar/.test(
+      norm
+    )
+  ) {
+    return "offer_more_info";
+  }
+
+  return "";
+}
+
 async function handleContextualShortReply(phone, text) {
   const convo = getConversation(phone);
   const lead = convo.salesLead || {};
@@ -900,14 +934,14 @@ async function handleContextualShortReply(phone, text) {
   if (convo.lastSalesPromptType === "offer_price_after_value" && lead.course) {
     await sendMetaTextSmart(
       phone,
-      `Claro 😊\n\n` +
+      `Perfeito 😊\n\n` +
         `O curso não possui mensalidade.\n` +
         `É cobrada apenas uma taxa referente ao material didático digital e ao acesso à plataforma.\n\n` +
-        `Hoje temos estas condições:\n` +
+        `Hoje temos estas condições para ${lead.course}:\n` +
         `💰 Boleto: R$960,00 em 12x de R$80,00\n` +
         `${buildCardConditionText()}\n` +
         `💵 Pix / à vista: R$550,00\n\n` +
-        `Qual forma você acha que ficaria melhor para você?`
+        `Se você quiser, eu já posso te orientar para o melhor formato de pagamento para começar. Qual opção ficou mais interessante para você?`
     );
     setLastSalesPromptType(phone, "ask_payment_preference");
     return true;
@@ -2117,17 +2151,8 @@ async function processUserMessage(phone, text) {
       const aiReply = await generateOpenAIReply(phone, cleanText);
       await sendMetaTextSmart(phone, aiReply);
 
-      if (convo.salesLead?.course && /posso te explicar|posso te contar|quer que eu te explique|como funciona/i.test(aiReply)) {
-        setLastSalesPromptType(phone, "offer_more_info");
-      } else if (/como você pretende usar|para começar do zero|para entrar na área|para se aperfeiçoar/i.test(aiReply)) {
-        setLastSalesPromptType(phone, "ask_objective_after_explaining_course");
-      } else if (/posso te passar as condições|explicar valores|condições para começar/i.test(aiReply)) {
-        setLastSalesPromptType(phone, "offer_price_after_value");
-      } else if (/qual forma você acha que ficaria melhor|qual forma ficaria melhor|forma de pagamento/i.test(aiReply)) {
-        setLastSalesPromptType(phone, "ask_payment_preference");
-      } else {
-        setLastSalesPromptType(phone, "");
-      }
+      const detectedStage = detectReplyStageFromText(aiReply, Boolean(convo.salesLead?.course));
+      setLastSalesPromptType(phone, detectedStage);
 
       return;
     } catch (error) {
@@ -2135,15 +2160,8 @@ async function processUserMessage(phone, text) {
       const fallback = fallbackSalesReply(phone, cleanText);
       await sendMetaTextSmart(phone, fallback);
 
-      if (convo.salesLead?.course && /posso te explicar|posso te contar|como funciona/i.test(fallback)) {
-        setLastSalesPromptType(phone, "offer_more_info");
-      } else if (/para começar do zero|para entrar na área|para se aperfeiçoar/i.test(fallback)) {
-        setLastSalesPromptType(phone, "ask_objective_after_explaining_course");
-      } else if (/condições|valores|forma ficaria melhor/i.test(fallback)) {
-        setLastSalesPromptType(phone, "offer_price_after_value");
-      } else {
-        setLastSalesPromptType(phone, "");
-      }
+      const detectedStage = detectReplyStageFromText(fallback, Boolean(convo.salesLead?.course));
+      setLastSalesPromptType(phone, detectedStage);
 
       return;
     }
