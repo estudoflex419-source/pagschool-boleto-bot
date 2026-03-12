@@ -263,6 +263,24 @@ function extractLikelyName(text) {
   return toTitleCase(clean);
 }
 
+function clampText(text, max = 2500) {
+  return String(text || "").slice(0, max);
+}
+
+function normalizeAiReply(text) {
+  let t = String(text || "").trim();
+
+  t = t.replace(/\n{3,}/g, "\n\n");
+  t = t.replace(/[ \t]+\n/g, "\n");
+  t = t.replace(/\s{2,}/g, " ").trim();
+
+  if (t.length > 1400) {
+    t = t.slice(0, 1400).trim();
+  }
+
+  return t;
+}
+
 /* =========================================================
    CONFIG
 ========================================================= */
@@ -285,7 +303,11 @@ const OPENAI_API_KEY = readEnv("OPENAI_API_KEY");
 const OPENAI_ENABLED = /^(1|true|yes|on|sim)$/i.test(readEnv("OPENAI_ENABLED") || "true");
 const OPENAI_MODEL = readEnv("OPENAI_MODEL") || "gpt-4.1-mini";
 const OPENAI_TIMEOUT_MS = Number(readEnv("OPENAI_TIMEOUT_MS") || 30000);
-const OPENAI_MAX_OUTPUT_TOKENS = Number(readEnv("OPENAI_MAX_OUTPUT_TOKENS") || 380);
+const OPENAI_MAX_OUTPUT_TOKENS = Number(readEnv("OPENAI_MAX_OUTPUT_TOKENS") || 420);
+const OPENAI_TEMPERATURE = Number(readEnv("OPENAI_TEMPERATURE") || 0.75);
+const OPENAI_STORE = /^(1|true|yes|on|sim)$/i.test(readEnv("OPENAI_STORE") || "false");
+const OPENAI_TRUNCATION = readEnv("OPENAI_TRUNCATION") || "auto";
+const OPENAI_RETRY_COUNT = Number(readEnv("OPENAI_RETRY_COUNT") || 2);
 
 const CONVERSATIONS_FILE = readEnv("CONVERSATIONS_FILE") || path.join(__dirname, "conversations.json");
 
@@ -442,7 +464,7 @@ function pushAIHistory(phone, role, text) {
   const convo = getConversation(phone);
   convo.aiHistory.push({
     role,
-    text: String(text || "").slice(0, 2500),
+    text: clampText(text, 2500),
     at: nowTs(),
   });
 
@@ -457,8 +479,8 @@ function pushAIHistory(phone, role, text) {
 function getAIHistoryForOpenAI(phone, maxItems = 8) {
   const convo = getConversation(phone);
   return (convo.aiHistory || []).slice(-maxItems).map((item) => ({
-    role: item.role,
-    content: item.text,
+    role: item.role === "assistant" ? "assistant" : "user",
+    content: clampText(item.text, 1800),
   }));
 }
 
@@ -699,7 +721,7 @@ function detectIntent(text) {
 }
 
 function looksLikeHello(text) {
-  return /^(oi|ola|olá|bom dia|boa tarde|boa noite|menu|iniciar|comecar|começar|inicio)$/i.test(
+  return /^(oi|ola|olá|bom dia|boa tarde|boa noite|menu|iniciar|comecar|começar|inicio|quero)$/i.test(
     String(text || "").trim()
   );
 }
@@ -736,6 +758,13 @@ function looksLikeThinking(text) {
   );
 }
 
+function detectLeadTemperature(lead) {
+  const score = Number(lead?.warmScore || 0);
+  if (score >= 7) return "quente";
+  if (score >= 4) return "morno";
+  return "frio";
+}
+
 function updateLeadFromText(phone, text) {
   const convo = getConversation(phone);
   const lead = convo.salesLead;
@@ -765,10 +794,15 @@ function updateLeadFromText(phone, text) {
   if (course) lead.warmScore += 2;
   if (lead.askedPrice) lead.warmScore += 1;
   if (looksLikeStrongEnrollmentIntent(clean)) lead.warmScore += 3;
+  if (looksLikeHello(clean)) lead.warmScore += 1;
 
   if (looksLikeObjectionNoTime(clean)) lead.lastObjection = "tempo";
   else if (looksLikeObjectionExpensive(clean)) lead.lastObjection = "preco";
   else if (looksLikeThinking(clean)) lead.lastObjection = "pensando";
+
+  if (lead.warmScore >= 7 && lead.stage === "discovering") lead.stage = "value_building";
+  if (lead.askedPrice && lead.stage === "value_building") lead.stage = "proposal";
+  if (looksLikeStrongEnrollmentIntent(clean)) lead.stage = "collecting_enrollment";
 
   convo.updatedAt = nowTs();
   scheduleSaveConversations();
@@ -858,7 +892,8 @@ async function tryCollectEnrollmentData(phone, text) {
         `Nome: ${lead.name}\n` +
         `Curso: ${lead.course}\n` +
         `Pagamento: ${lead.paymentMethod}\n` +
-        `Objetivo: ${lead.objective || "Não informado"}`;
+        `Objetivo: ${lead.objective || "Não informado"}\n` +
+        `Temperatura: ${detectLeadTemperature(lead)}`;
       try {
         await sendMetaTextSmart(ENROLL_REDIRECT_PHONE, notifyText);
       } catch (err) {
@@ -979,6 +1014,7 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
 
 function buildSalesSystemPrompt(convo) {
   const lead = convo.salesLead || {};
+  const temperature = detectLeadTemperature(lead);
 
   const knownData = [
     lead.name ? `Nome já identificado: ${lead.name}.` : "",
@@ -988,6 +1024,7 @@ function buildSalesSystemPrompt(convo) {
     lead.stage ? `Estágio comercial atual: ${lead.stage}.` : "",
     lead.lastObjection ? `Última objeção percebida: ${lead.lastObjection}.` : "",
     typeof lead.warmScore === "number" ? `Lead score atual: ${lead.warmScore}.` : "",
+    `Temperatura do lead: ${temperature}.`,
     lead.askedPrice ? "A pessoa já demonstrou interesse em valor." : "",
     lead.askedContent ? "A pessoa já perguntou sobre funcionamento ou conteúdo." : "",
   ]
@@ -997,24 +1034,27 @@ function buildSalesSystemPrompt(convo) {
   return `
 Você é uma consultora virtual de vendas da Estudo Flex atendendo pelo WhatsApp.
 
-Fale sempre como uma humana real, acolhedora, simpática, comunicativa e persuasiva.
-Nunca fale como robô, FAQ, suporte técnico ou texto engessado.
+Seu papel é agir como uma consultora educacional humana, acolhedora, persuasiva, natural e profissional.
+Você nunca deve parecer robótica, fria, técnica demais ou automática.
 
-MISSÃO:
-Conduzir a conversa com naturalidade até a matrícula, sem parecer forçada.
+OBJETIVO:
+Conduzir a conversa até a matrícula com leveza, conexão e clareza.
 
 REGRAS OBRIGATÓRIAS:
-- Nunca jogue tudo de uma vez.
-- Nunca mande textão frio.
-- Sempre conduza para o próximo passo.
-- Sempre que fizer sentido, termine com uma pergunta curta.
-- Gere valor antes de preço.
-- Nunca prometa emprego garantido.
+- Fale sempre em português do Brasil.
+- Respostas curtas ou médias.
+- Nunca despeje tudo de uma vez.
+- Sempre gere conexão antes de vender.
+- Sempre termine, quando fizer sentido, com uma pergunta curta que mova a conversa.
+- Nunca fale como suporte técnico.
+- Nunca diga que é uma IA.
+- Nunca invente cursos fora da lista conhecida.
+- Nunca prometa emprego.
 - Nunca prometa estágio garantido.
-- Nunca peça CPF fora do fluxo financeiro de boleto.
-- Se for assunto financeiro, boleto, 2ª via, CPF, pagamento, parcela, fatura ou mensalidade, oriente a digitar BOLETO para seguir o fluxo automático.
-- Se a pessoa pedir preço, não diga “mensalidade”.
-- Diga que não há mensalidade; existe apenas taxa referente ao material didático digital e ao acesso à plataforma.
+- Nunca peça CPF fora do fluxo de boleto.
+- Se o assunto for boleto, 2ª via, mensalidade, pagamento de parcela, fatura ou CPF para consulta, oriente a pessoa a digitar BOLETO.
+- Se pedirem preço, explique primeiro o valor percebido e depois a condição.
+- Nunca use a palavra “mensalidade” para vender. Diga que o curso não possui mensalidade e que existe apenas a taxa do material didático digital e acesso à plataforma.
 
 COMO EXPLICAR O CURSO:
 - curso online
@@ -1026,69 +1066,70 @@ COMO EXPLICAR O CURSO:
 - avaliações
 - suporte pedagógico
 - recomendação de 2 aulas por semana
-- provas objetivas na plataforma
-- prova liberada após a 8ª aula
+- prova objetiva liberada após a 8ª aula
 - material digital, não físico
 
 BENEFÍCIOS IMPORTANTES:
 - flexibilidade
 - estudar no próprio ritmo
-- praticidade para quem tem rotina corrida
+- praticidade para rotina corrida
 - melhorar currículo
-- desenvolver novas habilidades
+- desenvolver habilidades
 - carta de estágio como diferencial
 
 SOBRE ESTÁGIO:
-Explique que a instituição oferece Carta de Estágio como benefício.
+A instituição oferece Carta de Estágio como benefício.
 Ela ajuda na busca por oportunidades.
 A carga horária mínima é 60 horas.
 A escolha do local é por conta do aluno.
 Nunca diga que o estágio é garantido.
 
-SOBRE VALOR:
-Use este posicionamento:
+SOBRE PREÇO:
+Use esta linha:
 “O curso não possui mensalidade 😊
 É cobrada apenas uma taxa referente ao material didático digital e ao acesso à plataforma.”
 
-Condições:
+CONDIÇÕES:
 - boleto: R$960,00 em 12x de R$80,00
 - pix / à vista: R$550,00
-- cartão: use a condição oficial configurada, sem inventar
+- cartão: use somente a condição oficial do contexto
 - se a pessoa conseguir dar entrada de R$100,00, podemos descontar o equivalente a 2 parcelas
 
-Se perguntarem cartão e não houver valor oficial disponível no contexto, diga que confirma a condição certinha no fechamento.
+Se não houver valor oficial de cartão, diga que confirma a condição certinha no fechamento.
 
-ORDEM IDEAL:
-1. Cumprimente
-2. Descubra curso ou área
-3. Descubra objetivo
-4. Gere valor
-5. Trate objeções
-6. Fale de valor com tato
-7. Conduza para matrícula
+ESTILO:
+- humano
+- simpático
+- acolhedor
+- vendedor consultivo
+- sem exagero
+- sem parecer script engessado
+- com tato comercial
+- com senso de progressão
 
-QUANDO A PESSOA DEMONSTRAR INTERESSE FORTE:
-Conduza para coleta de:
+ESTRATÉGIA:
+1. Acolher
+2. Descobrir curso ou área
+3. Entender objetivo
+4. Gerar valor
+5. Tratar objeção
+6. Apresentar condição
+7. Encaminhar para matrícula
+
+QUANDO O LEAD ESTIVER QUENTE:
+Conduza para coletar:
 - nome completo
 - curso escolhido
 - forma de pagamento
 
-SE A PESSOA ESTIVER EM DÚVIDA:
-Ajude a escolher entre áreas.
+SE O LEAD ESTIVER FRIO:
+Seja mais leve, descubra a área, gere curiosidade e valor antes de falar de matrícula.
 
 SE A PESSOA DISSER QUE NÃO TEM TEMPO:
-Valorize a flexibilidade e o acesso 24h.
+Valorize flexibilidade e acesso 24h.
 
 SE A PESSOA ACHAR CARO:
-Explique que não é mensalidade, e sim taxa de material/plataforma com acesso, vídeos, apostilas, atividades, avaliações e suporte.
-
-ESTILO:
-- respostas curtas ou médias
-- tom vendedor e humano
-- natural
-- envolvente
-- com leveza
-- sem parecer insistente demais
+Explique que não é mensalidade, e sim taxa referente a material digital, plataforma, videoaulas, atividades, avaliações e suporte.
 
 DADOS JÁ CONHECIDOS:
 ${knownData || "nenhum dado ainda."}
@@ -1121,6 +1162,14 @@ function fallbackSalesReply(phone, userText) {
   const convo = getConversation(phone);
   const course = detectCourseMention(userText) || convo.salesLead?.course || "";
   const intent = detectIntent(userText);
+
+  if (looksLikeHello(userText)) {
+    return (
+      "Oi! 😊 Que bom falar com você.\n\n" +
+      "Eu posso te ajudar a encontrar um curso que combine com o seu objetivo.\n\n" +
+      "Me conta: qual curso ou área você tem mais interesse?"
+    );
+  }
 
   if (looksLikeObjectionNoTime(userText)) {
     return (
@@ -1176,11 +1225,28 @@ function fallbackSalesReply(phone, userText) {
   }
 
   return (
-    "Olá 😊\n\n" +
-    "Posso te ajudar tanto com informações sobre cursos quanto com a 2ª via do boleto.\n\n" +
-    "Se for sobre boleto, digite *boleto*.\n" +
-    "Se for sobre curso, me fala qual área chamou sua atenção."
+    "Claro 😊\n\n" +
+    "Me fala qual curso ou área você tem interesse que eu te explico direitinho e te ajudo a escolher a melhor opção."
   );
+}
+
+function buildOpenAIInputFromHistory(phone, userText) {
+  const history = getAIHistoryForOpenAI(phone, 8);
+  const input = [];
+
+  for (const item of history) {
+    input.push({
+      role: item.role,
+      content: item.content,
+    });
+  }
+
+  input.push({
+    role: "user",
+    content: String(userText || ""),
+  });
+
+  return input;
 }
 
 async function generateOpenAIReply(phone, userText) {
@@ -1191,53 +1257,73 @@ async function generateOpenAIReply(phone, userText) {
 
   const payload = {
     model: OPENAI_MODEL,
-    input: [
-      {
-        role: "system",
-        content: systemPrompt,
-      },
-      ...getAIHistoryForOpenAI(phone, 8),
-      {
-        role: "user",
-        content: String(userText || ""),
-      },
-    ],
+    instructions: systemPrompt,
+    input: buildOpenAIInputFromHistory(phone, userText),
+    temperature: OPENAI_TEMPERATURE,
     max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS,
+    truncation: OPENAI_TRUNCATION,
+    store: OPENAI_STORE,
+    text: {
+      format: {
+        type: "text",
+      },
+    },
   };
 
-  const resp = await axios.post("https://api.openai.com/v1/responses", payload, {
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    timeout: OPENAI_TIMEOUT_MS,
-    validateStatus: () => true,
-  });
+  let lastError = null;
 
-  logVerbose("[OPENAI]", resp.status, safeJson(resp.data));
+  for (let attempt = 1; attempt <= OPENAI_RETRY_COUNT; attempt++) {
+    try {
+      const resp = await axios.post("https://api.openai.com/v1/responses", payload, {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        timeout: OPENAI_TIMEOUT_MS,
+        validateStatus: () => true,
+      });
 
-  if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(`OpenAI falhou (${resp.status}): ${safeJson(resp.data)}`);
+      logVerbose("[OPENAI]", resp.status, safeJson(resp.data));
+
+      if (resp.status < 200 || resp.status >= 300) {
+        throw new Error(`OpenAI falhou (${resp.status}): ${safeJson(resp.data)}`);
+      }
+
+      const incompleteReason =
+        resp.data?.incomplete_details?.reason ||
+        resp.data?.status ||
+        "";
+
+      let text = extractOpenAIText(resp.data);
+      text = normalizeAiReply(text);
+
+      if (!text || text.length < 12) {
+        text = fallbackSalesReply(phone, userText);
+      }
+
+      if (String(incompleteReason).includes("max_output_tokens") && (!text || text.length < 20)) {
+        text = fallbackSalesReply(phone, userText);
+      }
+
+      pushAIHistory(phone, "user", userText);
+      pushAIHistory(phone, "assistant", text);
+
+      return text;
+    } catch (error) {
+      lastError = error;
+      console.error(`[OPENAI ERROR ATTEMPT ${attempt}]`, error?.message || error);
+      if (attempt < OPENAI_RETRY_COUNT) {
+        await delay(500 * attempt);
+      }
+    }
   }
 
-  const incompleteReason =
-    resp.data?.incomplete_details?.reason ||
-    resp.data?.status;
+  console.error("[OPENAI ERROR FINAL]", lastError?.message || lastError);
 
-  let text = extractOpenAIText(resp.data);
-
-  if (!text && String(incompleteReason || "").includes("max_output_tokens")) {
-    text = fallbackSalesReply(phone, userText);
-  }
-
-  if (!text) {
-    text = fallbackSalesReply(phone, userText);
-  }
-
+  const fallback = fallbackSalesReply(phone, userText);
   pushAIHistory(phone, "user", userText);
-  pushAIHistory(phone, "assistant", text);
-
-  return text;
+  pushAIHistory(phone, "assistant", fallback);
+  return fallback;
 }
 
 function shouldUseAI(text, convo) {
@@ -1246,7 +1332,6 @@ function shouldUseAI(text, convo) {
 
   if (!OPENAI_ENABLED || !OPENAI_API_KEY) return false;
   if (!cleanText) return false;
-  if (looksLikeHello(cleanText)) return false;
   if (looksLikeBoletoRequest(cleanText)) return false;
   if (looksLikeConfirm(cleanText)) return false;
   if (looksLikeCancel(cleanText)) return false;
@@ -1892,21 +1977,6 @@ async function processUserMessage(phone, text) {
     salesStage: convo.salesLead?.stage,
   });
 
-  if (looksLikeHello(cleanText)) {
-    convo.step = "idle";
-    convo.salesLead.stage = "discovering";
-    scheduleSaveConversations();
-
-    await sendMetaTextSmart(
-      phone,
-      "Olá 😊 Seja muito bem-vindo(a)!\n\n" +
-        "É um prazer falar com você.\n\n" +
-        "Temos cursos profissionalizantes online em várias áreas, com acesso à plataforma, materiais digitais, videoaulas, atividades, avaliações e suporte pedagógico.\n\n" +
-        "Me conta: qual curso ou área mais chamou sua atenção?"
-    );
-    return;
-  }
-
   if (looksLikeCancel(cleanText) && convo.step === "awaiting_confirmation") {
     convo.step = "awaiting_cpf";
     convo.pendingBoleto = null;
@@ -2102,6 +2172,10 @@ app.get("/debug/env", (_req, res) => {
       OPENAI_MODEL: OPENAI_MODEL,
       OPENAI_TIMEOUT_MS,
       OPENAI_MAX_OUTPUT_TOKENS,
+      OPENAI_TEMPERATURE,
+      OPENAI_STORE,
+      OPENAI_TRUNCATION,
+      OPENAI_RETRY_COUNT,
       CONVERSATIONS_FILE,
       META_SEND_DELAY_MS,
       DUPLICATE_WINDOW_MS,
