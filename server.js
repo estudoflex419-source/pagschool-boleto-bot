@@ -5,6 +5,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const axios = require("axios");
+const fs = require("fs");
 
 const app = express();
 app.set("etag", false);
@@ -64,6 +65,8 @@ const OPENAI_MODEL = readEnv("OPENAI_MODEL") || "gpt-5-mini";
 const OPENAI_ENABLED = /^(1|true|yes|on|sim)$/i.test(readEnv("OPENAI_ENABLED") || "true");
 const OPENAI_TIMEOUT_MS = Number(readEnv("OPENAI_TIMEOUT_MS") || 25000);
 
+const CONVERSATIONS_FILE = readEnv("CONVERSATIONS_FILE") || "./conversations.json";
+
 const tokenCache = {
   token: "",
   exp: 0,
@@ -71,6 +74,8 @@ const tokenCache = {
 
 const conversations = new Map();
 const processedMetaMessages = new Map();
+
+let saveConversationsTimer = null;
 
 function logVerbose(...args) {
   if (LOG_VERBOSE) {
@@ -209,12 +214,89 @@ function parseMaybeJsonBuffer(data) {
   return data;
 }
 
+function splitMessage(text, max = 350) {
+  const words = String(text || "").split(" ");
+  const parts = [];
+  let current = "";
+
+  for (const word of words) {
+    if ((current + word).length > max) {
+      if (current.trim()) parts.push(current.trim());
+      current = "";
+    }
+    current += word + " ";
+  }
+
+  if (current.trim()) parts.push(current.trim());
+
+  return parts.length ? parts : [String(text || "").trim()].filter(Boolean);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function detectIntent(text) {
+  const t = String(text || "").toLowerCase();
+
+  if (/(boleto|segunda via|2 via|2a via|mensalidade|fatura)/.test(t)) return "boleto";
+  if (/(valor|preço|quanto custa|mensalidade|preco)/.test(t)) return "price";
+  if (/(curso|estudar|certificado|formação|formacao)/.test(t)) return "course";
+  if (/(matricula|inscrever|inscrição|inscricao)/.test(t)) return "enroll";
+
+  return "general";
+}
+
+function loadConversations() {
+  try {
+    if (!fs.existsSync(CONVERSATIONS_FILE)) return;
+    const raw = fs.readFileSync(CONVERSATIONS_FILE, "utf8");
+    if (!raw.trim()) return;
+    const parsed = JSON.parse(raw);
+
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!key || !value || typeof value !== "object") continue;
+      conversations.set(key, {
+        step: value.step || "idle",
+        lastCpf: value.lastCpf || "",
+        pendingBoleto: value.pendingBoleto || null,
+        aiHistory: Array.isArray(value.aiHistory) ? value.aiHistory : [],
+        updatedAt: Number(value.updatedAt || Date.now()),
+      });
+    }
+
+    console.log(`[CONVERSATIONS] ${conversations.size} conversa(s) carregada(s).`);
+  } catch (error) {
+    console.error("[CONVERSATIONS LOAD ERROR]", error?.message || error);
+  }
+}
+
+function saveConversationsNow() {
+  try {
+    const obj = Object.fromEntries(conversations);
+    fs.writeFileSync(CONVERSATIONS_FILE, JSON.stringify(obj, null, 2), "utf8");
+  } catch (error) {
+    console.error("[CONVERSATIONS SAVE ERROR]", error?.message || error);
+  }
+}
+
+function scheduleSaveConversations() {
+  if (saveConversationsTimer) clearTimeout(saveConversationsTimer);
+  saveConversationsTimer = setTimeout(() => {
+    saveConversationsNow();
+    saveConversationsTimer = null;
+  }, 500);
+  if (saveConversationsTimer.unref) saveConversationsTimer.unref();
+}
+
 function cleanupMaps() {
   const now = Date.now();
+  let changedConversations = false;
 
   for (const [key, value] of conversations.entries()) {
     if (now - Number(value.updatedAt || 0) > 1000 * 60 * 60 * 6) {
       conversations.delete(key);
+      changedConversations = true;
     }
   }
 
@@ -223,6 +305,8 @@ function cleanupMaps() {
       processedMetaMessages.delete(key);
     }
   }
+
+  if (changedConversations) scheduleSaveConversations();
 }
 setInterval(cleanupMaps, 1000 * 60 * 30).unref();
 
@@ -236,6 +320,7 @@ function getConversation(phone) {
       aiHistory: [],
       updatedAt: Date.now(),
     });
+    scheduleSaveConversations();
   }
   const state = conversations.get(key);
   state.updatedAt = Date.now();
@@ -251,6 +336,7 @@ function resetConversation(phone) {
     aiHistory: [],
     updatedAt: Date.now(),
   });
+  scheduleSaveConversations();
 }
 
 function requireMetaEnv() {
@@ -369,6 +455,7 @@ function pushAIHistory(phone, role, text) {
     convo.aiHistory = convo.aiHistory.slice(-12);
   }
   convo.updatedAt = Date.now();
+  scheduleSaveConversations();
 }
 
 async function generateOpenAIReply(phone, userText) {
@@ -393,6 +480,8 @@ async function generateOpenAIReply(phone, userText) {
             "Quando o assunto for 2ª via, boleto, CPF, confirmação, cancelar, pagamento ou financeiro, diga de forma curta e clara para a pessoa digitar BOLETO e seguir o fluxo automático. " +
             "Não peça CPF nem dados sensíveis fora do fluxo de boleto. " +
             "Se perguntarem sobre cursos, responda como consultora comercial. Se a pergunta estiver vaga, convide a pessoa a dizer qual área tem interesse. " +
+            "Se perguntarem preço ou valor, responda de forma acolhedora e convide a pessoa a dizer qual curso ou área tem interesse. " +
+            "Se a pessoa demonstrar interesse em matrícula, conduza naturalmente para o próximo passo comercial. " +
             "Mantenha respostas curtas e apropriadas para WhatsApp, mas com calor humano e foco em conversão."
         }
       ]
@@ -413,12 +502,12 @@ async function generateOpenAIReply(phone, userText) {
     model: OPENAI_MODEL,
     input,
     text: {
-      verbosity: "low"
+      verbosity: "medium"
     },
     reasoning: {
       effort: "low"
     },
-    max_output_tokens: 220
+    max_output_tokens: 1000
   };
 
   const resp = await axios.post("https://api.openai.com/v1/responses", payload, {
@@ -443,7 +532,7 @@ async function generateOpenAIReply(phone, userText) {
     ).trim();
 
   if (!text) {
-    throw new Error("A OpenAI respondeu sem texto.");
+    return "Posso te ajudar com informações sobre nossos cursos profissionalizantes ou com a 2ª via do boleto. Como posso ajudar?";
   }
 
   pushAIHistory(phone, "user", userText);
@@ -1031,6 +1120,7 @@ async function startCpfLookup(phone, cpf) {
   convo.step = "processing";
   convo.lastCpf = digits;
   convo.pendingBoleto = null;
+  scheduleSaveConversations();
 
   await sendMetaText(phone, "Estou localizando o boleto. Aguarde um instante.");
 
@@ -1049,6 +1139,7 @@ async function startCpfLookup(phone, cpf) {
       vencimento: result.vencimento,
       createdAt: Date.now(),
     };
+    scheduleSaveConversations();
 
     await sendMetaText(phone, buildConfirmationMessage(result));
   } catch (error) {
@@ -1119,6 +1210,7 @@ async function processUserMessage(phone, text) {
   if (looksLikeCancel(cleanText) && convo.step === "awaiting_confirmation") {
     convo.step = "awaiting_cpf";
     convo.pendingBoleto = null;
+    scheduleSaveConversations();
     await sendMetaText(phone, "Tudo bem. Me envie o *CPF correto* para eu consultar novamente.");
     return;
   }
@@ -1131,6 +1223,7 @@ async function processUserMessage(phone, text) {
   if (looksLikeBoletoRequest(cleanText)) {
     convo.step = "awaiting_cpf";
     convo.pendingBoleto = null;
+    scheduleSaveConversations();
     await sendMetaText(phone, "Perfeito. Me envie o *CPF do aluno* para eu localizar o boleto.");
     return;
   }
@@ -1150,10 +1243,27 @@ async function processUserMessage(phone, text) {
     return;
   }
 
+  const intent = detectIntent(cleanText);
+
+  if (intent === "price") {
+    await sendMetaText(
+      phone,
+      "Os cursos têm valores acessíveis e você pode estudar no seu ritmo. Me diga qual área ou curso te interessa que eu te explico melhor."
+    );
+    return;
+  }
+
   if (shouldUseAI(cleanText, convo)) {
     try {
       const aiReply = await generateOpenAIReply(phone, cleanText);
-      await sendMetaText(phone, aiReply);
+      const parts = splitMessage(aiReply, 350);
+
+      for (let i = 0; i < parts.length; i++) {
+        if (i > 0) {
+          await delay(1200);
+        }
+        await sendMetaText(phone, parts[i]);
+      }
       return;
     } catch (error) {
       console.error("[OPENAI ERROR]", error?.message || error);
@@ -1279,6 +1389,7 @@ app.get("/debug/env", (_req, res) => {
       OPENAI_ENABLED: OPENAI_ENABLED,
       OPENAI_API_KEY: Boolean(OPENAI_API_KEY),
       OPENAI_MODEL: OPENAI_MODEL,
+      CONVERSATIONS_FILE: CONVERSATIONS_FILE,
     },
   });
 });
@@ -1439,6 +1550,8 @@ app.get("/debug/pagschool/test-cpf/:cpf", async (req, res) => {
     });
   }
 });
+
+loadConversations();
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
