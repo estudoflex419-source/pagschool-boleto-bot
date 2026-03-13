@@ -763,8 +763,19 @@ function looksLikeHello(text) {
   );
 }
 
-function looksLikeBoletoRequest(text) {
-  return /(boleto|2a via|segunda via|2 via|mensalidade|fatura)/i.test(String(text || ""));
+function looksLikeExistingBoletoRequest(text) {
+  const t = normalizeText(text);
+  return /(segunda via|2 via|2a via|fatura|mensalidade|parcela em aberto|consultar boleto|ver boleto|boleto atrasado)/.test(t);
+}
+
+function looksLikeEnrollmentBoletoChoice(text) {
+  const t = normalizeText(text);
+
+  if (/(boleto 12x|12x de|parcelado no boleto|quero no boleto|pode ser no boleto|prefiro boleto|fechar no boleto|pagamento no boleto|boleto parcelado)/.test(t)) {
+    return true;
+  }
+
+  return false;
 }
 
 function looksLikeConfirm(text) {
@@ -807,7 +818,7 @@ function extractLikelyName(text) {
   if (clean.length < 6) return "";
   if (!/\s+/.test(clean)) return "";
   if (isCpf(clean)) return "";
-  if (looksLikeBoletoRequest(clean)) return "";
+  if (looksLikeExistingBoletoRequest(clean)) return "";
   if (detectCourseMention(clean)) return "";
   if (extractPaymentMethod(clean)) return "";
   if (/(quero|valor|preco|preço|curso|boleto|pix|cartao|cartão|sim|nao|não|ok)/i.test(clean)) return "";
@@ -956,6 +967,14 @@ function detectReplyStageFromText(text, hasCourse) {
   return "";
 }
 
+function leadHasMinimumDataForCreateZero(lead) {
+  return Boolean(
+    String(lead?.name || "").trim() &&
+    String(lead?.course || "").trim() &&
+    String(lead?.paymentMethod || "").trim().toLowerCase().includes("boleto")
+  );
+}
+
 async function handleContextualShortReply(phone, text) {
   const convo = getConversation(phone);
   const lead = convo.salesLead || {};
@@ -1019,7 +1038,10 @@ async function tryCollectEnrollmentData(phone, text) {
   const course = detectCourseMention(trimmed);
   if (course && !lead.course) lead.course = course;
 
-  const paymentMethod = extractPaymentMethod(trimmed);
+  let paymentMethod = extractPaymentMethod(trimmed);
+  if (!paymentMethod && looksLikeEnrollmentBoletoChoice(trimmed)) {
+    paymentMethod = "Boleto";
+  }
   if (paymentMethod && !lead.paymentMethod) lead.paymentMethod = paymentMethod;
 
   convo.updatedAt = nowTs();
@@ -1496,7 +1518,7 @@ function shouldUseAI(text, convo) {
 
   if (!OPENAI_ENABLED || !OPENAI_API_KEY) return false;
   if (!cleanText) return false;
-  if (looksLikeBoletoRequest(cleanText)) return false;
+  if (looksLikeExistingBoletoRequest(cleanText)) return false;
   if (looksLikeCreateCarnetRequest(cleanText)) return false;
   if (looksLikeConfirm(cleanText)) return false;
   if (looksLikeCancel(cleanText)) return false;
@@ -2376,6 +2398,39 @@ async function startCreateZeroFlow(phone) {
   );
 }
 
+async function startCreateZeroFromSalesLead(phone) {
+  const convo = getConversation(phone);
+  const lead = convo.salesLead || {};
+
+  convo.pendingCreateZero = {
+    nomeAluno: lead.name || "",
+    nomeCurso: lead.course || "",
+    telefoneCelular: onlyDigits(phone),
+    email: "",
+    valorParcela: 80,
+    quantidadeParcelas: 12,
+    duracaoCurso: 12,
+    genero: DEFAULT_GENERO,
+    cep: DEFAULT_CEP,
+    logradouro: DEFAULT_LOGRADOURO,
+    numero: DEFAULT_NUMERO,
+    bairro: DEFAULT_BAIRRO,
+    localidade: DEFAULT_LOCALIDADE,
+    uf: DEFAULT_UF,
+    dataNascimento: "1990-01-01",
+  };
+
+  convo.step = "create_zero_cpf";
+  scheduleSaveConversations();
+
+  await sendMetaTextSmart(
+    phone,
+    `Perfeito 😊\n\n` +
+      `Vamos seguir com a matrícula no boleto para o curso de ${lead.course || "seu curso"}.\n\n` +
+      `Agora me envie o *CPF do aluno* para eu criar o carnê no PagSchool.`
+  );
+}
+
 async function handleCreateZeroFlow(phone, text) {
   const convo = getConversation(phone);
   const clean = String(text || "").trim();
@@ -2626,7 +2681,39 @@ async function processUserMessage(phone, text) {
     return;
   }
 
-  if (looksLikeBoletoRequest(cleanText)) {
+  if (
+    convo.salesLead?.stage === "collecting_enrollment" &&
+    looksLikeEnrollmentBoletoChoice(cleanText)
+  ) {
+    convo.salesLead.paymentMethod = "Boleto";
+    scheduleSaveConversations();
+
+    if (leadHasMinimumDataForCreateZero(convo.salesLead)) {
+      await startCreateZeroFromSalesLead(phone);
+      return;
+    }
+
+    await sendMetaTextSmart(
+      phone,
+      "Perfeito 😊\n\n" +
+        "Vamos seguir no boleto.\n\n" +
+        "Antes de criar o carnê, preciso confirmar:\n" +
+        `• Nome completo\n` +
+        `• Curso escolhido\n\n` +
+        "Pode me enviar esses dados?"
+    );
+    return;
+  }
+
+  if (
+    String(convo.step || "").startsWith("create_zero_") &&
+    isCpf(digits)
+  ) {
+    const handled = await handleCreateZeroFlow(phone, digits);
+    if (handled) return;
+  }
+
+  if (looksLikeExistingBoletoRequest(cleanText)) {
     convo.step = "awaiting_cpf";
     convo.pendingBoleto = null;
     scheduleSaveConversations();
@@ -2639,7 +2726,7 @@ async function processUserMessage(phone, text) {
     return;
   }
 
-  if (convo.step === "awaiting_cpf" || isCpf(digits)) {
+  if (convo.step === "awaiting_cpf") {
     await startCpfLookup(phone, digits);
     return;
   }
@@ -2659,6 +2746,19 @@ async function processUserMessage(phone, text) {
 
   if (await tryCollectEnrollmentData(phone, cleanText)) {
     return;
+  }
+
+  if (
+    convo.salesLead?.stage === "collecting_enrollment" &&
+    extractPaymentMethod(cleanText) === "Boleto"
+  ) {
+    convo.salesLead.paymentMethod = "Boleto";
+    scheduleSaveConversations();
+
+    if (leadHasMinimumDataForCreateZero(convo.salesLead)) {
+      await startCreateZeroFromSalesLead(phone);
+      return;
+    }
   }
 
   if (await handleContextualShortReply(phone, cleanText)) {
