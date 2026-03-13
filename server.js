@@ -1,4 +1,4 @@
-  require("dotenv").config();
+    require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -499,6 +499,14 @@ function buildSmartBoletoIntentMessage() {
 }
 
 function buildEntryDirectionMessage() {
+  if (HUMAN_ATTENDANT_MODE) {
+    return (
+      "Olá, seja bem-vindo(a) à Estudo Flex 😊\n\n" +
+      "Vou te atender por aqui como sua consultora.\n\n" +
+      "Me conta: você já é aluno(a) ou quer fazer uma nova matrícula?"
+    );
+  }
+
   return (
     "Olá, seja bem-vindo(a) à Estudo Flex.\n\n" +
     "Para eu te ajudar melhor, me diga uma opção:\n\n" +
@@ -729,6 +737,7 @@ function buildPremiumAllCoursesMessage() {
 const OPENAI_TRUNCATION = readEnv("OPENAI_TRUNCATION") || "auto";
 const OPENAI_RETRY_COUNT = Number(readEnv("OPENAI_RETRY_COUNT") || 2);
 const START_ONLY_CHATBOT = /^(1|true|yes|on|sim)$/i.test(readEnv("START_ONLY_CHATBOT") || "true");
+const HUMAN_ATTENDANT_MODE = /^(1|true|yes|on|sim)$/i.test(readEnv("HUMAN_ATTENDANT_MODE") || "true");
 
   const CONVERSATIONS_FILE = readEnv("CONVERSATIONS_FILE") || path.join(__dirname, "conversations.json");
   const LEADS_FILE = readEnv("LEADS_FILE") || path.join(__dirname, "leads.json");
@@ -2508,6 +2517,14 @@ async function sendMetaButtons(phone, bodyText, buttons = []) {
   }
 
   async function sendMetaButtonsSmart(phone, bodyText, buttons = [], fallbackText = "") {
+    if (HUMAN_ATTENDANT_MODE) {
+      const optionsText =
+        fallbackText ||
+        normalizeOutgoingText(String(bodyText || "").trim());
+      await sendMetaTextSmart(phone, optionsText);
+      return;
+    }
+
     try {
       await sendMetaButtons(phone, bodyText, buttons);
     } catch (error) {
@@ -2565,6 +2582,11 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     convo.updatedAt = nowTs();
     scheduleSaveConversations();
 
+    if (HUMAN_ATTENDANT_MODE) {
+      await sendMetaTextSmart(phone, buildEntryDirectionMessage());
+      return;
+    }
+
     await sendMetaButtonsSmart(
       phone,
       buildEntryDirectionMessage(),
@@ -2578,10 +2600,10 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
 }
 
 async function sendCourseInterestButtons(phone) {
-  if (START_ONLY_CHATBOT) {
+  if (HUMAN_ATTENDANT_MODE || START_ONLY_CHATBOT) {
     await sendMetaTextSmart(
       phone,
-      "Se quiser, me responde em texto:\n⬢ Entendi\n⬢ Ver benefícios\n⬢ Quero matrícula"
+      "Se você quiser, me responde em texto:\nentendi, ver benefícios ou quero matrícula."
     );
     return;
   }
@@ -2599,10 +2621,10 @@ async function sendCourseInterestButtons(phone) {
 }
 
 async function sendPaymentButtons(phone) {
-  if (START_ONLY_CHATBOT) {
+  if (HUMAN_ATTENDANT_MODE || START_ONLY_CHATBOT) {
     await sendMetaTextSmart(
       phone,
-      "Me fala em texto qual forma de pagamento você prefere: boleto, cartão ou pix/à vista."
+      "Me fala em texto qual forma de pagamento você prefere: boleto, cartão ou pix à vista."
     );
     return;
   }
@@ -5410,6 +5432,7 @@ async function handleIntent(phone, text) {
         OPENAI_STORE,
         OPENAI_TRUNCATION,
         OPENAI_RETRY_COUNT,
+        HUMAN_ATTENDANT_MODE,
         CONVERSATIONS_FILE,
         LEADS_FILE,
         META_SEND_DELAY_MS,
