@@ -263,6 +263,48 @@ function normalizeAiReply(text) {
   return t;
 }
 
+function formatDateToYYYYMMDD(date) {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function isValidYMD(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
+function pickPrimeiraParcelaDate(dataVencimento) {
+  const date = new Date(dataVencimento);
+  if (Number.isNaN(date.getTime())) return 10;
+  return date.getDate();
+}
+
+function generateNumeroContrato(prefix = "E") {
+  const now = new Date();
+  const yyyy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const rand = String(Math.floor(Math.random() * 9000) + 1000);
+  return `${prefix}${yyyy}${mm}${dd}${rand}`;
+}
+
+function mapGenero(input, fallback = "F") {
+  const value = String(input || "").trim().toLowerCase();
+  if (["m", "masculino"].includes(value)) return "M";
+  if (["f", "feminino"].includes(value)) return "F";
+  return String(fallback || "F").toUpperCase();
+}
+
+function looksLikeCreateCarnetRequest(text) {
+  const t = normalizeText(text);
+  return /(criar carne|criar carn[eê]|novo carne|novo carn[eê]|gerar carne do zero|gerar carn[eê] do zero|criar boleto do zero|novo boleto do zero|matricular com carne|fazer carne|fazer carn[eê])/.test(
+    t
+  );
+}
+
 /* =========================================================
    CONFIG
 ========================================================= */
@@ -304,6 +346,17 @@ const CARD_INSTALLMENT_VALUE = Number(readEnv("CARD_INSTALLMENT_VALUE") || 0);
 const ENROLL_REDIRECT_PHONE = normalizePhone(readEnv("ENROLL_REDIRECT_PHONE", "SALES_CLOSER_PHONE"));
 const ENROLL_REDIRECT_TAG = readEnv("ENROLL_REDIRECT_TAG") || "#AGORASOUTECNICO";
 
+const DEFAULT_UF = readEnv("DEFAULT_UF") || "SP";
+const DEFAULT_LOCALIDADE = readEnv("DEFAULT_LOCALIDADE") || "Sao Jose do Rio Preto";
+const DEFAULT_BAIRRO = readEnv("DEFAULT_BAIRRO") || "Centro";
+const DEFAULT_LOGRADOURO = readEnv("DEFAULT_LOGRADOURO") || "Nao informado";
+const DEFAULT_NUMERO = readEnv("DEFAULT_NUMERO") || "S/N";
+const DEFAULT_CEP = onlyDigits(readEnv("DEFAULT_CEP")) || "15000000";
+const DEFAULT_GENERO = (readEnv("DEFAULT_GENERO") || "F").toUpperCase();
+
+const AUTO_CREATE_CONTRACT = /^(1|true|yes|on|sim)$/i.test(readEnv("AUTO_CREATE_CONTRACT") || "true");
+const AUTO_CREATE_PARCELA = /^(1|true|yes|on|sim)$/i.test(readEnv("AUTO_CREATE_PARCELA") || "true");
+
 /* =========================================================
    LOG
 ========================================================= */
@@ -331,6 +384,7 @@ function createDefaultConversation() {
     step: "idle",
     lastCpf: "",
     pendingBoleto: null,
+    pendingCreateZero: null,
     aiHistory: [],
     lastUserTextNormalized: "",
     lastUserTextAt: 0,
@@ -1443,9 +1497,11 @@ function shouldUseAI(text, convo) {
   if (!OPENAI_ENABLED || !OPENAI_API_KEY) return false;
   if (!cleanText) return false;
   if (looksLikeBoletoRequest(cleanText)) return false;
+  if (looksLikeCreateCarnetRequest(cleanText)) return false;
   if (looksLikeConfirm(cleanText)) return false;
   if (looksLikeCancel(cleanText)) return false;
   if (isCpf(digits)) return false;
+  if (String(convo.step || "").startsWith("create_zero_")) return false;
   if (convo.step === "awaiting_cpf") return false;
   if (convo.step === "awaiting_confirmation") return false;
   if (convo.step === "processing") return false;
@@ -1701,7 +1757,7 @@ function normalizeParcela(raw) {
     vencimento: getByKeys(raw, ["vencimento", "dataVencimento"]),
     numeroBoleto: getByKeys(raw, ["numeroBoleto", "linhaDigitavel", "codigoBarras"]) || "",
     nossoNumero: getByKeys(raw, ["nossoNumero"]) || "",
-    linkPDF: getByKeys(raw, ["linkPDF", "pdfUrl", "urlPdf"]) || "",
+    linkPDF: getByKeys(raw, ["linkPDF", "pdfUrl", "urlPdf", "boletoUrl"]) || "",
     raw,
   };
 }
@@ -1774,7 +1830,7 @@ function selectBestParcela(contrato) {
 }
 
 /* =========================================================
-   PAGSCHOOL BUSINESS
+   PAGSCHOOL BUSINESS - 2a VIA
 ========================================================= */
 
 async function findAlunoByCpf(cpf) {
@@ -1831,6 +1887,8 @@ async function findContratoByAlunoId(alunoId) {
       docPaths: [
         `/api/contrato/by-aluno/${alunoId}`,
         `/contrato/by-aluno/${alunoId}`,
+        `/api/contrato/by-aluno/${alunoId}/alunosid`,
+        `/contrato/by-aluno/${alunoId}/alunosid`,
         `/api/contratos/by-aluno/${alunoId}`,
         `/contratos/by-aluno/${alunoId}`,
       ],
@@ -1876,6 +1934,8 @@ async function gerarBoletoDaParcela(parcelaId) {
   const resp = await pagSchoolRequestMany({
     method: "post",
     docPaths: [
+      `/api/parcela-contrato/gerar-boleto-sicredi/${parcelaId}`,
+      `/parcela-contrato/gerar-boleto-sicredi/${parcelaId}`,
       `/api/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`,
       `/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`,
       `/api/parcelas-contrato/gerar-boleto/${parcelaId}`,
@@ -1888,6 +1948,7 @@ async function gerarBoletoDaParcela(parcelaId) {
   const nossoNumero =
     getByKeys(data, ["nossoNumero"]) ||
     getByKeys(data?.data || {}, ["nossoNumero"]) ||
+    getByKeys(data?.parcela || {}, ["nossoNumero"]) ||
     "";
 
   return {
@@ -1937,7 +1998,244 @@ async function buildBoletoResultFromCpf(cpf) {
 }
 
 /* =========================================================
-   FLOW
+   PAGSCHOOL BUSINESS - CRIAR DO ZERO
+========================================================= */
+
+async function searchAlunoByCpfExact(cpf) {
+  try {
+    return await findAlunoByCpf(cpf);
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function createAlunoPagSchool(dados) {
+  const payload = {
+    cpf: onlyDigits(dados.cpf),
+    telefoneCelular: onlyDigits(dados.telefoneCelular || dados.telefone || ""),
+    telefoneFixo: onlyDigits(dados.telefoneFixo || ""),
+    nomeAluno: String(dados.nomeAluno || "").trim(),
+    dataNascimento: formatDateToYYYYMMDD(dados.dataNascimento || "1990-01-01"),
+    email: String(dados.email || "").trim(),
+    genero: mapGenero(dados.genero, DEFAULT_GENERO),
+    cep: onlyDigits(dados.cep || DEFAULT_CEP),
+    logradouro: String(dados.logradouro || DEFAULT_LOGRADOURO).trim(),
+    enderecoComplemento: String(dados.enderecoComplemento || "").trim(),
+    bairro: String(dados.bairro || DEFAULT_BAIRRO).trim(),
+    localidade: String(dados.localidade || DEFAULT_LOCALIDADE).trim(),
+    uf: String(dados.uf || DEFAULT_UF).trim().toUpperCase(),
+    numero: String(dados.numero || DEFAULT_NUMERO).trim(),
+    alunoResponsavelFinanceiro:
+      typeof dados.alunoResponsavelFinanceiro === "boolean" ? dados.alunoResponsavelFinanceiro : true,
+  };
+
+  const resp = await pagSchoolRequestMany({
+    method: "post",
+    docPaths: ["/api/aluno/novo", "/aluno/novo"],
+    data: payload,
+  });
+
+  const data = resp.data || {};
+  const alunoId =
+    getByKeys(data, ["id", "alunoId", "idAluno"]) ||
+    getByKeys(data?.data || {}, ["id", "alunoId", "idAluno"]);
+
+  if (!alunoId) {
+    throw new Error(`A PagSchool não retornou o id do aluno criado: ${safeJson(data)}`);
+  }
+
+  return {
+    id: alunoId,
+    nome: payload.nomeAluno,
+    cpf: payload.cpf,
+    telefone: payload.telefoneCelular,
+    raw: data,
+  };
+}
+
+async function createContratoPagSchool(dados) {
+  const primeiroVencimento = formatDateToYYYYMMDD(dados.vencimento);
+  const diaPrimeiraParcela = pickPrimeiraParcelaDate(primeiroVencimento);
+
+  const payload = {
+    numeroContrato: String(dados.numeroContrato || generateNumeroContrato("E")).trim(),
+    nomeCurso: String(dados.nomeCurso || "CURSO").trim(),
+    duracaoCurso: Number(dados.duracaoCurso || dados.quantidadeParcelas || 1),
+    valorParcela: Number(dados.valorParcela || 0),
+    quantidadeParcelas: Number(dados.quantidadeParcelas || 1),
+    diaProximoVencimento: diaPrimeiraParcela,
+    diaInicioPrimeiraParcela: diaPrimeiraParcela,
+    descontoAdimplencia: Number(dados.descontoAdimplencia || 0),
+    descontoAdimplenciaValorFixo:
+      dados.descontoAdimplenciaValorFixo !== undefined ? Number(dados.descontoAdimplenciaValorFixo) : null,
+    aluno_id: Number(dados.aluno_id),
+    numeroParcelaInicial: Number(dados.numeroParcelaInicial || 1),
+  };
+
+  const resp = await pagSchoolRequestMany({
+    method: "post",
+    docPaths: ["/api/contrato/create", "/contrato/create"],
+    data: payload,
+  });
+
+  const data = resp.data || {};
+  const contratoId =
+    getByKeys(data, ["id", "contratoId", "idContrato"]) ||
+    getByKeys(data?.data || {}, ["id", "contratoId", "idContrato"]);
+
+  if (!contratoId) {
+    throw new Error(`A PagSchool não retornou o id do contrato criado: ${safeJson(data)}`);
+  }
+
+  return {
+    id: contratoId,
+    numeroContrato: payload.numeroContrato,
+    nomeCurso: payload.nomeCurso,
+    raw: data,
+  };
+}
+
+async function createParcelaPagSchool(dados) {
+  const payload = {
+    valor: Number(dados.valor),
+    descricao: String(dados.descricao || "Mensalidade").trim(),
+    vencimento: formatDateToYYYYMMDD(dados.vencimento),
+    contrato_id: Number(dados.contrato_id),
+  };
+
+  const resp = await pagSchoolRequestMany({
+    method: "post",
+    docPaths: ["/api/parcela-contrato/create", "/parcela-contrato/create"],
+    data: payload,
+  });
+
+  const data = resp.data || {};
+  const parcelaId =
+    getByKeys(data, ["id", "parcelaId", "idParcela"]) ||
+    getByKeys(data?.data || {}, ["id", "parcelaId", "idParcela"]);
+
+  if (!parcelaId) {
+    throw new Error(`A PagSchool não retornou o id da parcela criada: ${safeJson(data)}`);
+  }
+
+  return {
+    id: parcelaId,
+    valor: payload.valor,
+    vencimento: payload.vencimento,
+    descricao: payload.descricao,
+    nossoNumero: getByKeys(data, ["nossoNumero"]) || "",
+    numeroBoleto: getByKeys(data, ["numeroBoleto"]) || "",
+    raw: data,
+  };
+}
+
+async function createBoletoDoZero(dados) {
+  const cpf = onlyDigits(dados.cpf);
+  if (!isCpf(cpf)) throw new Error("CPF inválido. Envie 11 números.");
+
+  if (!String(dados.nomeAluno || "").trim()) throw new Error("nomeAluno é obrigatório.");
+  if (!String(dados.nomeCurso || "").trim()) throw new Error("nomeCurso é obrigatório.");
+  if (!Number(dados.valorParcela || 0)) throw new Error("valorParcela é obrigatório.");
+  if (!Number(dados.quantidadeParcelas || 0)) throw new Error("quantidadeParcelas é obrigatória.");
+  if (!isValidYMD(dados.vencimento)) throw new Error("vencimento precisa estar no formato AAAA-MM-DD.");
+
+  let aluno = await searchAlunoByCpfExact(cpf);
+
+  if (!aluno) {
+    aluno = await createAlunoPagSchool({
+      cpf,
+      telefoneCelular: dados.telefoneCelular,
+      telefoneFixo: dados.telefoneFixo,
+      nomeAluno: dados.nomeAluno,
+      dataNascimento: dados.dataNascimento || "1990-01-01",
+      email: dados.email || `sem-email-${cpf}@exemplo.com`,
+      genero: dados.genero || DEFAULT_GENERO,
+      cep: dados.cep || DEFAULT_CEP,
+      logradouro: dados.logradouro || DEFAULT_LOGRADOURO,
+      enderecoComplemento: dados.enderecoComplemento || "",
+      bairro: dados.bairro || DEFAULT_BAIRRO,
+      localidade: dados.localidade || DEFAULT_LOCALIDADE,
+      uf: dados.uf || DEFAULT_UF,
+      numero: dados.numero || DEFAULT_NUMERO,
+      alunoResponsavelFinanceiro: true,
+    });
+  }
+
+  let contrato;
+  if (AUTO_CREATE_CONTRACT) {
+    contrato = await createContratoPagSchool({
+      numeroContrato: dados.numeroContrato || generateNumeroContrato("E"),
+      nomeCurso: dados.nomeCurso,
+      duracaoCurso: dados.duracaoCurso || dados.quantidadeParcelas || 1,
+      valorParcela: Number(dados.valorParcela),
+      quantidadeParcelas: Number(dados.quantidadeParcelas || 1),
+      vencimento: dados.vencimento,
+      descontoAdimplencia: Number(dados.descontoAdimplencia || 0),
+      descontoAdimplenciaValorFixo:
+        dados.descontoAdimplenciaValorFixo !== undefined ? dados.descontoAdimplenciaValorFixo : null,
+      aluno_id: aluno.id,
+      numeroParcelaInicial: Number(dados.numeroParcelaInicial || 1),
+    });
+  } else {
+    const contratoExistente = await findContratoByAlunoId(aluno.id);
+    contrato = {
+      id: contratoExistente.id,
+      numeroContrato: getByKeys(contratoExistente.raw, ["numeroContrato"]) || "",
+      nomeCurso: getByKeys(contratoExistente.raw, ["nomeCurso"]) || dados.nomeCurso,
+      raw: contratoExistente.raw,
+    };
+  }
+
+  if (!AUTO_CREATE_PARCELA) {
+    throw new Error("AUTO_CREATE_PARCELA=false ainda não está suportado nesta versão.");
+  }
+
+  const parcela = await createParcelaPagSchool({
+    valor: Number(dados.valorParcela),
+    descricao: dados.descricaoParcela || `Mensalidade ${dados.nomeCurso}`,
+    vencimento: dados.vencimento,
+    contrato_id: contrato.id,
+  });
+
+  const boletoGerado = await gerarBoletoDaParcela(parcela.id);
+  const nossoNumero = boletoGerado.nossoNumero || parcela.nossoNumero || "";
+  const pdfUrl = nossoNumero ? buildPublicPdfUrl(parcela.id, nossoNumero) : "";
+
+  return {
+    ok: true,
+    aluno: {
+      id: aluno.id,
+      nome: aluno.nome,
+      cpf: aluno.cpf,
+      telefone: aluno.telefone || "",
+    },
+    contrato: {
+      id: contrato.id,
+      numeroContrato: contrato.numeroContrato || "",
+      nomeCurso: contrato.nomeCurso || dados.nomeCurso,
+    },
+    parcela: {
+      id: parcela.id,
+      valor: Number(dados.valorParcela),
+      vencimento: dados.vencimento,
+      descricao: parcela.descricao,
+    },
+    boleto: {
+      nossoNumero,
+      linhaDigitavel: parcela.numeroBoleto || "",
+      pdfUrl,
+    },
+    raw: {
+      aluno: aluno.raw,
+      contrato: contrato.raw,
+      parcela: parcela.raw,
+      boletoGerado: boletoGerado.raw,
+    },
+  };
+}
+
+/* =========================================================
+   FLOW - 2a VIA
 ========================================================= */
 
 function buildConfirmationMessage(result) {
@@ -2037,6 +2335,223 @@ async function confirmAndSendBoleto(phone) {
   }
 }
 
+/* =========================================================
+   FLOW - CRIAR DO ZERO
+========================================================= */
+
+function buildCreateZeroResume(data) {
+  return [
+    "Confira os dados para criar o carnê:",
+    `Nome: ${data.nomeAluno}`,
+    `CPF: ${maskCpf(data.cpf)}`,
+    `Telefone: ${data.telefoneCelular}`,
+    `E-mail: ${data.email}`,
+    `Curso: ${data.nomeCurso}`,
+    `Valor da parcela: ${formatCurrencyBR(data.valorParcela)}`,
+    `Quantidade de parcelas: ${data.quantidadeParcelas}`,
+    `Primeiro vencimento: ${formatDateBR(data.vencimento)}`,
+    "",
+    "Se estiver tudo certo, responda *CONFIRMAR*.",
+    "Se quiser cancelar, responda *CANCELAR*.",
+  ].join("\n");
+}
+
+function getCreateZeroData(phone) {
+  const convo = getConversation(phone);
+  if (!convo.pendingCreateZero || typeof convo.pendingCreateZero !== "object") {
+    convo.pendingCreateZero = {};
+  }
+  return convo.pendingCreateZero;
+}
+
+async function startCreateZeroFlow(phone) {
+  const convo = getConversation(phone);
+  convo.step = "create_zero_nome";
+  convo.pendingCreateZero = {};
+  scheduleSaveConversations();
+
+  await sendMetaTextSmart(
+    phone,
+    "Perfeito 😊\n\nVamos criar o carnê do zero no PagSchool.\n\nMe envie o *nome completo do aluno*."
+  );
+}
+
+async function handleCreateZeroFlow(phone, text) {
+  const convo = getConversation(phone);
+  const clean = String(text || "").trim();
+  const data = getCreateZeroData(phone);
+
+  if (looksLikeCancel(clean)) {
+    resetConversation(phone);
+    await sendMetaTextSmart(phone, "Tudo bem. Processo cancelado.\n\nQuando quiser recomeçar, envie *criar carnê*.");
+    return true;
+  }
+
+  if (convo.step === "create_zero_nome") {
+    const nome = extractLikelyName(clean) || toTitleCase(clean);
+    if (!nome || nome.length < 5) {
+      await sendMetaTextSmart(phone, "Me envie o *nome completo do aluno*.");
+      return true;
+    }
+
+    data.nomeAluno = nome;
+    convo.step = "create_zero_cpf";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Agora me envie o *CPF do aluno* com 11 números.");
+    return true;
+  }
+
+  if (convo.step === "create_zero_cpf") {
+    const cpf = onlyDigits(clean);
+    if (!isCpf(cpf)) {
+      await sendMetaTextSmart(phone, "CPF inválido. Me envie o CPF com *11 números*.");
+      return true;
+    }
+
+    data.cpf = cpf;
+    convo.step = "create_zero_telefone";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Agora me envie o *telefone celular do aluno* com DDD.");
+    return true;
+  }
+
+  if (convo.step === "create_zero_telefone") {
+    const tel = onlyDigits(clean);
+    if (tel.length < 10) {
+      await sendMetaTextSmart(phone, "Telefone inválido. Me envie o *telefone com DDD*.");
+      return true;
+    }
+
+    data.telefoneCelular = tel;
+    convo.step = "create_zero_email";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Agora me envie o *e-mail do aluno*.");
+    return true;
+  }
+
+  if (convo.step === "create_zero_email") {
+    data.email = clean;
+    convo.step = "create_zero_curso";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Agora me envie o *nome do curso*.");
+    return true;
+  }
+
+  if (convo.step === "create_zero_curso") {
+    data.nomeCurso = clean;
+    convo.step = "create_zero_valor";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Agora me envie o *valor da parcela*.\nExemplo: 99,90");
+    return true;
+  }
+
+  if (convo.step === "create_zero_valor") {
+    const valor = Number(String(clean).replace(",", "."));
+    if (!valor || valor <= 0) {
+      await sendMetaTextSmart(phone, "Valor inválido. Envie algo como *99,90*.");
+      return true;
+    }
+
+    data.valorParcela = valor;
+    convo.step = "create_zero_quantidade";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Agora me envie a *quantidade de parcelas*.\nExemplo: 24");
+    return true;
+  }
+
+  if (convo.step === "create_zero_quantidade") {
+    const qtd = Number(onlyDigits(clean));
+    if (!qtd || qtd <= 0) {
+      await sendMetaTextSmart(phone, "Quantidade inválida. Envie um número como *24*.");
+      return true;
+    }
+
+    data.quantidadeParcelas = qtd;
+    data.duracaoCurso = qtd;
+    convo.step = "create_zero_vencimento";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Agora me envie a *data do primeiro vencimento* no formato AAAA-MM-DD.");
+    return true;
+  }
+
+  if (convo.step === "create_zero_vencimento") {
+    if (!isValidYMD(clean)) {
+      await sendMetaTextSmart(phone, "Data inválida. Envie no formato *AAAA-MM-DD*.\nExemplo: 2026-03-25");
+      return true;
+    }
+
+    data.vencimento = clean;
+    data.genero = DEFAULT_GENERO;
+    data.cep = DEFAULT_CEP;
+    data.logradouro = DEFAULT_LOGRADOURO;
+    data.numero = DEFAULT_NUMERO;
+    data.bairro = DEFAULT_BAIRRO;
+    data.localidade = DEFAULT_LOCALIDADE;
+    data.uf = DEFAULT_UF;
+    data.dataNascimento = "1990-01-01";
+    data.descricaoParcela = `Mensalidade ${data.nomeCurso}`;
+
+    convo.step = "create_zero_confirmacao";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, buildCreateZeroResume(data));
+    return true;
+  }
+
+  if (convo.step === "create_zero_confirmacao") {
+    if (!looksLikeConfirm(clean)) {
+      await sendMetaTextSmart(phone, "Responda *CONFIRMAR* para criar o carnê ou *CANCELAR* para sair.");
+      return true;
+    }
+
+    convo.step = "create_zero_processing";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Perfeito. Estou criando o aluno, contrato, parcela e boleto no PagSchool...");
+
+    try {
+      const result = await createBoletoDoZero(data);
+
+      const lines = [];
+      lines.push("Carnê criado com sucesso ✅");
+      lines.push(`Aluno: ${result.aluno.nome}`);
+      lines.push(`Aluno ID: ${result.aluno.id}`);
+      lines.push(`Contrato ID: ${result.contrato.id}`);
+      lines.push(`Parcela ID: ${result.parcela.id}`);
+      if (result.boleto.nossoNumero) lines.push(`Nosso número: ${result.boleto.nossoNumero}`);
+      if (result.boleto.linhaDigitavel) lines.push(`Linha digitável: ${result.boleto.linhaDigitavel}`);
+      if (result.boleto.pdfUrl) lines.push(`PDF: ${result.boleto.pdfUrl}`);
+
+      await sendMetaTextSmart(phone, lines.join("\n"));
+
+      if (result.boleto.pdfUrl) {
+        try {
+          await sendMetaDocument(
+            phone,
+            result.boleto.pdfUrl,
+            `boleto-${result.boleto.nossoNumero || result.parcela.id}.pdf`,
+            "Segue o carnê em PDF."
+          );
+        } catch (err) {
+          console.error("[CREATE ZERO PDF SEND ERROR]", err?.message || err);
+        }
+      }
+
+      resetConversation(phone);
+      return true;
+    } catch (error) {
+      console.error("[CREATE ZERO ERROR]", error?.message || error);
+      resetConversation(phone);
+      await sendMetaTextSmart(phone, `Não consegui criar o carnê.\n\nMotivo: ${String(error.message || error)}`);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/* =========================================================
+   INBOUND TEXT
+========================================================= */
+
 function extractIncomingText(message) {
   if (!message || typeof message !== "object") return "";
 
@@ -2087,6 +2602,16 @@ async function processUserMessage(phone, text) {
     salesStage: convo.salesLead?.stage,
     lastSalesPromptType: convo.lastSalesPromptType,
   });
+
+  if (looksLikeCreateCarnetRequest(cleanText)) {
+    await startCreateZeroFlow(phone);
+    return;
+  }
+
+  if (String(convo.step || "").startsWith("create_zero_")) {
+    const handled = await handleCreateZeroFlow(phone, cleanText);
+    if (handled) return;
+  }
 
   if (looksLikeCancel(cleanText) && convo.step === "awaiting_confirmation") {
     convo.step = "awaiting_cpf";
@@ -2306,6 +2831,15 @@ app.get("/debug/env", (_req, res) => {
       CARD_INSTALLMENT_VALUE,
       ENROLL_REDIRECT_PHONE: Boolean(ENROLL_REDIRECT_PHONE),
       ENROLL_REDIRECT_TAG,
+      DEFAULT_UF,
+      DEFAULT_LOCALIDADE,
+      DEFAULT_BAIRRO,
+      DEFAULT_LOGRADOURO,
+      DEFAULT_NUMERO,
+      DEFAULT_CEP,
+      DEFAULT_GENERO,
+      AUTO_CREATE_CONTRACT,
+      AUTO_CREATE_PARCELA,
     },
   });
 });
@@ -2405,6 +2939,8 @@ app.get("/boleto/pdf/:parcelaId/:nossoNumero", async (req, res) => {
     const resp = await pagSchoolRequestMany({
       method: "get",
       docPaths: [
+        `/api/parcela-contrato/pdf/${parcelaId}/${nossoNumero}`,
+        `/parcela-contrato/pdf/${parcelaId}/${nossoNumero}`,
         `/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
         `/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
         `/api/parcelas-contrato/boleto/${parcelaId}/${nossoNumero}`,
@@ -2469,6 +3005,50 @@ app.get("/debug/pagschool/test-cpf/:cpf", async (req, res) => {
         pdfUrl: result.pdfUrl,
       },
     });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: String(error.message || error),
+    });
+  }
+});
+
+app.post("/pagschool/criar-boleto-zero", async (req, res) => {
+  try {
+    const result = await createBoletoDoZero(req.body || {});
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: String(error.message || error),
+    });
+  }
+});
+
+app.get("/debug/pagschool/test-create-zero", async (_req, res) => {
+  try {
+    const body = {
+      nomeAluno: "Aluno Teste Render",
+      cpf: "11111111111",
+      telefoneCelular: "13999999999",
+      email: "teste@exemplo.com",
+      nomeCurso: "ATEND FARMACIA",
+      valorParcela: 99.9,
+      quantidadeParcelas: 12,
+      duracaoCurso: 12,
+      vencimento: "2026-03-25",
+      genero: DEFAULT_GENERO,
+      cep: DEFAULT_CEP,
+      logradouro: DEFAULT_LOGRADOURO,
+      numero: DEFAULT_NUMERO,
+      bairro: DEFAULT_BAIRRO,
+      localidade: DEFAULT_LOCALIDADE,
+      uf: DEFAULT_UF,
+      dataNascimento: "1990-01-01",
+    };
+
+    const result = await createBoletoDoZero(body);
+    res.json({ ok: true, result });
   } catch (error) {
     res.status(500).json({
       ok: false,
