@@ -1,4 +1,4 @@
-   require("dotenv").config();
+  require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -162,6 +162,30 @@ function isValidCpf(value) {
 
   function normalizeForCompare(text) {
     return normalizeText(text).replace(/[^\w\s]/g, "");
+  }
+
+  function isLikelyPersonName(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return false;
+    if (raw.length < 6 || raw.length > 80) return false;
+    if (/[?0-9]/.test(raw)) return false;
+
+    const normalized = normalizeText(raw);
+    if (
+      /(tem que|pagar|quanto|como|quero|valor|preco|preço|curso|boleto|pix|cartao|cartão|cpf|email|forma de pagamento|sim|nao|não|ok|entendi)/.test(
+        normalized
+      )
+    ) {
+      return false;
+    }
+
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length < 2 || parts.length > 6) return false;
+
+    const validPart = (part) => /^[A-Za-zÀ-ÖØ-öø-ÿ'`-]{2,}$/.test(part);
+    if (!parts.every(validPart)) return false;
+
+    return true;
   }
 
   function splitMessage(text, max = 380) {
@@ -1122,7 +1146,7 @@ const MARKET_SALARY_BY_COURSE = {
     const convo = getConversation(phone);
     const lead = convo?.salesLead || {};
     return updateLeadProfile(phone, {
-      name: String(lead.name || "").trim(),
+      name: isLikelyPersonName(lead.name) ? String(lead.name || "").trim() : "",
       course_interest: String(lead.course || "").trim(),
       objective: String(lead.objective || "").trim(),
       stage: String(lead.stage || "discovering").trim(),
@@ -1204,7 +1228,7 @@ const MARKET_SALARY_BY_COURSE = {
       const profile = getLeadProfile(key);
 
       if (profile) {
-        fresh.salesLead.name = profile.name || "";
+        fresh.salesLead.name = isLikelyPersonName(profile.name) ? profile.name : "";
         fresh.salesLead.course = profile.course_interest || "";
         fresh.salesLead.objective = profile.objective || "";
         fresh.salesLead.stage = profile.stage || "discovering";
@@ -1228,7 +1252,7 @@ const MARKET_SALARY_BY_COURSE = {
 
     const profile = getLeadProfile(key);
     if (profile) {
-      if (!state.salesLead.name && profile.name) state.salesLead.name = profile.name;
+      if (!state.salesLead.name && isLikelyPersonName(profile.name)) state.salesLead.name = profile.name;
       if (!state.salesLead.course && profile.course_interest) state.salesLead.course = profile.course_interest;
       if (!state.salesLead.objective && profile.objective) state.salesLead.objective = profile.objective;
       if (!state.salesLead.paymentMethod && profile.payment_method) state.salesLead.paymentMethod = profile.payment_method;
@@ -1482,7 +1506,10 @@ const MARKET_SALARY_BY_COURSE = {
 
     for (const keyword of SALES_COURSE_KEYWORDS) {
       const normalizedKeyword = normalizeForCompare(keyword);
-      if (t.includes(normalizedKeyword)) {
+
+      const regex = new RegExp(`\\b${normalizedKeyword}\\b`, "i");
+
+      if (regex.test(t)) {
         return COURSE_LABEL_MAP[normalizedKeyword] || toTitleCase(keyword);
       }
     }
@@ -1491,9 +1518,11 @@ const MARKET_SALARY_BY_COURSE = {
 
   function extractPaymentMethod(text) {
     const t = normalizeText(text);
-    if (/\bboleto\b|\bcarne\b|\bcarn[eê]\b/.test(t)) return "Boleto";
-    if (/\bpix\b|\ba vista\b|\bà vista\b|\bavista\b/.test(t)) return "Pix / à vista";
-    if (/\bcartao\b|\bcartão\b|\bcredito\b|\bcrédito\b/.test(t)) return "Cartão";
+    if (/(^|[^a-z])pay[_-]?boleto([^a-z]|$)|boleto|carne|carn[eê]/.test(t)) return "Boleto";
+    if (/(^|[^a-z])pay[_-]?pix([^a-z]|$)|\bpix\b|\ba vista\b|\bà vista\b|\bavista\b/.test(t))
+      return "Pix / à vista";
+    if (/(^|[^a-z])pay[_-]?cartao([^a-z]|$)|\bcartao\b|\bcartão\b|\bcredito\b|\bcrédito\b/.test(t))
+      return "Cartão";
     return "";
   }
 
@@ -1620,6 +1649,53 @@ function detectIntent(text) {
   return "general";
 }
 
+function containsForbiddenContent(text) {
+  const t = normalizeText(text);
+
+  const forbiddenWords = [
+    "necrofilia",
+    "pedofilia",
+    "sexo",
+    "porn",
+    "droga",
+    "arma",
+    "assassinato",
+    "suicidio",
+    "suicídio"
+  ];
+
+  return forbiddenWords.some(word => t.includes(word));
+}
+
+function classifyUserIntent(text) {
+
+  const t = normalizeText(text);
+
+  if (looksLikeHello(t)) return "greeting";
+
+  if (looksLikeMenuRequest(t)) return "menu";
+
+  if (looksLikeAskingAllCourses(t)) return "list_courses";
+
+  if (looksLikeSalaryQuestion(t)) return "salary";
+
+  if (looksLikeExistingBoletoRequest(t)) return "boleto_second_copy";
+
+  if (looksLikeEnrollmentBoletoChoice(t)) return "payment_boleto";
+
+  if (detectCourseMention(t)) return "course_interest";
+
+  if (looksLikeStrongEnrollmentIntent(t)) return "enroll";
+
+  if (detectPriceObjection(t)) return "price_objection";
+
+  if (looksLikeThinking(t)) return "thinking";
+
+  if (looksLikeSoftYes(t)) return "soft_yes";
+
+  return "unknown";
+}
+
   function looksLikeHello(text) {
     return /^(oi|ola|olá|bom dia|boa tarde|boa noite|menu|iniciar|comecar|começar|inicio)$/i.test(
       String(text || "").trim()
@@ -1687,7 +1763,7 @@ function looksLikeExistingStudentSupportNeed(text) {
 
   function looksLikeEnrollmentBoletoChoice(text) {
     const t = normalizeText(text);
-    return /(boleto 12x|12x de|parcelado no boleto|quero no boleto|pode ser no boleto|prefiro boleto|fechar no boleto|pagamento no boleto|boleto parcelado|\bboleto\b|\bcarne\b|\bcarn[eê]\b)/.test(
+    return /(pay[_-]?boleto|boleto 12x|12x de|parcelado no boleto|quero no boleto|pode ser no boleto|prefiro boleto|fechar no boleto|pagamento no boleto|boleto parcelado|boleto|carne|carn[eê])/.test(
       t
     );
   }
@@ -1753,18 +1829,28 @@ function looksLikeExistingStudentSupportNeed(text) {
     );
   }
 
-  function extractLikelyName(text) {
-    const clean = String(text || "").trim();
-    if (!clean) return "";
-    if (clean.length < 6) return "";
-    if (!/\s+/.test(clean)) return "";
-    if (isCpf(clean)) return "";
-    if (looksLikeExistingBoletoRequest(clean)) return "";
-    if (detectCourseMention(clean)) return "";
-    if (extractPaymentMethod(clean)) return "";
-    if (/(quero|valor|preco|preço|curso|boleto|pix|cartao|cartão|sim|nao|não|ok)/i.test(clean)) return "";
-    return toTitleCase(clean);
-  }
+function extractLikelyName(text) {
+  const clean = String(text || "").trim();
+  if (!clean) return "";
+
+  if (isCpf(clean)) return "";
+
+  if (detectCourseMention(clean)) return "";
+
+  if (extractPaymentMethod(clean)) return "";
+
+  if (looksLikeExistingBoletoRequest(clean)) return "";
+
+  if (!isLikelyPersonName(clean)) return "";
+
+  const words = clean.split(/\s+/);
+
+  if (words.length < 2 || words.length > 5) return "";
+
+  if (words.some(w => w.length < 2)) return "";
+
+  return toTitleCase(clean);
+}
 
   function detectLeadTemperature(lead) {
     const score = Number(lead?.warmScore || 0);
@@ -1879,10 +1965,14 @@ function buildNegotiationReply(entryOfferValue = 0, course = "") {
     return true;
   }
 
-function updateLeadFromText(phone, text) {
+  function updateLeadFromText(phone, text) {
   const convo = getConversation(phone);
   const lead = convo.salesLead;
   const clean = String(text || "").trim();
+
+    if (lead.name && !isLikelyPersonName(lead.name)) {
+      lead.name = "";
+    }
 
     const foundName = extractLikelyName(clean);
     if (foundName && !lead.name) lead.name = foundName;
@@ -1897,7 +1987,13 @@ function updateLeadFromText(phone, text) {
   }
 
     const paymentMethod = extractPaymentMethod(clean);
-    if (paymentMethod && !lead.paymentMethod) lead.paymentMethod = paymentMethod;
+    if (paymentMethod && !lead.paymentMethod) {
+      lead.paymentMethod = paymentMethod;
+    }
+
+    if (lead.paymentMethod && paymentMethod && lead.paymentMethod !== paymentMethod) {
+      // não sobrescrever pagamento já escolhido
+    }
 
     if (!lead.objective) {
       const t = normalizeText(clean);
@@ -2593,6 +2689,29 @@ async function sendPaymentButtons(phone) {
   ${buildCardConditionText()}
   `.trim();
   }
+
+function validateAIReply(reply, course) {
+
+  if (!reply) return false;
+
+  const forbidden = [
+    "curso técnico",
+    "técnico",
+    "técnica"
+  ];
+
+  for (const word of forbidden) {
+    if (reply.toLowerCase().includes(word)) {
+      return false;
+    }
+  }
+
+  if (course && !reply.includes(course)) {
+    return false;
+  }
+
+  return true;
+}
 
   function extractOpenAIText(data) {
     if (typeof data?.output_text === "string" && data.output_text.trim()) {
@@ -4292,7 +4411,13 @@ async function startBoletoEnrollmentFlow(phone) {
     if (!paymentMethod && looksLikeEnrollmentBoletoChoice(trimmed)) {
       paymentMethod = "Boleto";
     }
-    if (paymentMethod && !lead.paymentMethod) lead.paymentMethod = paymentMethod;
+    if (paymentMethod && !lead.paymentMethod) {
+      lead.paymentMethod = paymentMethod;
+    }
+
+    if (lead.paymentMethod && paymentMethod && lead.paymentMethod !== paymentMethod) {
+      // não sobrescrever pagamento já escolhido
+    }
 
     convo.updatedAt = nowTs();
     scheduleSaveConversations();
@@ -4344,6 +4469,57 @@ async function startBoletoEnrollmentFlow(phone) {
     return true;
   }
 
+async function handleIntent(phone, text) {
+
+  const intent = classifyUserIntent(text);
+  const convo = getConversation(phone);
+
+  switch(intent) {
+
+    case "greeting":
+      await sendMainMenu(phone);
+      return true;
+
+    case "menu":
+      softResetToMenu(phone);
+      await sendMainMenu(phone);
+      return true;
+
+    case "list_courses":
+      await sendMetaTextSmart(phone, buildAllCoursesMessage());
+      return true;
+
+    case "salary":
+      await sendMetaTextSmart(
+        phone,
+        buildSalaryInsightMessage(convo.salesLead.course)
+      );
+      return true;
+
+    case "price_objection":
+      await sendMetaTextSmart(
+        phone,
+        buildNegotiationReply(0, convo.salesLead.course)
+      );
+      return true;
+
+    case "course_interest":
+
+      const course = detectCourseMention(text);
+
+      await sendMetaTextSmart(
+        phone,
+        buildCourseDeepDiveMessage(course)
+      );
+
+      markCourseAsExplained(phone, course);
+
+      return true;
+  }
+
+  return false;
+}
+
   /* =========================================================
     INBOUND TEXT
   ========================================================= */
@@ -4370,6 +4546,13 @@ async function startBoletoEnrollmentFlow(phone) {
 
   async function processUserMessage(phone, text) {
     const cleanText = String(text || "").trim();
+    if (containsForbiddenContent(cleanText)) {
+      await sendMetaTextSmart(
+        phone,
+        "Não entendi essa mensagem. Posso te ajudar com informações sobre nossos cursos."
+      );
+      return;
+    }
     const digits = onlyDigits(cleanText);
     const convo = getConversation(phone);
     const normalizedUserText = normalizeText(cleanText);
@@ -4391,6 +4574,21 @@ async function startBoletoEnrollmentFlow(phone) {
     convo.lastUserTextAt = nowTs();
 
     updateLeadFromText(phone, cleanText);
+    const detectedCourse = detectCourseMention(cleanText);
+
+    if (!detectedCourse && /curso|estudar|fazer/i.test(cleanText)) {
+      await sendMetaTextSmart(
+        phone,
+        "Não encontrei esse curso no nosso catálogo. Posso te mostrar as opções disponíveis."
+      );
+      return;
+    }
+
+    const handledIntent = await handleIntent(phone, cleanText);
+
+    if (handledIntent) {
+      return;
+    }
 
     logVerbose("[INBOUND USER MESSAGE]", {
       phone: maskPhone(phone),
@@ -4465,7 +4663,22 @@ async function startBoletoEnrollmentFlow(phone) {
 
         if (shouldUseAI(cleanText, convo)) {
           try {
-            const aiReply = await generateOpenAIReply(phone, cleanText);
+            let aiReply = await generateOpenAIReply(phone, cleanText);
+
+            if (!validateAIReply(aiReply, convo.salesLead.course)) {
+              aiReply = fallbackSalesReply(phone, cleanText);
+            }
+
+            const detectedCourseAfterAI = detectCourseMention(aiReply);
+
+            if (
+              detectedCourseAfterAI &&
+              convo.salesLead.course &&
+              detectedCourseAfterAI !== convo.salesLead.course
+            ) {
+              aiReply = aiReply.replace(detectedCourseAfterAI, convo.salesLead.course);
+            }
+
             await sendMetaTextSmart(phone, aiReply);
             const detectedStage = detectReplyStageFromText(aiReply, true);
             setLastSalesPromptType(phone, detectedStage);
@@ -4525,7 +4738,22 @@ async function startBoletoEnrollmentFlow(phone) {
 
       if (shouldUseAI(cleanText, convo)) {
         try {
-          const aiReply = await generateOpenAIReply(phone, cleanText);
+          let aiReply = await generateOpenAIReply(phone, cleanText);
+
+          if (!validateAIReply(aiReply, convo.salesLead.course)) {
+            aiReply = fallbackSalesReply(phone, cleanText);
+          }
+
+          const detectedCourseAfterAI = detectCourseMention(aiReply);
+
+          if (
+            detectedCourseAfterAI &&
+            convo.salesLead.course &&
+            detectedCourseAfterAI !== convo.salesLead.course
+          ) {
+            aiReply = aiReply.replace(detectedCourseAfterAI, convo.salesLead.course);
+          }
+
           await sendMetaTextSmart(phone, aiReply);
           return;
         } catch (error) {
@@ -4674,6 +4902,25 @@ async function startBoletoEnrollmentFlow(phone) {
       return;
     }
 
+    if (convo.lastSalesPromptType === "ask_payment_preference") {
+      const preferredPayment = extractPaymentMethod(cleanText);
+      if (preferredPayment) {
+        convo.salesLead.stage = "collecting_enrollment";
+        convo.salesLead.paymentMethod = preferredPayment;
+        convo.updatedAt = nowTs();
+        scheduleSaveConversations();
+        syncLeadProfileFromConversation(phone);
+
+        if (preferredPayment === "Boleto") {
+          await startBoletoEnrollmentFlow(phone);
+          return;
+        }
+
+        await sendMetaTextSmart(phone, buildEnrollmentCollectionMessage(phone));
+        return;
+      }
+    }
+
     if (
       convo.entryDirection !== "existing_student" &&
       !convo.salesLead?.course &&
@@ -4710,7 +4957,22 @@ async function startBoletoEnrollmentFlow(phone) {
       shouldUseAI(cleanText, convo)
     ) {
       try {
-        const aiReply = await generateOpenAIReply(phone, cleanText);
+        let aiReply = await generateOpenAIReply(phone, cleanText);
+
+        if (!validateAIReply(aiReply, convo.salesLead.course)) {
+          aiReply = fallbackSalesReply(phone, cleanText);
+        }
+
+        const detectedCourseAfterAI = detectCourseMention(aiReply);
+
+        if (
+          detectedCourseAfterAI &&
+          convo.salesLead.course &&
+          detectedCourseAfterAI !== convo.salesLead.course
+        ) {
+          aiReply = aiReply.replace(detectedCourseAfterAI, convo.salesLead.course);
+        }
+
         await sendMetaTextSmart(phone, aiReply);
 
         const detectedStage = detectReplyStageFromText(aiReply, Boolean(convo.salesLead?.course));
@@ -4762,9 +5024,9 @@ async function startBoletoEnrollmentFlow(phone) {
       return;
     }
 
-    const detectedCourse = detectCourseMention(cleanText);
+    const detectedCourseForExplain = detectCourseMention(cleanText);
     if (
-      detectedCourse &&
+      detectedCourseForExplain &&
       !looksLikeAskingContent(cleanText) &&
       !looksLikeAskingBenefits(cleanText) &&
       detectIntent(cleanText) !== "price" &&
@@ -4772,8 +5034,8 @@ async function startBoletoEnrollmentFlow(phone) {
       !looksLikeCloseDeal(cleanText) &&
       !looksLikeBoletoGeneric(cleanText)
     ) {
-      await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(detectedCourse));
-      markCourseAsExplained(phone, detectedCourse);
+      await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(detectedCourseForExplain));
+      markCourseAsExplained(phone, detectedCourseForExplain);
       await delay(350);
       await sendCourseInterestButtons(phone);
       setLastSalesPromptType(phone, "check_understanding_before_price");
