@@ -1,4 +1,5 @@
   require("dotenv").config();
+  require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -298,14 +299,63 @@
     return String(fallback || "F").toUpperCase();
   }
 
-  function sanitizeForbiddenWords(text) {
-    let t = String(text || "");
-    t = t.replace(/\bcursos tÃ©cnicos\b/gi, "cursos profissionalizantes");
-    t = t.replace(/\bcurso tÃ©cnico\b/gi, "curso profissionalizante");
-    t = t.replace(/\btÃ©cnico\b/gi, "profissionalizante");
-    t = t.replace(/\btÃ©cnica\b/gi, "profissionalizante");
-    return t;
+function sanitizeForbiddenWords(text) {
+  let t = String(text || "");
+  t = t.replace(/\bcursos técnicos\b/gi, "cursos profissionalizantes");
+  t = t.replace(/\bcurso técnico\b/gi, "curso profissionalizante");
+  t = t.replace(/\btécnico\b/gi, "profissionalizante");
+  t = t.replace(/\btécnica\b/gi, "profissionalizante");
+  return t;
+}
+
+function normalizeOutgoingText(text) {
+  let t = String(text || "");
+
+  const replacements = {
+    "Ã€": "À",
+    "Ã": "Á",
+    "Ã‚": "Â",
+    "Ãƒ": "Ã",
+    "Ã‡": "Ç",
+    "Ã‰": "É",
+    "ÃŠ": "Ê",
+    "Ã“": "Ó",
+    "Ã”": "Ô",
+    "Ã•": "Õ",
+    "Ãš": "Ú",
+    "Ãœ": "Ü",
+    "Ã ": "à",
+    "Ã¡": "á",
+    "Ã¢": "â",
+    "Ã£": "ã",
+    "Ã§": "ç",
+    "Ã©": "é",
+    "Ãª": "ê",
+    "Ã­": "í",
+    "Ã³": "ó",
+    "Ã´": "ô",
+    "Ãµ": "õ",
+    "Ãº": "ú",
+    "Ã¼": "ü",
+    "â€¢": "•",
+    "âœ…": "✅",
+    "â€œ": "“",
+    "â€": "”",
+    "â€˜": "‘",
+    "â€™": "’",
+    "â€¦": "…",
+    "ðŸ˜Š": "😊",
+    "ðŸ’°": "💰",
+    "ðŸ’µ": "💵",
+    "ðŸ’³": "💳",
+  };
+
+  for (const [bad, good] of Object.entries(replacements)) {
+    t = t.split(bad).join(good);
   }
+
+  return t;
+}
 
   function extractEmail(text) {
     const match = String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
@@ -324,7 +374,7 @@
 
   function looksLikeCloseDeal(text) {
     const t = normalizeText(text);
-    return /(quero sim|quero fechar|vamos fechar|fechar agora|pode fazer|quero fazer a matricula|quero fazer a matrÃ­cula|quero entrar|quero comeÃ§ar|pode prosseguir|bora fechar|quero garantir minha vaga)/.test(
+    return /(quero sim|quero fechar|vamos fechar|fechar agora|pode fazer|quero fazer a matricula|quero fazer a matrícula|quero entrar|quero começar|pode prosseguir|bora fechar|quero garantir minha vaga)/.test(
       t
     );
   }
@@ -339,20 +389,20 @@
   }
 
   function truncateButtonTitle(text) {
-    return String(text || "OpÃ§Ã£o").slice(0, 20);
+    return String(text || "Opção").slice(0, 20);
   }
 
   function truncateButtonId(text) {
     return String(text || "btn").slice(0, 256);
   }
 
-  function uniqueButtons(buttons = []) {
-    const seen = new Set();
-    const result = [];
+function uniqueButtons(buttons = []) {
+  const seen = new Set();
+  const result = [];
 
-    for (const item of buttons) {
-      const id = String(item?.id || "").trim();
-      const title = String(item?.title || "").trim();
+  for (const item of buttons) {
+    const id = String(item?.id || "").trim();
+    const title = normalizeOutgoingText(String(item?.title || "").trim());
       if (!id || !title) continue;
       const key = `${id}::${title}`;
       if (seen.has(key)) continue;
@@ -366,59 +416,59 @@
     return result.slice(0, 3);
   }
 
-  function buildSmartBoletoIntentMessage() {
-    return (
-      "Perfeito ðŸ˜Š\n\n" +
-      "SÃ³ me confirma uma coisa para eu seguir certo:\n\n" +
-      "â€¢ Nova matrÃ­cula\n" +
-      "â€¢ JÃ¡ sou aluno"
-    );
-  }
+function buildSmartBoletoIntentMessage() {
+  return (
+    "Perfeito 😊\n\n" +
+    "Só me confirma uma coisa para eu seguir certo:\n\n" +
+    "⬢ Nova matrícula\n" +
+    "⬢ Já sou aluno"
+  );
+}
 
-  function buildEntryDirectionMessage() {
-    return (
-      "OlÃ¡ ðŸ˜Š\n\n" +
-      "Para eu te atender melhor, escolha uma opÃ§Ã£o:\n\n" +
-      "â€¢ Nova matrÃ­cula\n" +
-      "â€¢ JÃ¡ sou aluno\n" +
-      "â€¢ Ver cursos"
-    );
-  }
+function buildEntryDirectionMessage() {
+  return (
+    "Olá 😊\n\n" +
+    "Para eu te atender melhor, escolha uma opção:\n\n" +
+    "⬢ Nova matrícula\n" +
+    "⬢ Já sou aluno\n" +
+    "⬢ Ver cursos"
+  );
+}
 
-  function buildMenuWelcomeText() {
-    return pickRandom([
-      "OlÃ¡ ðŸ˜Š Seja bem-vindo(a). Me diz como vocÃª quer seguir:",
-      "Oi ðŸ˜Š Vou te atender por aqui. Escolha uma opÃ§Ã£o abaixo:",
-      "OlÃ¡! ðŸ˜Š Para eu te direcionar melhor, escolha uma opÃ§Ã£o:",
-    ]);
-  }
+function buildMenuWelcomeText() {
+  return pickRandom([
+    "Olá 😊 Seja bem-vindo(a). Me diz como você quer seguir:",
+    "Oi 😊 Vou te atender por aqui. Escolha uma opção abaixo:",
+    "Olá! 😊 Para eu te direcionar melhor, escolha uma opção:",
+  ]);
+}
 
-  function buildHumanGreeting() {
-    return pickRandom([
-      "Oi ðŸ˜Š Que bom falar com vocÃª.",
-      "OlÃ¡ ðŸ˜Š Seja muito bem-vindo(a).",
-      "Oi, tudo bem? ðŸ˜Š Vou te ajudar da melhor forma.",
-    ]);
-  }
+function buildHumanGreeting() {
+  return pickRandom([
+    "Oi 😊 Que bom falar com você.",
+    "Olá 😊 Seja muito bem-vindo(a).",
+    "Oi, tudo bem? 😊 Vou te ajudar da melhor forma.",
+  ]);
+}
 
   function buildCourseIntroMessage(course) {
     return (
       `${pickRandom([
-        "Ã“tima escolha ðŸ˜Š",
-        "Excelente escolha ðŸ˜Š",
-        "Boa escolha ðŸ˜Š",
+        "Ótima escolha 😊",
+        "Excelente escolha 😊",
+        "Boa escolha 😊",
       ])}\n\n` +
-      `O curso de ${course} Ã© totalmente online e foi pensado para quem quer estudar com flexibilidade, no prÃ³prio ritmo.\n\n` +
-      `VocÃª tem acesso Ã  plataforma, videoaulas, materiais digitais, atividades, exercÃ­cios e avaliaÃ§Ãµes.\n\n` +
-      `Se quiser, eu posso te mostrar *como funciona* ou jÃ¡ te passar *os valores* para comeÃ§ar.`
+      `O curso de ${course} é totalmente online e foi pensado para quem quer estudar com flexibilidade, no próprio ritmo.\n\n` +
+      `Você tem acesso à plataforma, videoaulas, materiais digitais, atividades, exercícios e avaliações.\n\n` +
+      `Se quiser, eu posso te mostrar *como funciona* ou já te passar *os valores* para começar.`
     );
   }
 
   function buildSalesClosing(course) {
     return pickRandom([
-      `Se fizer sentido para vocÃª, eu jÃ¡ posso te mostrar a melhor forma de comeÃ§ar em ${course || "seu curso"}.`,
-      `Se essa Ã¡rea Ã© o que vocÃª quer, eu jÃ¡ posso te orientar no prÃ³ximo passo para entrar em ${course || "seu curso"}.`,
-      `Se vocÃª quiser, eu posso te passar agora a condiÃ§Ã£o mais prÃ¡tica para comeÃ§ar em ${course || "seu curso"}.`,
+      `Se fizer sentido para você, eu já posso te mostrar a melhor forma de começar em ${course || "seu curso"}.`,
+      `Se essa área é o que você quer, eu já posso te orientar no próximo passo para entrar em ${course || "seu curso"}.`,
+      `Se você quiser, eu posso te passar agora a condição mais prática para começar em ${course || "seu curso"}.`,
     ]);
   }
 
@@ -507,88 +557,88 @@
     return (
       "Perfeito ðŸ˜Š\n\n" +
       (course
-        ? `Se vocÃª gostou de ${course}, jÃ¡ dÃ¡ para seguir para a matrÃ­cula.`
-        : "Se fizer sentido para vocÃª, jÃ¡ dÃ¡ para seguir para a matrÃ­cula.") +
+        ? `Se você gostou de ${course}, já dá para seguir para a matrícula.`
+        : "Se fizer sentido para você, já dá para seguir para a matrícula.") +
       "\n\n" +
       "Me envie:\n" +
-      "â€¢ Nome completo\n" +
-      "â€¢ Curso escolhido\n" +
-      "â€¢ Forma de pagamento"
+      "⬢ Nome completo\n" +
+      "⬢ Curso escolhido\n" +
+      "⬢ Forma de pagamento"
     );
   }
 
   function buildPremiumAllCoursesMessage() {
     return (
       "Claro ðŸ˜Š\n\n" +
-      "Hoje trabalhamos com vÃ¡rias opÃ§Ãµes de cursos online, com acesso Ã  plataforma, materiais digitais, videoaulas, atividades e avaliaÃ§Ãµes.\n\n" +
-      "*SaÃºde*\n" +
-      "â€¢ Agente de SaÃºde\n" +
-      "â€¢ AnÃ¡lises ClÃ­nicas\n" +
-      "â€¢ Assistente Social\n" +
-      "â€¢ Auxiliar de Necropsia\n" +
-      "â€¢ Auxiliar VeterinÃ¡rio\n" +
-      "â€¢ Cuidador de Idosos\n" +
-      "â€¢ Enfermagem Livre\n" +
-      "â€¢ FarmÃ¡cia\n" +
-      "â€¢ InstrumentaÃ§Ã£o CirÃºrgica\n" +
-      "â€¢ NutriÃ§Ã£o\n" +
-      "â€¢ Odontologia & SaÃºde Bucal\n" +
-      "â€¢ Psicologia\n" +
-      "â€¢ Radiologia e Ultrassonografia\n" +
-      "â€¢ Recepcionista Hospitalar\n" +
-      "â€¢ Socorrista\n\n" +
-      "*GestÃ£o, atendimento e carreira*\n" +
-      "â€¢ AdministraÃ§Ã£o\n" +
-      "â€¢ Concurso PÃºblico\n" +
-      "â€¢ Contabilidade\n" +
-      "â€¢ GestÃ£o & LogÃ­stica\n" +
-      "â€¢ Jovem Aprendiz\n" +
-      "â€¢ Libras\n" +
-      "â€¢ Operador de Caixa\n" +
-      "â€¢ Pedagogia\n" +
-      "â€¢ Portaria\n" +
-      "â€¢ PreparatÃ³rio Militar\n" +
-      "â€¢ Recursos Humanos\n\n" +
+      "Hoje trabalhamos com várias opções de cursos online, com acesso à plataforma, materiais digitais, videoaulas, atividades e avaliações.\n\n" +
+      "*Saúde*\n" +
+      "⬢ Agente de Saúde\n" +
+      "⬢ Análises Clínicas\n" +
+      "⬢ Assistente Social\n" +
+      "⬢ Auxiliar de Necropsia\n" +
+      "⬢ Auxiliar Veterinário\n" +
+      "⬢ Cuidador de Idosos\n" +
+      "⬢ Enfermagem Livre\n" +
+      "⬢ Farmácia\n" +
+      "⬢ Instrumentação Cirúrgica\n" +
+      "⬢ Nutrição\n" +
+      "⬢ Odontologia & Saúde Bucal\n" +
+      "⬢ Psicologia\n" +
+      "⬢ Radiologia e Ultrassonografia\n" +
+      "⬢ Recepcionista Hospitalar\n" +
+      "⬢ Socorrista\n\n" +
+      "*Gestão, atendimento e carreira*\n" +
+      "⬢ Administração\n" +
+      "⬢ Concurso Público\n" +
+      "⬢ Contabilidade\n" +
+      "⬢ Gestão & Logística\n" +
+      "⬢ Jovem Aprendiz\n" +
+      "⬢ Libras\n" +
+      "⬢ Operador de Caixa\n" +
+      "⬢ Pedagogia\n" +
+      "⬢ Portaria\n" +
+      "⬢ Preparatório Militar\n" +
+      "⬢ Recursos Humanos\n\n" +
       "*Beleza e imagem*\n" +
-      "â€¢ Barbeiro\n" +
-      "â€¢ Beleza e EstÃ©tica\n" +
-      "â€¢ Cabeleireiro(a)\n" +
-      "â€¢ DepilaÃ§Ã£o Profissional\n" +
-      "â€¢ Designer de Sobrancelhas\n" +
-      "â€¢ Designer de Unhas\n" +
-      "â€¢ ExtensÃ£o de CÃ­lios\n" +
-      "â€¢ Maquiagem Profissionalizante\n" +
-      "â€¢ Mega Hair\n" +
-      "â€¢ MicropigmentaÃ§Ã£o Labial\n\n" +
+      "⬢ Barbeiro\n" +
+      "⬢ Beleza e Estética\n" +
+      "⬢ Cabeleireiro(a)\n" +
+      "⬢ Depilação Profissional\n" +
+      "⬢ Designer de Sobrancelhas\n" +
+      "⬢ Designer de Unhas\n" +
+      "⬢ Extensão de Cílios\n" +
+      "⬢ Maquiagem Profissionalizante\n" +
+      "⬢ Mega Hair\n" +
+      "⬢ Micropigmentação Labial\n\n" +
       "*Tecnologia e digital*\n" +
-      "â€¢ CapCut\n" +
-      "â€¢ CriaÃ§Ã£o de Games\n" +
-      "â€¢ Designer GrÃ¡fico\n" +
-      "â€¢ Designer GrÃ¡fico Canva\n" +
-      "â€¢ Designer GrÃ¡fico Photoshop\n" +
-      "â€¢ Digital Influencer\n" +
-      "â€¢ InformÃ¡tica\n" +
-      "â€¢ InglÃªs\n" +
-      "â€¢ InteligÃªncia Artificial (ChatGPT)\n" +
-      "â€¢ Marketing Digital\n" +
-      "â€¢ RobÃ³tica\n\n" +
-      "*IndÃºstria, manutenÃ§Ã£o e operaÃ§Ãµes*\n" +
-      "â€¢ Ar Condicionado\n" +
-      "â€¢ Auto ElÃ©trica\n" +
-      "â€¢ Bombeiro Civil\n" +
-      "â€¢ ManutenÃ§Ã£o de Celulares\n" +
-      "â€¢ MecÃ¢nica Industrial\n" +
-      "â€¢ Mestre de Obras\n" +
-      "â€¢ SeguranÃ§a do Trabalho\n" +
-      "â€¢ Soldador\n" +
-      "â€¢ Topografia\n" +
-      "â€¢ Torneiro MecÃ¢nico\n\n" +
-      "*Outras opÃ§Ãµes*\n" +
-      "â€¢ Gastronomia & Confeitaria\n" +
-      "â€¢ Massoterapia\n" +
+      "⬢ CapCut\n" +
+      "⬢ Criação de Games\n" +
+      "⬢ Designer Gráfico\n" +
+      "⬢ Designer Gráfico Canva\n" +
+      "⬢ Designer Gráfico Photoshop\n" +
+      "⬢ Digital Influencer\n" +
+      "⬢ Informática\n" +
+      "⬢ Inglês\n" +
+      "⬢ Inteligência Artificial (ChatGPT)\n" +
+      "⬢ Marketing Digital\n" +
+      "⬢ Robótica\n\n" +
+      "*Indústria, manutenção e operações*\n" +
+      "⬢ Ar Condicionado\n" +
+      "⬢ Auto Elétrica\n" +
+      "⬢ Bombeiro Civil\n" +
+      "⬢ Manutenção de Celulares\n" +
+      "⬢ Mecânica Industrial\n" +
+      "⬢ Mestre de Obras\n" +
+      "⬢ Segurança do Trabalho\n" +
+      "⬢ Soldador\n" +
+      "⬢ Topografia\n" +
+      "⬢ Torneiro Mecânico\n\n" +
+      "*Outras opções*\n" +
+      "⬢ Gastronomia & Confeitaria\n" +
+      "⬢ Massoterapia\n" +
       "â€¢ Ã“ptica\n\n" +
-      "Se vocÃª quiser, eu tambÃ©m posso te indicar as opÃ§Ãµes que mais combinam com o seu objetivo.\n" +
-      "Me diz: qual Ã¡rea chamou mais sua atenÃ§Ã£o?"
+      "Se você quiser, eu também posso te indicar as opções que mais combinam com o seu objetivo.\n" +
+      "Me diz: qual área chamou mais sua atenção?"
     );
   }
 
@@ -660,62 +710,62 @@
   ========================================================= */
 
   const ALL_COURSES = [
-    "AdministraÃ§Ã£o",
-    "Agente de SaÃºde",
-    "AnÃ¡lises ClÃ­nicas",
+    "Administração",
+    "Agente de Saúde",
+    "Análises Clínicas",
     "Ar Condicionado",
     "Assistente Social",
-    "Auto ElÃ©trica",
+    "Auto Elétrica",
     "Auxiliar de Necropsia",
-    "Auxiliar VeterinÃ¡rio",
+    "Auxiliar Veterinário",
     "Barbeiro",
-    "Beleza e EstÃ©tica",
+    "Beleza e Estética",
     "Bombeiro Civil",
     "Cabeleireiro(a)",
     "CapCut",
-    "Concurso PÃºblico",
+    "Concurso Público",
     "Contabilidade",
-    "CriaÃ§Ã£o de Games",
+    "Criação de Games",
     "Cuidador de Idosos",
-    "DepilaÃ§Ã£o Profissional",
+    "Depilação Profissional",
     "Designer de Sobrancelhas",
     "Designer de Unhas",
-    "Designer GrÃ¡fico",
-    "Designer GrÃ¡fico Canva",
-    "Designer GrÃ¡fico Photoshop",
+    "Designer Gráfico",
+    "Designer Gráfico Canva",
+    "Designer Gráfico Photoshop",
     "Digital Influencer",
     "Enfermagem Livre",
-    "ExtensÃ£o de CÃ­lios",
-    "FarmÃ¡cia",
+    "Extensão de Cílios",
+    "Farmácia",
     "Gastronomia & Confeitaria",
-    "GestÃ£o & LogÃ­stica",
-    "InformÃ¡tica",
-    "InglÃªs",
-    "InstrumentaÃ§Ã£o CirÃºrgica",
-    "InteligÃªncia Artificial (ChatGPT)",
+    "Gestão & Logística",
+    "Informática",
+    "Inglês",
+    "Instrumentação Cirúrgica",
+    "Inteligência Artificial (ChatGPT)",
     "Jovem Aprendiz",
     "Libras",
     "Maquiagem Profissionalizante",
-    "ManutenÃ§Ã£o de Celulares",
+    "Manutenção de Celulares",
     "Marketing Digital",
     "Massoterapia",
     "Mega Hair",
     "MecÃ¢nica Industrial",
     "Mestre de Obras",
-    "MicropigmentaÃ§Ã£o Labial",
-    "NutriÃ§Ã£o",
-    "Odontologia & SaÃºde Bucal",
+    "Micropigmentação Labial",
+    "Nutrição",
+    "Odontologia & Saúde Bucal",
     "Operador de Caixa",
     "Ã“ptica",
     "Pedagogia",
     "Portaria",
-    "PreparatÃ³rio Militar",
+    "Preparatório Militar",
     "Psicologia",
     "Radiologia e Ultrassonografia",
     "Recepcionista Hospitalar",
     "Recursos Humanos",
-    "RobÃ³tica",
-    "SeguranÃ§a do Trabalho",
+    "Robótica",
+    "Segurança do Trabalho",
     "Socorrista",
     "Soldador",
     "Topografia",
@@ -983,7 +1033,7 @@ const MARKET_SALARY_BY_COURSE = {
 
   const SALES_COURSE_KEYWORDS = [
     "farmacia",
-    "administraÃ§Ã£o",
+    "administração",
     "administracao",
     "contabilidade",
     "recursos humanos",
@@ -992,74 +1042,74 @@ const MARKET_SALARY_BY_COURSE = {
     "radiologia",
     "odontologia",
     "saude bucal",
-    "nutriÃ§Ã£o",
+    "nutrição",
     "nutricao",
     "analises clinicas",
-    "anÃ¡lises clÃ­nicas",
+    "análises clínicas",
     "auxiliar veterinario",
-    "auxiliar veterinÃ¡rio",
+    "auxiliar veterinário",
     "socorrista",
     "recepcionista hospitalar",
     "cuidador de idosos",
     "instrumentacao cirurgica",
-    "instrumentaÃ§Ã£o cirÃºrgica",
+    "instrumentação cirúrgica",
     "agente de saude",
-    "agente de saÃºde",
+    "agente de saúde",
     "beleza",
     "barbeiro",
     "cabeleireiro",
     "designer de unhas",
     "designer de sobrancelhas",
     "depilacao",
-    "depilaÃ§Ã£o",
+    "depilação",
     "extensao de cilios",
-    "extensÃ£o de cÃ­lios",
+    "extensão de cílios",
     "maquiagem",
     "mega hair",
     "micropigmentacao",
-    "micropigmentaÃ§Ã£o",
+    "micropigmentação",
     "informatica",
-    "informÃ¡tica",
+    "informática",
     "marketing digital",
     "inteligencia artificial",
-    "inteligÃªncia artificial",
+    "inteligência artificial",
     "chatgpt",
     "design grafico",
-    "design grÃ¡fico",
+    "design gráfico",
     "photoshop",
     "canva",
     "capcut",
     "robotica",
-    "robÃ³tica",
+    "robótica",
     "games",
     "criacao de games",
-    "criaÃ§Ã£o de games",
+    "criação de games",
     "mecanica",
     "mecÃ¢nica",
     "ar condicionado",
     "auto eletrica",
-    "auto elÃ©trica",
+    "auto elétrica",
     "automacao industrial",
-    "automaÃ§Ã£o industrial",
+    "automação industrial",
     "mestre de obras",
     "soldador",
     "torneiro mecanico",
     "torneiro mecÃ¢nico",
     "logistica",
-    "logÃ­stica",
+    "logística",
     "gestao",
-    "gestÃ£o",
+    "gestão",
     "seguranca do trabalho",
-    "seguranÃ§a do trabalho",
+    "segurança do trabalho",
     "libras",
     "pedagogia",
     "jovem aprendiz",
     "concurso publico",
-    "concurso pÃºblico",
+    "concurso público",
     "preparatorio militar",
-    "preparatÃ³rio militar",
+    "preparatório militar",
     "ingles",
-    "inglÃªs",
+    "inglês",
     "operador de caixa",
     "portaria",
     "topografia",
@@ -1067,71 +1117,71 @@ const MARKET_SALARY_BY_COURSE = {
     "bombeiro civil",
     "massoterapia",
     "optica",
-    "Ã³ptica",
+    "óptica",
     "psicologia",
     "gastronomia",
     "confeitaria",
     "assistente social",
     "digital influencer",
     "manutencao de celulares",
-    "manutenÃ§Ã£o de celulares",
+    "manutenção de celulares",
   ];
 
   const COURSE_LABEL_MAP = {
-    farmacia: "FarmÃ¡cia",
-    administracao: "AdministraÃ§Ã£o",
+    farmacia: "Farmácia",
+    administracao: "Administração",
     contabilidade: "Contabilidade",
     "recursos humanos": "Recursos Humanos",
     rh: "Recursos Humanos",
     enfermagem: "Enfermagem Livre",
     radiologia: "Radiologia e Ultrassonografia",
-    odontologia: "Odontologia & SaÃºde Bucal",
-    "saude bucal": "Odontologia & SaÃºde Bucal",
-    nutricao: "NutriÃ§Ã£o",
-    "analises clinicas": "AnÃ¡lises ClÃ­nicas",
-    "auxiliar veterinario": "Auxiliar VeterinÃ¡rio",
+    odontologia: "Odontologia & Saúde Bucal",
+    "saude bucal": "Odontologia & Saúde Bucal",
+    nutricao: "Nutrição",
+    "analises clinicas": "Análises Clínicas",
+    "auxiliar veterinario": "Auxiliar Veterinário",
     socorrista: "Socorrista",
     "recepcionista hospitalar": "Recepcionista Hospitalar",
     "cuidador de idosos": "Cuidador de Idosos",
-    "instrumentacao cirurgica": "InstrumentaÃ§Ã£o CirÃºrgica",
-    "agente de saude": "Agente de SaÃºde",
-    beleza: "Beleza e EstÃ©tica",
+    "instrumentacao cirurgica": "Instrumentação Cirúrgica",
+    "agente de saude": "Agente de Saúde",
+    beleza: "Beleza e Estética",
     barbeiro: "Barbeiro",
     cabeleireiro: "Cabeleireiro(a)",
     "designer de unhas": "Designer de Unhas",
     "designer de sobrancelhas": "Designer de Sobrancelhas",
-    depilacao: "DepilaÃ§Ã£o Profissional",
-    "extensao de cilios": "ExtensÃ£o de CÃ­lios",
+    depilacao: "Depilação Profissional",
+    "extensao de cilios": "Extensão de Cílios",
     maquiagem: "Maquiagem Profissionalizante",
     "mega hair": "Mega Hair",
-    micropigmentacao: "MicropigmentaÃ§Ã£o Labial",
-    informatica: "InformÃ¡tica",
+    micropigmentacao: "Micropigmentação Labial",
+    informatica: "Informática",
     "marketing digital": "Marketing Digital",
-    "inteligencia artificial": "InteligÃªncia Artificial (ChatGPT)",
-    chatgpt: "InteligÃªncia Artificial (ChatGPT)",
-    "design grafico": "Designer GrÃ¡fico",
-    photoshop: "Designer GrÃ¡fico Photoshop",
-    canva: "Designer GrÃ¡fico Canva",
+    "inteligencia artificial": "Inteligência Artificial (ChatGPT)",
+    chatgpt: "Inteligência Artificial (ChatGPT)",
+    "design grafico": "Designer Gráfico",
+    photoshop: "Designer Gráfico Photoshop",
+    canva: "Designer Gráfico Canva",
     capcut: "CapCut",
-    robotica: "RobÃ³tica",
-    games: "CriaÃ§Ã£o de Games",
-    "criacao de games": "CriaÃ§Ã£o de Games",
+    robotica: "Robótica",
+    games: "Criação de Games",
+    "criacao de games": "Criação de Games",
     mecanica: "MecÃ¢nica Industrial",
     "ar condicionado": "Ar Condicionado",
-    "auto eletrica": "Auto ElÃ©trica",
-    "automacao industrial": "AutomaÃ§Ã£o Industrial",
+    "auto eletrica": "Auto Elétrica",
+    "automacao industrial": "Automação Industrial",
     "mestre de obras": "Mestre de Obras",
     soldador: "Soldador",
     "torneiro mecanico": "Torneiro MecÃ¢nico",
-    logistica: "GestÃ£o & LogÃ­stica",
-    gestao: "GestÃ£o & LogÃ­stica",
-    "seguranca do trabalho": "SeguranÃ§a do Trabalho",
+    logistica: "Gestão & Logística",
+    gestao: "Gestão & Logística",
+    "seguranca do trabalho": "Segurança do Trabalho",
     libras: "Libras",
     pedagogia: "Pedagogia",
     "jovem aprendiz": "Jovem Aprendiz",
-    "concurso publico": "Concurso PÃºblico",
-    "preparatorio militar": "PreparatÃ³rio Militar",
-    ingles: "InglÃªs",
+    "concurso publico": "Concurso Público",
+    "preparatorio militar": "Preparatório Militar",
+    ingles: "Inglês",
     "operador de caixa": "Operador de Caixa",
     portaria: "Portaria",
     topografia: "Topografia",
@@ -1144,7 +1194,7 @@ const MARKET_SALARY_BY_COURSE = {
     confeitaria: "Gastronomia & Confeitaria",
     "assistente social": "Assistente Social",
     "digital influencer": "Digital Influencer",
-    "manutencao de celulares": "ManutenÃ§Ã£o de Celulares",
+    "manutencao de celulares": "Manutenção de Celulares",
   };
 
   function detectCourseMention(text) {
@@ -1162,22 +1212,22 @@ const MARKET_SALARY_BY_COURSE = {
 
   function extractPaymentMethod(text) {
     const t = normalizeText(text);
-    if (/\bboleto\b|\bcarne\b|\bcarn[eÃª]\b/.test(t)) return "Boleto";
-    if (/\bpix\b|\ba vista\b|\bÃ  vista\b|\bavista\b/.test(t)) return "Pix / Ã  vista";
-    if (/\bcartao\b|\bcartÃ£o\b|\bcredito\b|\bcrÃ©dito\b/.test(t)) return "CartÃ£o";
+    if (/\bboleto\b|\bcarne\b|\bcarn[eê]\b/.test(t)) return "Boleto";
+    if (/\bpix\b|\ba vista\b|\bà vista\b|\bavista\b/.test(t)) return "Pix / à vista";
+    if (/\bcartao\b|\bcartão\b|\bcredito\b|\bcrédito\b/.test(t)) return "Cartão";
     return "";
   }
 
   function looksLikeStrongEnrollmentIntent(text) {
     const t = normalizeText(text);
-    return /(quero me inscrever|quero fazer|quero comeÃ§ar|quero comecar|quero fechar|quero garantir|pode fazer minha inscricao|pode fazer minha inscriÃ§Ã£o|tenho interesse|quero entrar|como faco para entrar|como faÃ§o para entrar|quero essa opcao|quero essa opÃ§Ã£o|como faco a matricula|como faÃ§o a matrÃ­cula|matricula|matrÃ­cula|quero matricula|quero matrÃ­cula)/.test(
+    return /(quero me inscrever|quero fazer|quero começar|quero comecar|quero fechar|quero garantir|pode fazer minha inscricao|pode fazer minha inscrição|tenho interesse|quero entrar|como faco para entrar|como faço para entrar|quero essa opcao|quero essa opção|como faco a matricula|como faço a matrícula|matricula|matrícula|quero matricula|quero matrícula)/.test(
       t
     );
   }
 
   function looksLikeAskingContent(text) {
     const t = normalizeText(text);
-    return /(conteudo|conteÃºdo|grade|grade curricular|materias|matÃ©rias|assuntos|o que aprende|oque aprende|como funciona|funciona como|quero saber mais)/.test(
+    return /(conteudo|conteúdo|grade|grade curricular|materias|matérias|assuntos|o que aprende|oque aprende|como funciona|funciona como|quero saber mais)/.test(
       t
     );
   }
@@ -1185,50 +1235,50 @@ const MARKET_SALARY_BY_COURSE = {
   function detectIntent(text) {
     const t = normalizeText(text);
 
-    if (/(quanto ganha|salario|salÃ¡rio|faixa salarial|media salarial|mÃ©dia salarial|remuneracao|remuneraÃ§Ã£o|mercado de trabalho)/.test(t)) return "salary";
-    if (/(desconto|entrada|sinal|negociar|melhorar condicao|melhorar condiÃ§Ã£o|tirar parcela|diminuir parcela)/.test(t))
+    if (/(quanto ganha|salario|salário|faixa salarial|media salarial|média salarial|remuneracao|remuneração|mercado de trabalho)/.test(t)) return "salary";
+    if (/(desconto|entrada|sinal|negociar|melhorar condicao|melhorar condição|tirar parcela|diminuir parcela)/.test(t))
       return "negotiation";
-    if (/(boleto|segunda via|2 via|2a via|mensalidade|fatura|carne|carn[eÃª])/.test(t)) return "boleto";
-    if (/(valor|valores|preco|preÃ§o|quanto custa|quanto fica|forma de pagamento|pagamento)/.test(t)) return "price";
-    if (/(curso|estudar|certificado|formacao|formaÃ§Ã£o|area|Ã¡rea|plataforma|material)/.test(t)) return "course";
-    if (/(matricula|matrÃ­cula|inscrever|inscricao|inscriÃ§Ã£o|quero fazer|quero comecar|quero comeÃ§ar|tenho interesse)/.test(t)) return "enroll";
+    if (/(boleto|segunda via|2 via|2a via|mensalidade|fatura|carne|carn[eê])/.test(t)) return "boleto";
+    if (/(valor|valores|preco|preço|quanto custa|quanto fica|forma de pagamento|pagamento)/.test(t)) return "price";
+    if (/(curso|estudar|certificado|formacao|formação|area|área|plataforma|material)/.test(t)) return "course";
+    if (/(matricula|matrícula|inscrever|inscricao|inscrição|quero fazer|quero comecar|quero começar|tenho interesse)/.test(t)) return "enroll";
     return "general";
   }
 
   function looksLikeHello(text) {
-    return /^(oi|ola|olÃ¡|bom dia|boa tarde|boa noite|menu|iniciar|comecar|comeÃ§ar|inicio)$/i.test(
+    return /^(oi|ola|olá|bom dia|boa tarde|boa noite|menu|iniciar|comecar|começar|inicio)$/i.test(
       String(text || "").trim()
     );
   }
 
   function looksLikeMenuRequest(text) {
-    return /^(menu|voltar ao menu|voltar menu|inicio|inÃ­cio|reiniciar|recomecar|recomeÃ§ar)$/i.test(
+    return /^(menu|voltar ao menu|voltar menu|inicio|início|reiniciar|recomecar|recomeçar)$/i.test(
       String(text || "").trim()
     );
   }
 
   function looksLikeCreateCarnetRequest(text) {
     const t = normalizeText(text);
-    return /(criar carne|criar carn[eÃª]|novo carne|novo carn[eÃª]|gerar carne do zero|gerar carn[eÃª] do zero|criar boleto do zero|novo boleto do zero|matricular com carne|fazer carne|fazer carn[eÃª])/.test(
+    return /(criar carne|criar carn[eê]|novo carne|novo carn[eê]|gerar carne do zero|gerar carn[eê] do zero|criar boleto do zero|novo boleto do zero|matricular com carne|fazer carne|fazer carn[eê])/.test(
       t
     );
   }
 
   function looksLikeBoletoGeneric(text) {
     const t = normalizeText(text);
-    return /\bboleto\b|\bcarne\b|\bcarn[eÃª]\b|\b2 via\b|\b2a via\b|\bsegunda via\b|\bfatura\b|\bmensalidade\b/.test(t);
+    return /\bboleto\b|\bcarne\b|\bcarn[eê]\b|\b2 via\b|\b2a via\b|\bsegunda via\b|\bfatura\b|\bmensalidade\b/.test(t);
   }
 
   function looksLikeNewEnrollmentAnswer(text) {
     const t = normalizeText(text);
-    return /(nova matricula|nova matrÃ­cula|quero me matricular|quero fazer matricula|quero fazer matrÃ­cula|primeira matricula|primeira matrÃ­cula|ainda nao sou aluno|ainda nÃ£o sou aluno|nao sou aluno|nÃ£o sou aluno|novo aluno|quero comeÃ§ar|quero comecar)/.test(
+    return /(nova matricula|nova matrícula|quero me matricular|quero fazer matricula|quero fazer matrícula|primeira matricula|primeira matrícula|ainda nao sou aluno|ainda não sou aluno|nao sou aluno|não sou aluno|novo aluno|quero começar|quero comecar)/.test(
       t
     );
   }
 
   function looksLikeExistingStudentAnswer(text) {
     const t = normalizeText(text);
-    return /(ja sou aluno|jÃ¡ sou aluno|sou aluno|segunda via|2 via|2a via|mensalidade|fatura|boleto atrasado|parcela em aberto|boleto antigo)/.test(
+    return /(ja sou aluno|já sou aluno|sou aluno|segunda via|2 via|2a via|mensalidade|fatura|boleto atrasado|parcela em aberto|boleto antigo)/.test(
       t
     );
   }
@@ -1245,14 +1295,14 @@ const MARKET_SALARY_BY_COURSE = {
 
   function looksLikeEnrollmentBoletoChoice(text) {
     const t = normalizeText(text);
-    return /(boleto 12x|12x de|parcelado no boleto|quero no boleto|pode ser no boleto|prefiro boleto|fechar no boleto|pagamento no boleto|boleto parcelado|\bboleto\b|\bcarne\b|\bcarn[eÃª]\b)/.test(
+    return /(boleto 12x|12x de|parcelado no boleto|quero no boleto|pode ser no boleto|prefiro boleto|fechar no boleto|pagamento no boleto|boleto parcelado|\bboleto\b|\bcarne\b|\bcarn[eê]\b)/.test(
       t
     );
   }
 
   function looksLikeAskingAllCourses(text) {
     const t = normalizeText(text);
-    return /(quais cursos|quais sao os cursos|quais sÃ£o os cursos|lista de cursos|todos os cursos|me manda os cursos|me envie os cursos|que cursos voces tem|que cursos vocÃªs tem|quais cursos voces oferecem|quais cursos vocÃªs oferecem|catalogo de cursos|catÃ¡logo de cursos)/.test(
+    return /(quais cursos|quais sao os cursos|quais são os cursos|lista de cursos|todos os cursos|me manda os cursos|me envie os cursos|que cursos voces tem|que cursos vocês tem|quais cursos voces oferecem|quais cursos vocês oferecem|catalogo de cursos|catálogo de cursos)/.test(
       t
     );
   }
@@ -1264,29 +1314,29 @@ const MARKET_SALARY_BY_COURSE = {
   }
 
   function looksLikeCancel(text) {
-    return /^(cancelar|cancelo|cancela|nao|nÃ£o|errado|trocar|corrigir)$/i.test(
+    return /^(cancelar|cancelo|cancela|nao|não|errado|trocar|corrigir)$/i.test(
       String(text || "").trim()
     );
   }
 
   function looksLikeObjectionNoTime(text) {
-    return /(nao tenho tempo|nÃ£o tenho tempo|sem tempo|corrido|correria|trabalho muito|rotina puxada)/i.test(
+    return /(nao tenho tempo|não tenho tempo|sem tempo|corrido|correria|trabalho muito|rotina puxada)/i.test(
       String(text || "")
     );
   }
 
   function looksLikeObjectionExpensive(text) {
-    return /(caro|muito caro|achei caro|pesado|ta caro|tÃ¡ caro|valor alto)/i.test(String(text || ""));
+    return /(caro|muito caro|achei caro|pesado|ta caro|tá caro|valor alto)/i.test(String(text || ""));
   }
 
   function looksLikeSalaryQuestion(text) {
-    return /(quanto ganha|salario|salÃ¡rio|faixa salarial|media salarial|mÃ©dia salarial|remuneracao|remuneraÃ§Ã£o|mercado de trabalho|piso salarial)/i.test(
+    return /(quanto ganha|salario|salário|faixa salarial|media salarial|média salarial|remuneracao|remuneração|mercado de trabalho|piso salarial)/i.test(
       String(text || "")
     );
   }
 
   function looksLikeNegotiatingDiscount(text) {
-    return /(desconto|entrada|sinal|negociar|melhorar condicao|melhorar condiÃ§Ã£o|tirar parcela|diminuir parcela|parcelas a menos|parcela a menos)/i.test(
+    return /(desconto|entrada|sinal|negociar|melhorar condicao|melhorar condição|tirar parcela|diminuir parcela|parcelas a menos|parcela a menos)/i.test(
       String(text || "")
     );
   }
@@ -1320,7 +1370,7 @@ const MARKET_SALARY_BY_COURSE = {
     if (looksLikeExistingBoletoRequest(clean)) return "";
     if (detectCourseMention(clean)) return "";
     if (extractPaymentMethod(clean)) return "";
-    if (/(quero|valor|preco|preÃ§o|curso|boleto|pix|cartao|cartÃ£o|sim|nao|nÃ£o|ok)/i.test(clean)) return "";
+    if (/(quero|valor|preco|preço|curso|boleto|pix|cartao|cartão|sim|nao|não|ok)/i.test(clean)) return "";
     return toTitleCase(clean);
   }
 
@@ -1442,10 +1492,10 @@ const MARKET_SALARY_BY_COURSE = {
 
     if (!lead.objective) {
       const t = normalizeText(clean);
-      if (/curriculo|currÃ­culo/.test(t)) lead.objective = "Melhorar currÃ­culo";
-      else if (/trabalhar|emprego|vaga/.test(t)) lead.objective = "Trabalhar na Ã¡rea";
-      else if (/iniciante|comeÃ§ar do zero|comecar do zero/.test(t)) lead.objective = "ComeÃ§ar do zero";
-      else if (/mudar de profissao|mudar de profissÃ£o/.test(t)) lead.objective = "Mudar de profissÃ£o";
+      if (/curriculo|currículo/.test(t)) lead.objective = "Melhorar currículo";
+      else if (/trabalhar|emprego|vaga/.test(t)) lead.objective = "Trabalhar na área";
+      else if (/iniciante|começar do zero|comecar do zero/.test(t)) lead.objective = "Começar do zero";
+      else if (/mudar de profissao|mudar de profissão/.test(t)) lead.objective = "Mudar de profissão";
       else if (/concurso/.test(t)) lead.objective = "Concurso";
     }
 
@@ -1522,30 +1572,30 @@ const MARKET_SALARY_BY_COURSE = {
     const lead = getConversation(phone).salesLead;
     const missing = [];
 
-    if (!lead.name) missing.push("â€¢ Nome completo");
-    if (!lead.course) missing.push("â€¢ Curso escolhido");
-    if (!lead.paymentMethod) missing.push("â€¢ Forma de pagamento");
+    if (!lead.name) missing.push("⬢ Nome completo");
+    if (!lead.course) missing.push("⬢ Curso escolhido");
+    if (!lead.paymentMethod) missing.push("⬢ Forma de pagamento");
 
     if (!missing.length) {
       return (
         "Perfeito ðŸ˜Š\n\n" +
-        "JÃ¡ anotei estas informaÃ§Ãµes:\n" +
-        `â€¢ Nome: ${lead.name}\n` +
-        `â€¢ Curso: ${lead.course}\n` +
-        `â€¢ Pagamento: ${lead.paymentMethod}\n\n` +
-        "Agora vou te conduzir para a prÃ³xima etapa."
+        "Já anotei estas informações:\n" +
+        `⬢ Nome: ${lead.name}\n` +
+        `⬢ Curso: ${lead.course}\n` +
+        `⬢ Pagamento: ${lead.paymentMethod}\n\n` +
+        "Agora vou te conduzir para a próxima etapa."
       );
     }
 
     return (
       "Perfeito ðŸ˜Š\n\n" +
-      "Para eu avanÃ§ar com sua matrÃ­cula, me envie:\n\n" +
+      "Para eu avançar com sua matrícula, me envie:\n\n" +
       missing.join("\n") +
       "\n\n" +
       "Formas de pagamento:\n" +
-      "â€¢ Boleto\n" +
-      "â€¢ CartÃ£o\n" +
-      "â€¢ Pix / Ã  vista"
+      "⬢ Boleto\n" +
+      "⬢ Cartão\n" +
+      "⬢ Pix / à vista"
     );
   }
 
@@ -1560,11 +1610,11 @@ const MARKET_SALARY_BY_COURSE = {
   function buildCourseDeepDiveMessage(course) {
     return (
       `Perfeito ðŸ˜Š\n\n` +
-      `O curso de ${course} funciona de forma totalmente online, entÃ£o vocÃª consegue estudar no seu ritmo, sem precisar sair de casa.\n\n` +
-      `Na plataforma, vocÃª tem acesso a videoaulas, materiais digitais, atividades, exercÃ­cios e avaliaÃ§Ãµes para ir acompanhando seu desenvolvimento.\n\n` +
-      `A plataforma fica disponÃ­vel 24 horas, o que ajuda muito quem tem rotina corrida. A recomendaÃ§Ã£o Ã© fazer 2 aulas por semana para manter um bom progresso.\n\n` +
-      `AlÃ©m disso, Ã© uma Ã³tima opÃ§Ã£o para quem quer se qualificar, melhorar o currÃ­culo e desenvolver conhecimento na Ã¡rea.\n\n` +
-      `VocÃª quer esse curso mais para comeÃ§ar do zero ou para entrar logo na Ã¡rea?`
+      `O curso de ${course} funciona de forma totalmente online, então você consegue estudar no seu ritmo, sem precisar sair de casa.\n\n` +
+      `Na plataforma, você tem acesso a videoaulas, materiais digitais, atividades, exercícios e avaliações para ir acompanhando seu desenvolvimento.\n\n` +
+      `A plataforma fica disponível 24 horas, o que ajuda muito quem tem rotina corrida. A recomendação é fazer 2 aulas por semana para manter um bom progresso.\n\n` +
+      `Além disso, é uma ótima opção para quem quer se qualificar, melhorar o currículo e desenvolver conhecimento na área.\n\n` +
+      `Você quer esse curso mais para começar do zero ou para entrar logo na área?`
     );
   }
 
@@ -1572,18 +1622,18 @@ const MARKET_SALARY_BY_COURSE = {
     const norm = normalizeText(text);
 
     if (
-      /forma de pagamento|formas de pagamento|condicoes para comecar|condicoes para comeÃ§ar|condicoes|condiÃ§Ãµes|explicar valores|passar os valores|te passar as condicoes|te passar as condiÃ§Ãµes|qual forma ficaria melhor|qual forma voce acha que ficaria melhor|boleto|pix|cartao|cartÃ£o/.test(
+      /forma de pagamento|formas de pagamento|condicoes para comecar|condicoes para começar|condicoes|condições|explicar valores|passar os valores|te passar as condicoes|te passar as condições|qual forma ficaria melhor|qual forma voce acha que ficaria melhor|boleto|pix|cartao|cartão/.test(
         norm
       )
     ) {
-      if (/qual forma ficaria melhor|qual forma voce acha que ficaria melhor|boleto|pix|cartao|cartÃ£o/.test(norm)) {
+      if (/qual forma ficaria melhor|qual forma voce acha que ficaria melhor|boleto|pix|cartao|cartão/.test(norm)) {
         return "ask_payment_preference";
       }
       return "offer_price_after_value";
     }
 
     if (
-      /como voce pretende usar|para comecar do zero|para entrar na area|para se aperfeicoar|para se aperfeiÃ§oar/.test(
+      /como voce pretende usar|para comecar do zero|para entrar na area|para se aperfeicoar|para se aperfeiçoar/.test(
         norm
       )
     ) {
@@ -1618,11 +1668,11 @@ const MARKET_SALARY_BY_COURSE = {
     return `https://graph.facebook.com/${META_API_VERSION}/${META_PHONE_NUMBER_ID}/messages`;
   }
 
-  async function sendMetaText(phone, bodyText) {
-    requireMetaEnv();
+async function sendMetaText(phone, bodyText) {
+  requireMetaEnv();
 
-    const finalBody = String(bodyText || "").slice(0, 4096);
-    console.log("[META SEND BODY]", finalBody);
+  const finalBody = normalizeOutgoingText(String(bodyText || "")).slice(0, 4096);
+  console.log("[META SEND BODY]", finalBody);
 
     const payload = {
       messaging_product: "whatsapp",
@@ -1679,13 +1729,14 @@ const MARKET_SALARY_BY_COURSE = {
     scheduleSaveConversations();
   }
 
-  async function sendMetaButtons(phone, bodyText, buttons = []) {
-    requireMetaEnv();
+async function sendMetaButtons(phone, bodyText, buttons = []) {
+  requireMetaEnv();
 
-    const finalButtons = uniqueButtons(buttons);
-    if (!finalButtons.length) {
-      return sendMetaText(phone, bodyText);
-    }
+  const finalButtons = uniqueButtons(buttons);
+  const normalizedBodyText = normalizeOutgoingText(String(bodyText || ""));
+  if (!finalButtons.length) {
+    return sendMetaText(phone, normalizedBodyText);
+  }
 
     const payload = {
       messaging_product: "whatsapp",
@@ -1695,7 +1746,7 @@ const MARKET_SALARY_BY_COURSE = {
       interactive: {
         type: "button",
         body: {
-          text: String(bodyText || "").slice(0, 1024),
+          text: normalizedBodyText.slice(0, 1024),
         },
         action: {
           buttons: finalButtons.map((btn) => ({
@@ -1736,9 +1787,9 @@ const MARKET_SALARY_BY_COURSE = {
       const optionsText =
         fallbackText ||
         [
-          String(bodyText || "").trim(),
+          normalizeOutgoingText(String(bodyText || "").trim()),
           "",
-          ...(buttons || []).map((btn) => `â€¢ ${btn.title}`),
+          ...(buttons || []).map((btn) => `⬢ ${normalizeOutgoingText(String(btn.title || ""))}`),
         ]
           .filter(Boolean)
           .join("\n");
@@ -1747,19 +1798,19 @@ const MARKET_SALARY_BY_COURSE = {
     }
   }
 
-  async function sendMetaDocument(phone, documentUrl, filename, caption) {
-    requireMetaEnv();
+async function sendMetaDocument(phone, documentUrl, filename, caption) {
+  requireMetaEnv();
 
-    const payload = {
+  const payload = {
       messaging_product: "whatsapp",
       to: normalizePhone(phone),
       type: "document",
-      document: {
-        link: documentUrl,
-        filename: filename || "boleto.pdf",
-        caption: caption || "Segue o seu boleto em PDF.",
-      },
-    };
+    document: {
+      link: documentUrl,
+      filename: normalizeOutgoingText(filename || "boleto.pdf"),
+      caption: normalizeOutgoingText(caption || "Segue o seu boleto em PDF."),
+    },
+  };
 
     const resp = await axios.post(buildMetaUrl(), payload, {
       headers: {
@@ -1789,8 +1840,8 @@ const MARKET_SALARY_BY_COURSE = {
       phone,
       buildMenuWelcomeText(),
       [
-        { id: "nova_matricula", title: "Nova matrÃ­cula" },
-        { id: "ja_sou_aluno", title: "JÃ¡ sou aluno" },
+        { id: "nova_matricula", title: "Nova matrícula" },
+        { id: "ja_sou_aluno", title: "Já sou aluno" },
         { id: "ver_cursos", title: "Ver cursos" },
       ],
       buildEntryDirectionMessage()
@@ -1800,26 +1851,26 @@ const MARKET_SALARY_BY_COURSE = {
   async function sendCourseInterestButtons(phone) {
     await sendMetaButtonsSmart(
       phone,
-      "Escolha como vocÃª prefere seguir:",
+      "Escolha como você prefere seguir:",
       [
         { id: "como_funciona", title: "Como funciona" },
         { id: "ver_valores", title: "Ver valores" },
-        { id: "quero_matricula", title: "Quero matrÃ­cula" },
+        { id: "quero_matricula", title: "Quero matrícula" },
       ],
-      "Escolha uma opÃ§Ã£o:\nâ€¢ Como funciona\nâ€¢ Ver valores\nâ€¢ Quero matrÃ­cula"
+      "Escolha uma opção:\n⬢ Como funciona\n⬢ Ver valores\n⬢ Quero matrícula"
     );
   }
 
   async function sendPaymentButtons(phone) {
     await sendMetaButtonsSmart(
       phone,
-      "Me diga qual forma vocÃª prefere:",
+      "Me diga qual forma você prefere:",
       [
         { id: "pay_boleto", title: "Boleto" },
-        { id: "pay_cartao", title: "CartÃ£o" },
-        { id: "pay_pix", title: "Pix / Ã  vista" },
+        { id: "pay_cartao", title: "Cartão" },
+        { id: "pay_pix", title: "Pix / à vista" },
       ],
-      "Me diga qual forma vocÃª prefere:\nâ€¢ Boleto\nâ€¢ CartÃ£o\nâ€¢ Pix / Ã  vista"
+      "Me diga qual forma você prefere:\n⬢ Boleto\n⬢ Cartão\n⬢ Pix / à vista"
     );
   }
 
@@ -1982,7 +2033,7 @@ const MARKET_SALARY_BY_COURSE = {
     }
 
     if (looksLikeHello(userText)) {
-      return `${buildHumanGreeting()}\n\nMe fala qual Ã¡rea ou curso chamou mais sua atenÃ§Ã£o.`;
+      return `${buildHumanGreeting()}\n\nMe fala qual área ou curso chamou mais sua atenção.`;
     }
 
     if (looksLikeSoftYes(userText) && course) {
@@ -1992,19 +2043,19 @@ const MARKET_SALARY_BY_COURSE = {
     if (looksLikeObjectionNoTime(userText)) {
       return (
         "Entendo vocÃª ðŸ˜Š\n\n" +
-        "Inclusive esse Ã© um dos pontos que mais ajudam nossos alunos, porque o curso Ã© online e vocÃª pode estudar no dia e horÃ¡rio que preferir, no seu ritmo.\n\n" +
-        "A plataforma fica disponÃ­vel 24 horas.\n\n" +
-        "VocÃª estÃ¡ buscando algo mais para comeÃ§ar do zero ou para entrar na Ã¡rea?"
+        "Inclusive esse é um dos pontos que mais ajudam nossos alunos, porque o curso é online e você pode estudar no dia e horário que preferir, no seu ritmo.\n\n" +
+        "A plataforma fica disponível 24 horas.\n\n" +
+        "Você está buscando algo mais para começar do zero ou para entrar na área?"
       );
     }
 
     if (looksLikeObjectionExpensive(userText)) {
       return (
         "Eu entendo ðŸ˜Š\n\n" +
-        "Mas esse valor nÃ£o Ã© mensalidade, tÃ¡?\n" +
+        "Mas esse valor não é mensalidade, tá?\n" +
         "Ã‰ referente ao material didÃ¡tico digital e ao acesso Ã  plataforma.\n\n" +
         `${buildBoletoCommercialBlock()}\n\n` +
-        "Qual forma ficaria mais leve para vocÃª?"
+        "Qual forma ficaria mais leve para você?"
       );
     }
 
@@ -2012,7 +2063,7 @@ const MARKET_SALARY_BY_COURSE = {
       return (
         "Claro, sem problema ðŸ˜Š\n\n" +
         "Ã‰ importante analisar com calma mesmo.\n\n" +
-        "Me diz sÃ³ uma coisa: o que mais estÃ¡ pesando para vocÃª agora?\n" +
+        "Me diz só uma coisa: o que mais está pesando para você agora?\n" +
         "A escolha do curso, a forma de pagamento ou o tempo para estudar?"
       );
     }
@@ -2036,7 +2087,7 @@ const MARKET_SALARY_BY_COURSE = {
     if (intent === "price") {
       return (
         "Claro ðŸ˜Š\n\n" +
-        "Antes de te passar a melhor condiÃ§Ã£o, me fala qual curso ou Ã¡rea chamou sua atenÃ§Ã£o.\n" +
+        "Antes de te passar a melhor condição, me fala qual curso ou área chamou sua atenção.\n" +
         "Assim eu consigo te orientar de forma mais certa para o seu objetivo."
       );
     }
@@ -2044,15 +2095,15 @@ const MARKET_SALARY_BY_COURSE = {
     if (looksLikeAskingContent(userText)) {
       return (
         "Claro ðŸ˜Š\n\n" +
-        "Os cursos funcionam pela plataforma online da escola, com materiais digitais, videoaulas, atividades, exercÃ­cios e avaliaÃ§Ãµes, tudo no seu ritmo.\n\n" +
-        "A plataforma fica disponÃ­vel 24 horas.\n\n" +
-        "Qual Ã¡rea chamou mais sua atenÃ§Ã£o?"
+        "Os cursos funcionam pela plataforma online da escola, com materiais digitais, videoaulas, atividades, exercícios e avaliações, tudo no seu ritmo.\n\n" +
+        "A plataforma fica disponível 24 horas.\n\n" +
+        "Qual área chamou mais sua atenção?"
       );
     }
 
     return (
       "Claro ðŸ˜Š\n\n" +
-      "Me fala qual curso ou Ã¡rea vocÃª tem interesse que eu te explico direitinho e te ajudo a escolher a melhor opÃ§Ã£o."
+      "Me fala qual curso ou área você tem interesse que eu te explico direitinho e te ajudo a escolher a melhor opção."
     );
   }
 
@@ -2303,7 +2354,7 @@ const MARKET_SALARY_BY_COURSE = {
       }
     }
 
-    throw new Error(`NÃ£o consegui autenticar na PagSchool: ${safeJson(errors)}`);
+    throw new Error(`Não consegui autenticar na PagSchool: ${safeJson(errors)}`);
   }
 
   async function pagSchoolRequest({ method = "get", docPath, params, data, responseType = "json" }, retry = true) {
@@ -2509,7 +2560,7 @@ const MARKET_SALARY_BY_COURSE = {
     const cpfDigits = onlyDigits(cpf);
 
     if (!cpfDigits || cpfDigits.length !== 11) {
-      throw new Error("CPF invÃ¡lido para busca.");
+      throw new Error("CPF inválido para busca.");
     }
 
     const endpointAttempts = ["/api/aluno/all", "/aluno/all"];
@@ -2550,7 +2601,7 @@ const MARKET_SALARY_BY_COURSE = {
       }
     }
 
-    throw new Error(`Aluno nÃ£o encontrado para o CPF ${cpfDigits}. Tentativas: ${safeJson(errors)}`);
+    throw new Error(`Aluno não encontrado para o CPF ${cpfDigits}. Tentativas: ${safeJson(errors)}`);
   }
 
   async function findContratoByAlunoId(alunoId) {
@@ -2588,7 +2639,7 @@ const MARKET_SALARY_BY_COURSE = {
         errors.push({
           docPaths: attempt.docPaths,
           params: attempt.params || null,
-          result: "Nenhum contrato vÃ¡lido encontrado",
+          result: "Nenhum contrato válido encontrado",
         });
       } catch (error) {
         errors.push({
@@ -2599,7 +2650,7 @@ const MARKET_SALARY_BY_COURSE = {
       }
     }
 
-    throw new Error(`Contrato nÃ£o encontrado para o aluno ${alunoId}. Tentativas: ${safeJson(errors)}`);
+    throw new Error(`Contrato não encontrado para o aluno ${alunoId}. Tentativas: ${safeJson(errors)}`);
   }
 
   async function gerarBoletoDaParcela(parcelaId) {
@@ -2713,7 +2764,7 @@ const MARKET_SALARY_BY_COURSE = {
       getByKeys(data?.data || {}, ["id", "alunoId", "idAluno"]);
 
     if (!alunoId) {
-      throw new Error(`A PagSchool nÃ£o retornou o id do aluno criado: ${safeJson(data)}`);
+      throw new Error(`A PagSchool não retornou o id do aluno criado: ${safeJson(data)}`);
     }
 
     return {
@@ -2756,7 +2807,7 @@ const MARKET_SALARY_BY_COURSE = {
       getByKeys(data?.data || {}, ["id", "contratoId", "idContrato"]);
 
     if (!contratoId) {
-      throw new Error(`A PagSchool nÃ£o retornou o id do contrato criado: ${safeJson(data)}`);
+      throw new Error(`A PagSchool não retornou o id do contrato criado: ${safeJson(data)}`);
     }
 
     return {
@@ -2787,7 +2838,7 @@ const MARKET_SALARY_BY_COURSE = {
       getByKeys(data?.data || {}, ["id", "parcelaId", "idParcela"]);
 
     if (!parcelaId) {
-      throw new Error(`A PagSchool nÃ£o retornou o id da parcela criada: ${safeJson(data)}`);
+      throw new Error(`A PagSchool não retornou o id da parcela criada: ${safeJson(data)}`);
     }
 
     return {
@@ -2803,12 +2854,12 @@ const MARKET_SALARY_BY_COURSE = {
 
   async function createBoletoDoZero(dados) {
     const cpf = onlyDigits(dados.cpf);
-    if (!isCpf(cpf)) throw new Error("CPF invÃ¡lido. Envie 11 nÃºmeros.");
+    if (!isCpf(cpf)) throw new Error("CPF inválido. Envie 11 números.");
 
-    if (!String(dados.nomeAluno || "").trim()) throw new Error("nomeAluno Ã© obrigatÃ³rio.");
-    if (!String(dados.nomeCurso || "").trim()) throw new Error("nomeCurso Ã© obrigatÃ³rio.");
-    if (!Number(dados.valorParcela || 0)) throw new Error("valorParcela Ã© obrigatÃ³rio.");
-    if (!Number(dados.quantidadeParcelas || 0)) throw new Error("quantidadeParcelas Ã© obrigatÃ³ria.");
+    if (!String(dados.nomeAluno || "").trim()) throw new Error("nomeAluno é obrigatório.");
+    if (!String(dados.nomeCurso || "").trim()) throw new Error("nomeCurso é obrigatório.");
+    if (!Number(dados.valorParcela || 0)) throw new Error("valorParcela é obrigatório.");
+    if (!Number(dados.quantidadeParcelas || 0)) throw new Error("quantidadeParcelas é obrigatória.");
     if (!isValidYMD(dados.vencimento)) throw new Error("vencimento precisa estar no formato AAAA-MM-DD.");
 
     let aluno = await searchAlunoByCpfExact(cpf);
@@ -2859,7 +2910,7 @@ const MARKET_SALARY_BY_COURSE = {
     }
 
     if (!AUTO_CREATE_PARCELA) {
-      throw new Error("AUTO_CREATE_PARCELA=false ainda nÃ£o estÃ¡ suportado nesta versÃ£o.");
+      throw new Error("AUTO_CREATE_PARCELA=false ainda não está suportado nesta versão.");
     }
 
     const parcela = await createParcelaPagSchool({
@@ -2917,10 +2968,10 @@ const MARKET_SALARY_BY_COURSE = {
     lines.push(`CPF: ${maskCpf(result.aluno.cpf)}`);
     if (result.vencimento) lines.push(`Vencimento: ${formatDateBR(result.vencimento)}`);
     if (result.valor) lines.push(`Valor: ${formatCurrencyBR(result.valor)}`);
-    if (result.linhaDigitavel) lines.push(`Linha digitÃ¡vel: ${result.linhaDigitavel}`);
+    if (result.linhaDigitavel) lines.push(`Linha digitável: ${result.linhaDigitavel}`);
     lines.push("");
     lines.push("Se estiver correto, responda *CONFIRMAR*.");
-    lines.push("Se nÃ£o for esse aluno, responda *CANCELAR* e envie o CPF certo.");
+    lines.push("Se não for esse aluno, responda *CANCELAR* e envie o CPF certo.");
     return lines.join("\n");
   }
 
@@ -2929,7 +2980,7 @@ const MARKET_SALARY_BY_COURSE = {
     const convo = getConversation(phone);
 
     if (!isCpf(digits)) {
-      await sendMetaText(phone, "O CPF precisa ter 11 nÃºmeros. Me envie novamente sÃ³ com os nÃºmeros.");
+      await sendMetaText(phone, "O CPF precisa ter 11 números. Me envie novamente só com os números.");
       return;
     }
 
@@ -2938,7 +2989,7 @@ const MARKET_SALARY_BY_COURSE = {
     convo.pendingBoleto = null;
     scheduleSaveConversations();
 
-    await sendMetaText(phone, "Estou localizando o boleto. Aguarde sÃ³ um instante.");
+    await sendMetaText(phone, "Estou localizando o boleto. Aguarde só um instante.");
 
     try {
       const result = await buildBoletoResultFromCpf(digits);
@@ -2963,7 +3014,7 @@ const MARKET_SALARY_BY_COURSE = {
       resetConversation(phone);
       await sendMetaText(
         phone,
-        "NÃ£o encontrei nenhum boleto em aberto para esse CPF. Confira o nÃºmero e tente novamente."
+        "Não encontrei nenhum boleto em aberto para esse CPF. Confira o número e tente novamente."
       );
     }
   }
@@ -2974,7 +3025,7 @@ const MARKET_SALARY_BY_COURSE = {
 
     if (!pending) {
       resetConversation(phone);
-      await sendMetaText(phone, "NÃ£o encontrei uma consulta pendente. Digite *menu* para comeÃ§ar novamente.");
+      await sendMetaText(phone, "Não encontrei uma consulta pendente. Digite *menu* para começar novamente.");
       return;
     }
 
@@ -2991,10 +3042,10 @@ const MARKET_SALARY_BY_COURSE = {
       } else if (pending.linhaDigitavel) {
         await sendMetaText(
           phone,
-          `NÃ£o consegui montar o PDF agora, mas segue a linha digitÃ¡vel:\n${pending.linhaDigitavel}`
+          `Não consegui montar o PDF agora, mas segue a linha digitável:\n${pending.linhaDigitavel}`
         );
       } else {
-        await sendMetaText(phone, "Localizei a parcela, mas nÃ£o consegui gerar o PDF nem a linha digitÃ¡vel agora.");
+        await sendMetaText(phone, "Localizei a parcela, mas não consegui gerar o PDF nem a linha digitável agora.");
       }
 
       resetConversation(phone);
@@ -3013,7 +3064,7 @@ const MARKET_SALARY_BY_COURSE = {
 
   function buildCreateZeroResume(data) {
     return [
-      "Confira os dados para criar o carnÃª:",
+      "Confira os dados para criar o carnê:",
       `Nome: ${data.nomeAluno}`,
       `CPF: ${maskCpf(data.cpf)}`,
       `Telefone: ${data.telefoneCelular}`,
@@ -3085,7 +3136,7 @@ const MARKET_SALARY_BY_COURSE = {
       msg += `E-mail confirmado: ${convo.pendingCreateZero.email}\n\n`;
     }
 
-    msg += "Agora me envie o *CPF do aluno* para eu criar o carnÃª no PagSchool.";
+    msg += "Agora me envie o *CPF do aluno* para eu criar o carnê no PagSchool.";
 
     await sendMetaTextSmart(phone, msg);
   }
@@ -3097,7 +3148,7 @@ const MARKET_SALARY_BY_COURSE = {
 
     if (looksLikeCancel(clean)) {
       resetConversation(phone);
-      await sendMetaTextSmart(phone, "Tudo bem. Processo cancelado.\n\nQuando quiser recomeÃ§ar, envie *nova matrÃ­cula*.");
+      await sendMetaTextSmart(phone, "Tudo bem. Processo cancelado.\n\nQuando quiser recomeçar, envie *nova matrícula*.");
       return true;
     }
 
@@ -3111,14 +3162,14 @@ const MARKET_SALARY_BY_COURSE = {
       data.nomeAluno = nome;
       convo.step = "create_zero_cpf";
       scheduleSaveConversations();
-      await sendMetaTextSmart(phone, "Agora me envie o *CPF do aluno* com 11 nÃºmeros.");
+      await sendMetaTextSmart(phone, "Agora me envie o *CPF do aluno* com 11 números.");
       return true;
     }
 
     if (convo.step === "create_zero_cpf") {
       const cpf = onlyDigits(clean);
       if (!isCpf(cpf)) {
-        await sendMetaTextSmart(phone, "CPF invÃ¡lido. Me envie o CPF com *11 nÃºmeros*.");
+        await sendMetaTextSmart(phone, "CPF inválido. Me envie o CPF com *11 números*.");
         return true;
       }
 
@@ -3132,7 +3183,7 @@ const MARKET_SALARY_BY_COURSE = {
     if (convo.step === "create_zero_telefone") {
       const tel = onlyDigits(clean);
       if (tel.length < 10) {
-        await sendMetaTextSmart(phone, "Telefone invÃ¡lido. Me envie o *telefone com DDD*.");
+        await sendMetaTextSmart(phone, "Telefone inválido. Me envie o *telefone com DDD*.");
         return true;
       }
 
@@ -3162,7 +3213,7 @@ const MARKET_SALARY_BY_COURSE = {
     if (convo.step === "create_zero_valor") {
       const valor = Number(String(clean).replace(",", "."));
       if (!valor || valor <= 0) {
-        await sendMetaTextSmart(phone, "Valor invÃ¡lido. Envie algo como *99,90*.");
+        await sendMetaTextSmart(phone, "Valor inválido. Envie algo como *99,90*.");
         return true;
       }
 
@@ -3176,7 +3227,7 @@ const MARKET_SALARY_BY_COURSE = {
     if (convo.step === "create_zero_quantidade") {
       const qtd = Number(onlyDigits(clean));
       if (!qtd || qtd <= 0) {
-        await sendMetaTextSmart(phone, "Quantidade invÃ¡lida. Envie um nÃºmero como *12*.");
+        await sendMetaTextSmart(phone, "Quantidade inválida. Envie um número como *12*.");
         return true;
       }
 
@@ -3190,7 +3241,7 @@ const MARKET_SALARY_BY_COURSE = {
 
     if (convo.step === "create_zero_vencimento") {
       if (!isValidYMD(clean)) {
-        await sendMetaTextSmart(phone, "Data invÃ¡lida. Envie no formato *AAAA-MM-DD*.\nExemplo: 2026-03-25");
+        await sendMetaTextSmart(phone, "Data inválida. Envie no formato *AAAA-MM-DD*.\nExemplo: 2026-03-25");
         return true;
       }
 
@@ -3213,7 +3264,7 @@ const MARKET_SALARY_BY_COURSE = {
 
     if (convo.step === "create_zero_confirmacao") {
       if (!looksLikeConfirm(clean)) {
-        await sendMetaTextSmart(phone, "Responda *CONFIRMAR* para criar o carnÃª ou *CANCELAR* para sair.");
+        await sendMetaTextSmart(phone, "Responda *CONFIRMAR* para criar o carnê ou *CANCELAR* para sair.");
         return true;
       }
 
@@ -3230,8 +3281,8 @@ const MARKET_SALARY_BY_COURSE = {
         lines.push(`Aluno ID: ${result.aluno.id}`);
         lines.push(`Contrato ID: ${result.contrato.id}`);
         lines.push(`Parcela ID: ${result.parcela.id}`);
-        if (result.boleto.nossoNumero) lines.push(`Nosso nÃºmero: ${result.boleto.nossoNumero}`);
-        if (result.boleto.linhaDigitavel) lines.push(`Linha digitÃ¡vel: ${result.boleto.linhaDigitavel}`);
+        if (result.boleto.nossoNumero) lines.push(`Nosso número: ${result.boleto.nossoNumero}`);
+        if (result.boleto.linhaDigitavel) lines.push(`Linha digitável: ${result.boleto.linhaDigitavel}`);
         if (result.boleto.pdfUrl) lines.push(`PDF: ${result.boleto.pdfUrl}`);
 
         await sendMetaTextSmart(phone, lines.join("\n"));
@@ -3242,7 +3293,7 @@ const MARKET_SALARY_BY_COURSE = {
               phone,
               result.boleto.pdfUrl,
               `boleto-${result.boleto.nossoNumero || result.parcela.id}.pdf`,
-              "Segue o carnÃª em PDF."
+              "Segue o carnê em PDF."
             );
           } catch (err) {
             console.error("[CREATE ZERO PDF SEND ERROR]", err?.message || err);
@@ -3254,7 +3305,7 @@ const MARKET_SALARY_BY_COURSE = {
       } catch (error) {
         console.error("[CREATE ZERO ERROR]", error?.message || error);
         resetConversation(phone);
-        await sendMetaTextSmart(phone, `NÃ£o consegui criar o carnÃª.\n\nMotivo: ${String(error.message || error)}`);
+        await sendMetaTextSmart(phone, `Não consegui criar o carnê.\n\nMotivo: ${String(error.message || error)}`);
         return true;
       }
     }
@@ -3272,8 +3323,8 @@ const MARKET_SALARY_BY_COURSE = {
       phone,
       "Perfeito ðŸ˜Š\n\nSÃ³ me confirma uma coisa para eu seguir certo:",
       [
-        { id: "boleto_nova_matricula", title: "Nova matrÃ­cula" },
-        { id: "boleto_ja_aluno", title: "JÃ¡ sou aluno" },
+        { id: "boleto_nova_matricula", title: "Nova matrícula" },
+        { id: "boleto_ja_aluno", title: "Já sou aluno" },
       ],
       buildSmartBoletoIntentMessage()
     );
@@ -3329,10 +3380,10 @@ const MARKET_SALARY_BY_COURSE = {
 
     await sendMetaTextSmart(
       phone,
-      "SÃ³ para eu seguir da forma certa, me responda assim:\n\n" +
-        "â€¢ Nova matrÃ­cula\n" +
+      "Só para eu seguir da forma certa, me responda assim:\n\n" +
+        "⬢ Nova matrícula\n" +
         "ou\n" +
-        "â€¢ JÃ¡ sou aluno"
+        "⬢ Já sou aluno"
     );
     return true;
   }
@@ -3362,9 +3413,9 @@ const MARKET_SALARY_BY_COURSE = {
       await sendMetaTextSmart(
         phone,
         `Perfeito ðŸ˜Š\n\n` +
-          `EntÃ£o o curso de ${lead.course} pode fazer muito sentido para vocÃª.\n\n` +
-          `Ele Ã© uma Ã³tima opÃ§Ã£o para quem quer se qualificar, estudar com flexibilidade e desenvolver conhecimento de forma prÃ¡tica.\n\n` +
-          `Se quiser, eu posso te mostrar agora como ficam as condiÃ§Ãµes para comeÃ§ar.`
+          `Então o curso de ${lead.course} pode fazer muito sentido para você.\n\n` +
+          `Ele é uma ótima opção para quem quer se qualificar, estudar com flexibilidade e desenvolver conhecimento de forma prática.\n\n` +
+          `Se quiser, eu posso te mostrar agora como ficam as condições para começar.`
       );
       setLastSalesPromptType(phone, "offer_price_after_value");
       return true;
@@ -3429,11 +3480,11 @@ const MARKET_SALARY_BY_COURSE = {
 
       const finalMessage =
         "Perfeito ðŸ˜Š\n\n" +
-        "Recebi suas informaÃ§Ãµes:\n" +
-        `â€¢ Nome: ${lead.name}\n` +
-        `â€¢ Curso: ${lead.course}\n` +
-        `â€¢ Pagamento: ${lead.paymentMethod}\n\n` +
-        "Agora vou deixar seu atendimento encaminhado para o fechamento da matrÃ­cula.";
+        "Recebi suas informações:\n" +
+        `⬢ Nome: ${lead.name}\n` +
+        `⬢ Curso: ${lead.course}\n` +
+        `⬢ Pagamento: ${lead.paymentMethod}\n\n` +
+        "Agora vou deixar seu atendimento encaminhado para o fechamento da matrícula.";
 
       await sendMetaTextSmart(phone, finalMessage);
 
@@ -3445,9 +3496,9 @@ const MARKET_SALARY_BY_COURSE = {
           `Nome: ${lead.name}\n` +
           `Curso: ${lead.course}\n` +
           `Pagamento: ${lead.paymentMethod}\n` +
-          `Objetivo: ${lead.objective || "NÃ£o informado"}\n` +
+          `Objetivo: ${lead.objective || "Não informado"}\n` +
           `Temperatura: ${detectLeadTemperature(lead)}\n` +
-          `E-mail: ${convo.pendingCreateZero?.email || "NÃ£o informado"}`;
+          `E-mail: ${convo.pendingCreateZero?.email || "Não informado"}`;
 
         try {
           await sendMetaTextSmart(ENROLL_REDIRECT_PHONE, notifyText);
@@ -3754,7 +3805,7 @@ const MARKET_SALARY_BY_COURSE = {
     await sendMetaTextSmart(
       phone,
       "Claro ðŸ˜Š\n\n" +
-        "Me fala qual curso ou Ã¡rea vocÃª tem interesse que eu te explico direitinho e te ajudo a escolher a melhor opÃ§Ã£o."
+        "Me fala qual curso ou área você tem interesse que eu te explico direitinho e te ajudo a escolher a melhor opção."
     );
     setLastSalesPromptType(phone, "ask_course_area");
   }
@@ -3905,7 +3956,7 @@ const MARKET_SALARY_BY_COURSE = {
 
   app.get("/debug/openai/test", async (req, res) => {
     try {
-      const prompt = String(req.query.q || "quais cursos vocÃªs tÃªm?");
+      const prompt = String(req.query.q || "quais cursos vocês têm?");
       const reply = await generateOpenAIReply("debug-openai", prompt);
       res.json({ ok: true, model: OPENAI_MODEL, reply });
     } catch (error) {
@@ -3939,7 +3990,7 @@ const MARKET_SALARY_BY_COURSE = {
   app.get("/debug/meta/test-course-buttons/:phone", async (req, res) => {
     try {
       await sendCourseInterestButtons(req.params.phone);
-      res.json({ ok: true, message: "BotÃµes de curso enviados." });
+      res.json({ ok: true, message: "Botões de curso enviados." });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error.message || error) });
     }
@@ -3948,7 +3999,7 @@ const MARKET_SALARY_BY_COURSE = {
   app.get("/debug/meta/test-payment-buttons/:phone", async (req, res) => {
     try {
       await sendPaymentButtons(req.params.phone);
-      res.json({ ok: true, message: "BotÃµes de pagamento enviados." });
+      res.json({ ok: true, message: "Botões de pagamento enviados." });
     } catch (error) {
       res.status(500).json({ ok: false, error: String(error.message || error) });
     }
@@ -3999,11 +4050,11 @@ const MARKET_SALARY_BY_COURSE = {
 
       if (event.phone) {
         const lines = [];
-        lines.push(`OlÃ¡, ${event.nome}.`);
-        lines.push("Recebemos a confirmaÃ§Ã£o de pagamento do seu boleto.");
+        lines.push(`Olá, ${event.nome}.`);
+        lines.push("Recebemos a confirmação de pagamento do seu boleto.");
         if (event.valorPago || event.valor) lines.push(`Valor: ${formatCurrencyBR(event.valorPago || event.valor)}`);
         if (event.dataPagamento) lines.push(`Pagamento: ${formatDateBR(event.dataPagamento)}`);
-        if (event.nossoNumero) lines.push(`Nosso nÃºmero: ${event.nossoNumero}`);
+        if (event.nossoNumero) lines.push(`Nosso número: ${event.nossoNumero}`);
         lines.push("Obrigado.");
 
         await sendMetaText(event.phone, lines.join("\n"));
@@ -4019,7 +4070,7 @@ const MARKET_SALARY_BY_COURSE = {
       const nossoNumero = String(req.params.nossoNumero || "");
 
       if (!parcelaId || !nossoNumero) {
-        return res.status(400).send("parcelaId e nossoNumero sÃ£o obrigatÃ³rios");
+        return res.status(400).send("parcelaId e nossoNumero são obrigatórios");
       }
 
       const resp = await pagSchoolRequestMany({
@@ -4045,7 +4096,7 @@ const MARKET_SALARY_BY_COURSE = {
         return res.status(200).send(buffer);
       }
 
-      return res.status(500).send("A PagSchool nÃ£o retornou um PDF vÃ¡lido.");
+      return res.status(500).send("A PagSchool não retornou um PDF válido.");
     } catch (error) {
       return res.status(500).send(String(error.message || error));
     }
@@ -4118,7 +4169,7 @@ const MARKET_SALARY_BY_COURSE = {
         cpf: "11111111111",
         telefoneCelular: "13999999999",
         email: "teste@exemplo.com",
-        nomeCurso: "FarmÃ¡cia",
+        nomeCurso: "Farmácia",
         valorParcela: 99.9,
         quantidadeParcelas: 12,
         duracaoCurso: 12,
@@ -4148,5 +4199,3 @@ const MARKET_SALARY_BY_COURSE = {
   app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
   });
-
-
