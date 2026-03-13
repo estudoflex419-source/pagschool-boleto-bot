@@ -260,6 +260,10 @@ function isValidCpf(value) {
     return Date.now();
   }
 
+  function isoNow() {
+    return new Date().toISOString();
+  }
+
   function toTitleCase(text) {
     return String(text || "")
       .toLowerCase()
@@ -479,6 +483,19 @@ function buildHumanGreeting() {
   ]);
 }
 
+function buildReturningLeadWelcome(profile) {
+  if (!profile) return "";
+  const firstName = String(profile.name || "").trim().split(/\s+/)[0] || "";
+  const namePart = firstName ? `${firstName} ` : "";
+  const course = String(profile.course_interest || "").trim();
+
+  if (course) {
+    return `Oi ${namePart}😊\nVocê ainda está pensando no curso de ${course}?`;
+  }
+
+  return `Oi ${namePart}😊\nQue bom te ver de novo. Quer continuar de onde paramos na sua matrícula?`;
+}
+
   function buildCourseIntroMessage(course) {
     return (
       `${pickRandom([
@@ -576,6 +593,7 @@ function buildHumanGreeting() {
       `${intro}\n\n` +
       "O curso não possui mensalidade ðŸ˜Š\n" +
       "É cobrada apenas uma taxa referente ao material didático digital e ao acesso à plataforma.\n\n" +
+      "As condições atuais são promocionais para novas matrículas 😊\n\n" +
       `${buildBoletoCommercialBlock()}\n\n` +
       "Qual opção faz mais sentido para você hoje?"
     );
@@ -662,6 +680,7 @@ const OPENAI_RETRY_COUNT = Number(readEnv("OPENAI_RETRY_COUNT") || 2);
 const START_ONLY_CHATBOT = /^(1|true|yes|on|sim)$/i.test(readEnv("START_ONLY_CHATBOT") || "true");
 
   const CONVERSATIONS_FILE = readEnv("CONVERSATIONS_FILE") || path.join(__dirname, "conversations.json");
+  const LEADS_FILE = readEnv("LEADS_FILE") || path.join(__dirname, "leads.json");
 
   const META_SEND_DELAY_MS = Number(readEnv("META_SEND_DELAY_MS") || 950);
   const DUPLICATE_WINDOW_MS = Number(readEnv("DUPLICATE_WINDOW_MS") || 15000);
@@ -680,6 +699,10 @@ const START_ONLY_CHATBOT = /^(1|true|yes|on|sim)$/i.test(readEnv("START_ONLY_CHA
   );
   const BOLETO_ENTRY_50_DISCOUNT_INSTALLMENTS = Number(
     readEnv("BOLETO_ENTRY_50_DISCOUNT_INSTALLMENTS") || 1
+  );
+  const FIRST_DUE_IN_DAYS = Math.max(
+    1,
+    Number(readEnv("FIRST_DUE_IN_DAYS") || BOLETO_NEXT_PAYMENT_DAYS) || BOLETO_NEXT_PAYMENT_DAYS
   );
 
   const ENROLL_REDIRECT_PHONE = normalizePhone(readEnv("ENROLL_REDIRECT_PHONE", "SALES_CLOSER_PHONE"));
@@ -928,9 +951,28 @@ const MARKET_SALARY_BY_COURSE = {
   };
 
   const conversations = new Map();
+  const leadProfiles = new Map();
   const processedMetaMessages = new Map();
 
   let saveConversationsTimer = null;
+  let saveLeadProfilesTimer = null;
+
+  function createDefaultLeadProfile(phone = "") {
+    const normalizedPhone = normalizePhone(phone);
+    return {
+      phone: normalizedPhone,
+      name: "",
+      course_interest: "",
+      objective: "",
+      stage: "discovering",
+      payment_method: "",
+      warm_score: 0,
+      last_objection: "",
+      created_at: isoNow(),
+      updated_at: isoNow(),
+      last_interaction_at: isoNow(),
+    };
+  }
 
   function createDefaultConversation() {
     return {
@@ -939,6 +981,9 @@ const MARKET_SALARY_BY_COURSE = {
       pendingBoleto: null,
       pendingCreateZero: null,
       awaitingBoletoIntent: false,
+      awaitingEntryProof: false,
+      entryProofReceived: false,
+      requestedEntryValue: 0,
       entryDirection: "",
       aiHistory: [],
       lastUserTextNormalized: "",
@@ -948,6 +993,7 @@ const MARKET_SALARY_BY_COURSE = {
       lastSalesPromptType: "",
       lastSalesPromptAt: 0,
       lastMenuAt: 0,
+      lastLeadWelcomeAt: 0,
       salesLead: {
         name: "",
         course: "",
@@ -964,6 +1010,126 @@ const MARKET_SALARY_BY_COURSE = {
       },
       updatedAt: nowTs(),
     };
+  }
+
+  function normalizeLeadProfile(rawPhone, value) {
+    if (!value || typeof value !== "object") return null;
+    const normalizedPhone = normalizePhone(value.phone || rawPhone || "");
+    if (!normalizedPhone) return null;
+
+    const defaults = createDefaultLeadProfile(normalizedPhone);
+    return {
+      ...defaults,
+      ...value,
+      phone: normalizedPhone,
+      name: String(value.name || "").trim(),
+      course_interest: String(value.course_interest || "").trim(),
+      objective: String(value.objective || "").trim(),
+      stage: String(value.stage || defaults.stage).trim(),
+      payment_method: String(value.payment_method || "").trim(),
+      warm_score: Number(value.warm_score || 0),
+      last_objection: String(value.last_objection || "").trim(),
+      created_at: String(value.created_at || defaults.created_at),
+      updated_at: String(value.updated_at || isoNow()),
+      last_interaction_at: String(value.last_interaction_at || isoNow()),
+    };
+  }
+
+  function loadLeadProfiles() {
+    try {
+      if (!fs.existsSync(LEADS_FILE)) return;
+      const raw = fs.readFileSync(LEADS_FILE, "utf8");
+      if (!raw.trim()) return;
+      const parsed = JSON.parse(raw);
+
+      const entries = Array.isArray(parsed)
+        ? parsed.map((item) => [item?.phone || "", item])
+        : Object.entries(parsed || {});
+
+      for (const [rawPhone, value] of entries) {
+        const normalized = normalizeLeadProfile(rawPhone, value);
+        if (!normalized) continue;
+        leadProfiles.set(normalized.phone, normalized);
+      }
+
+      console.log(`[LEADS] ${leadProfiles.size} perfil(is) carregado(s).`);
+    } catch (error) {
+      console.error("[LEADS LOAD ERROR]", error?.message || error);
+    }
+  }
+
+  function saveLeadProfilesNow() {
+    try {
+      const obj = Object.fromEntries(leadProfiles);
+      fs.writeFileSync(LEADS_FILE, JSON.stringify(obj, null, 2), "utf8");
+    } catch (error) {
+      console.error("[LEADS SAVE ERROR]", error?.message || error);
+    }
+  }
+
+  function scheduleSaveLeadProfiles() {
+    if (saveLeadProfilesTimer) clearTimeout(saveLeadProfilesTimer);
+    saveLeadProfilesTimer = setTimeout(() => {
+      saveLeadProfilesNow();
+      saveLeadProfilesTimer = null;
+    }, 500);
+    if (saveLeadProfilesTimer.unref) saveLeadProfilesTimer.unref();
+  }
+
+  function getLeadProfile(phone) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+    return leadProfiles.get(key) || null;
+  }
+
+  function saveLeadProfile(profile) {
+    if (!profile || typeof profile !== "object") return null;
+    const key = normalizePhone(profile.phone || "");
+    if (!key) return null;
+
+    const existing = getLeadProfile(key);
+    const normalized = normalizeLeadProfile(key, {
+      ...(existing || createDefaultLeadProfile(key)),
+      ...profile,
+      phone: key,
+      created_at: existing?.created_at || profile.created_at || isoNow(),
+      updated_at: isoNow(),
+      last_interaction_at: isoNow(),
+    });
+
+    if (!normalized) return null;
+    leadProfiles.set(key, normalized);
+    scheduleSaveLeadProfiles();
+    return normalized;
+  }
+
+  function updateLeadProfile(phone, partial = {}) {
+    const key = normalizePhone(phone);
+    if (!key) return null;
+
+    const current = getLeadProfile(key) || createDefaultLeadProfile(key);
+    return saveLeadProfile({
+      ...current,
+      ...partial,
+      phone: key,
+      created_at: current.created_at || isoNow(),
+      updated_at: isoNow(),
+      last_interaction_at: isoNow(),
+    });
+  }
+
+  function syncLeadProfileFromConversation(phone) {
+    const convo = getConversation(phone);
+    const lead = convo?.salesLead || {};
+    return updateLeadProfile(phone, {
+      name: String(lead.name || "").trim(),
+      course_interest: String(lead.course || "").trim(),
+      objective: String(lead.objective || "").trim(),
+      stage: String(lead.stage || "discovering").trim(),
+      payment_method: String(lead.paymentMethod || "").trim(),
+      warm_score: Number(lead.warmScore || 0),
+      last_objection: String(lead.lastObjection || "").trim(),
+    });
   }
 
   function loadConversations() {
@@ -1034,7 +1200,20 @@ const MARKET_SALARY_BY_COURSE = {
   function getConversation(phone) {
     const key = normalizePhone(phone);
     if (!conversations.has(key)) {
-      conversations.set(key, createDefaultConversation());
+      const fresh = createDefaultConversation();
+      const profile = getLeadProfile(key);
+
+      if (profile) {
+        fresh.salesLead.name = profile.name || "";
+        fresh.salesLead.course = profile.course_interest || "";
+        fresh.salesLead.objective = profile.objective || "";
+        fresh.salesLead.stage = profile.stage || "discovering";
+        fresh.salesLead.paymentMethod = profile.payment_method || "";
+        fresh.salesLead.warmScore = Number(profile.warm_score || 0);
+        fresh.salesLead.lastObjection = profile.last_objection || "";
+      }
+
+      conversations.set(key, fresh);
       scheduleSaveConversations();
     }
 
@@ -1046,6 +1225,16 @@ const MARKET_SALARY_BY_COURSE = {
       ...createDefaultConversation().salesLead,
       ...(state.salesLead && typeof state.salesLead === "object" ? state.salesLead : {}),
     };
+
+    const profile = getLeadProfile(key);
+    if (profile) {
+      if (!state.salesLead.name && profile.name) state.salesLead.name = profile.name;
+      if (!state.salesLead.course && profile.course_interest) state.salesLead.course = profile.course_interest;
+      if (!state.salesLead.objective && profile.objective) state.salesLead.objective = profile.objective;
+      if (!state.salesLead.paymentMethod && profile.payment_method) state.salesLead.paymentMethod = profile.payment_method;
+      if (!state.salesLead.lastObjection && profile.last_objection) state.salesLead.lastObjection = profile.last_objection;
+      if (!state.salesLead.warmScore && profile.warm_score) state.salesLead.warmScore = Number(profile.warm_score || 0);
+    }
 
     return state;
   }
@@ -1315,6 +1504,86 @@ const MARKET_SALARY_BY_COURSE = {
     );
   }
 
+  function detectCloseMoment(text) {
+    const t = normalizeText(text);
+    return /(acho que vou fazer|acho que vou entrar|gostei|parece bom|quero esse|vou fazer|curti|legal gostei|quero sim|quero fechar|vamos fechar|bora fechar|pode matricular|pode fazer minha matricula|vou entrar|fechou pra mim)/.test(
+      t
+    );
+  }
+
+  function detectPriceObjection(text) {
+    const t = normalizeText(text);
+    return /(ta caro|tá caro|muito caro|caro demais|valor alto|parcela alta|parcela pesada|ficou pesado|nao tenho dinheiro|não tenho dinheiro|sem dinheiro|nao cabe no bolso|não cabe no bolso)/.test(
+      t
+    );
+  }
+
+  const GOAL_RECOMMENDATION_MAP = [
+    {
+      key: "hospital",
+      pattern: /\bhospital\b|\bpronto socorro\b|\bupa\b/,
+      courses: ["Recepcionista Hospitalar", "Farmácia", "Instrumentação Cirúrgica"],
+      label: "área hospitalar",
+    },
+    {
+      key: "beleza",
+      pattern: /\bbeleza\b|\bsalao\b|\bsal[aã]o\b/,
+      courses: ["Cabeleireiro(a)", "Designer de Sobrancelhas", "Extensão de Cílios"],
+      label: "área da beleza",
+    },
+    {
+      key: "estetica",
+      pattern: /\bestetica\b|\best[eé]tica\b/,
+      courses: ["Beleza e Estética", "Depilação Profissional", "Maquiagem Profissionalizante"],
+      label: "área de estética",
+    },
+    {
+      key: "administracao",
+      pattern: /\badministracao\b|\badministração\b|\badministrativo\b|\bescritorio\b|\bescritório\b/,
+      courses: ["Administração", "Recursos Humanos", "Contabilidade"],
+      label: "área administrativa",
+    },
+    {
+      key: "clinica",
+      pattern: /\bclinica\b|\bclínica\b|\bconsultorio\b|\bconsultório\b/,
+      courses: ["Análises Clínicas", "Recepcionista Hospitalar", "Auxiliar de Necropsia"],
+      label: "rotina de clínica",
+    },
+    {
+      key: "farmacia",
+      pattern: /\bfarmacia\b|\bfarmácia\b|\bdrogaria\b/,
+      courses: ["Farmácia", "Análises Clínicas", "Recepcionista Hospitalar"],
+      label: "área de farmácia",
+    },
+  ];
+
+  function recommendCoursesByGoal(text) {
+    const t = normalizeText(text);
+    if (!t) return null;
+
+    const match = GOAL_RECOMMENDATION_MAP.find((item) => item.pattern.test(t));
+    if (!match) return null;
+
+    const courses = (match.courses || [])
+      .map((name) => getCatalogCourse(name))
+      .filter(Boolean)
+      .map((course) => course.nome)
+      .slice(0, 3);
+
+    if (!courses.length) return null;
+
+    return {
+      goalKey: match.key,
+      goalLabel: match.label,
+      courses,
+      message:
+        "Perfeito 😊\n\n" +
+        `Pelo seu objetivo na ${match.label}, estes cursos podem te ajudar a entrar mais rápido no mercado:\n\n` +
+        courses.map((course) => `⬢ ${course}`).join("\n") +
+        "\n\nQual chamou mais sua atenção?",
+    };
+  }
+
 function looksLikeAskingContent(text) {
   const t = normalizeText(text);
   return /(conteudo|conteúdo|grade|grade curricular|materias|matérias|assuntos|o que aprende|oque aprende|como funciona|funciona como|quero saber mais|como_funciona)/.test(
@@ -1341,6 +1610,7 @@ function detectIntent(text) {
 
   if (/(beneficios|benefícios|vantagens|diferenciais)/.test(t)) return "benefits";
   if (/(quanto ganha|salario|salário|faixa salarial|media salarial|média salarial|remuneracao|remuneração|mercado de trabalho)/.test(t)) return "salary";
+  if (detectPriceObjection(t)) return "price_objection";
   if (/(desconto|entrada|sinal|negociar|melhorar condicao|melhorar condição|tirar parcela|diminuir parcela)/.test(t))
     return "negotiation";
   if (/(boleto|segunda via|2 via|2a via|mensalidade|fatura|carne|carn[eê])/.test(t)) return "boleto";
@@ -1555,30 +1825,39 @@ function looksLikeExistingStudentSupportNeed(text) {
     return fallback.join("\n");
   }
 
-  function buildNegotiationReply(entryOfferValue = 0, course = "") {
-    const condition = getEntryConditionByAmount(entryOfferValue);
+function buildNegotiationReply(entryOfferValue = 0, course = "") {
+  const condition = getEntryConditionByAmount(entryOfferValue);
 
-    if (condition) {
-      return [
-        "Consigo sim ðŸ˜Š",
-        "",
-        course ? `Para ${course}, consigo liberar assim:` : "Consigo liberar assim:",
-        `- Entrada de ${formatCurrencyBR(condition.entryValue)}`,
-        `- Tira ${condition.removedInstallments} parcela(s)`,
-        `- Fica ${condition.remainingInstallments}x de ${formatCurrencyBR(condition.installmentValue)}`,
-        `- Próxima parcela em até ${BOLETO_NEXT_PAYMENT_DAYS} dias`,
-        "",
-        "Se quiser, eu já deixo essa condição reservada para você agora.",
-      ].join("\n");
-    }
-
+  if (condition) {
     return [
-      "Consigo te ajudar com negociação no boleto ðŸ˜Š",
+      "Entendo você 😊",
       "",
-      buildBoletoEntryConditionsText(),
+      course
+        ? `O curso de ${course} tem foco prático e pode acelerar sua entrada na área, então vale muito esse investimento.`
+        : "Esse investimento costuma voltar rápido para quem aplica o conteúdo para entrar na área.",
       "",
-      "Se você me confirmar a melhor opção, eu já te encaminho para a matrícula.",
+      "Regra para alterar o boleto:",
+      `- Entrada de ${formatCurrencyBR(condition.entryValue)}`,
+      "- Envio do comprovante da entrada",
+      "",
+      "Após o comprovante, aplico a redução de parcelas no seu boleto.",
     ].join("\n");
+  }
+
+  return [
+    "Entendo você 😊",
+    "",
+    course
+      ? `No curso de ${course}, a ideia é te dar qualificação prática para gerar oportunidade real de trabalho.`
+      : "Nos cursos, a proposta é te dar qualificação prática para aumentar chance de oportunidade real.",
+    "",
+    "Muitos alunos começam com uma entrada menor e reduzem as parcelas:",
+    `- Entrada de ${formatCurrencyBR(100)}: reduz ${BOLETO_ENTRY_100_DISCOUNT_INSTALLMENTS} parcelas`,
+    `- Entrada de ${formatCurrencyBR(50)}: reduz ${BOLETO_ENTRY_50_DISCOUNT_INSTALLMENTS} parcela`,
+    "",
+    "Importante: o valor padrão só muda depois da entrada e do comprovante.",
+    "Se quiser, eu já te explico qual condição fica melhor para você.",
+  ].join("\n");
   }
 
   function buildAllCoursesMessage() {
@@ -1612,6 +1891,9 @@ function updateLeadFromText(phone, text) {
   if (course && lead.course !== course) {
     lead.course = course;
     lead.courseExplained = false;
+    convo.awaitingEntryProof = false;
+    convo.entryProofReceived = false;
+    convo.requestedEntryValue = 0;
   }
 
     const paymentMethod = extractPaymentMethod(clean);
@@ -1631,19 +1913,20 @@ function updateLeadFromText(phone, text) {
 
     if (course) lead.warmScore += 2;
     if (lead.askedPrice) lead.warmScore += 1;
-    if (looksLikeStrongEnrollmentIntent(clean)) lead.warmScore += 3;
+    if (detectCloseMoment(clean) || looksLikeStrongEnrollmentIntent(clean)) lead.warmScore += 3;
     if (looksLikeHello(clean)) lead.warmScore += 1;
 
     if (looksLikeObjectionNoTime(clean)) lead.lastObjection = "tempo";
-    else if (looksLikeObjectionExpensive(clean)) lead.lastObjection = "preco";
+    else if (detectPriceObjection(clean) || looksLikeObjectionExpensive(clean)) lead.lastObjection = "preco";
     else if (looksLikeThinking(clean)) lead.lastObjection = "pensando";
 
     if (lead.warmScore >= 7 && lead.stage === "discovering") lead.stage = "value_building";
     if (lead.askedPrice && lead.stage === "value_building") lead.stage = "proposal";
-    if (looksLikeStrongEnrollmentIntent(clean)) lead.stage = "collecting_enrollment";
+    if (detectCloseMoment(clean) || looksLikeStrongEnrollmentIntent(clean)) lead.stage = "collecting_enrollment";
 
     convo.updatedAt = nowTs();
     scheduleSaveConversations();
+    syncLeadProfileFromConversation(phone);
   }
 
   function buildCardConditionText() {
@@ -1827,6 +2110,69 @@ function markCourseAsExplained(phone, course = "") {
   if (convo.salesLead.stage === "discovering") convo.salesLead.stage = "value_building";
   convo.updatedAt = nowTs();
   scheduleSaveConversations();
+  syncLeadProfileFromConversation(phone);
+}
+
+function clearEntryProofState(phone) {
+  const convo = getConversation(phone);
+  convo.awaitingEntryProof = false;
+  convo.entryProofReceived = false;
+  convo.requestedEntryValue = 0;
+  convo.updatedAt = nowTs();
+  scheduleSaveConversations();
+}
+
+async function startEntryProofFlow(phone, entryValue) {
+  const convo = getConversation(phone);
+  const allowedValue = entryValue >= 100 ? 100 : 50;
+  convo.awaitingEntryProof = true;
+  convo.entryProofReceived = false;
+  convo.requestedEntryValue = allowedValue;
+  convo.updatedAt = nowTs();
+  scheduleSaveConversations();
+
+  await sendMetaTextSmart(
+    phone,
+    `Perfeito. Para aplicar a condição com entrada de ${formatCurrencyBR(allowedValue)}, me envie o comprovante da entrada (imagem ou PDF).`
+  );
+}
+
+function applyEntryDiscountIfAllowed(data, convo) {
+  if (!convo?.entryProofReceived) return data;
+  const entry = Number(convo?.requestedEntryValue || 0);
+  const condition = getEntryConditionByAmount(entry);
+  if (!condition) return data;
+
+  return {
+    ...data,
+    quantidadeParcelas: condition.remainingInstallments,
+    duracaoCurso: condition.remainingInstallments,
+  };
+}
+
+async function handleEntryProofMedia(phone, message) {
+  const convo = getConversation(phone);
+  if (!convo.awaitingEntryProof) return false;
+
+  const type = String(message?.type || "");
+  if (!["image", "document"].includes(type)) return false;
+
+  convo.awaitingEntryProof = false;
+  convo.entryProofReceived = true;
+  convo.updatedAt = nowTs();
+  scheduleSaveConversations();
+
+  const condition = getEntryConditionByAmount(convo.requestedEntryValue);
+  if (condition) {
+    await sendMetaTextSmart(
+      phone,
+      `Comprovante recebido ✅\n\nPerfeito, vou aplicar a condição de entrada e seguir com ${condition.remainingInstallments}x no boleto.`
+    );
+  } else {
+    await sendMetaTextSmart(phone, "Comprovante recebido ✅");
+  }
+
+  return true;
 }
 
   function detectReplyStageFromText(text, hasCourse) {
@@ -2189,8 +2535,18 @@ async function sendPaymentButtons(phone) {
   - Se já chegou no ponto de matrícula, vá para a próxima etapa com clareza.
   - Sempre explique o curso completo com benefícios antes de falar valores.
   - Só apresente valores após a pessoa confirmar entendimento (ex.: "entendi", "sim", "pode passar valores").
-  - Se houver objeção de preço, use negociação com entrada para reduzir parcelas.
+  - Se houver objeção de preço ("tá caro", "muito caro", "não tenho dinheiro", "parcela alta"), responda em 3 passos:
+    1) valide a objeção com empatia
+    2) reforce valor prático do curso para empregabilidade
+    3) ofereça condição alternativa
+  - Condição de negociação oficial:
+    - entrada de R$100 reduz 2 parcelas
+    - entrada de R$50 reduz 1 parcela
+    - o boleto só pode ser alterado após envio do comprovante da entrada
+  - Quando detectar sinais de fechamento ("acho que vou fazer", "gostei", "parece bom", "quero esse", "vou fazer", "curti", "legal gostei", "acho que vou entrar"), conduza diretamente para matrícula solicitando nome, curso e pagamento.
+  - Se a pessoa trouxer objetivo profissional e não souber o curso, recomende cursos com base no catálogo.
   - Quando a pessoa perguntar sobre ganhos, use referência salarial da área para reforçar valor.
+  - Sempre que falar de valores, inclua uma frase de urgência suave: "As condições atuais são promocionais para novas matrículas 😊".
 
   SOBRE OS CURSOS:
   - online
@@ -2263,6 +2619,7 @@ function fallbackSalesReply(phone, userText) {
   const intent = detectIntent(userText);
   const entryOfferValue = extractEntryOfferValue(userText);
   const courseExplained = Boolean(convo.salesLead?.courseExplained);
+  const recommendation = recommendCoursesByGoal(userText);
 
     if (looksLikeAskingAllCourses(userText)) {
       return buildAllCoursesMessage();
@@ -2293,6 +2650,10 @@ function fallbackSalesReply(phone, userText) {
     return buildCourseDeepDiveMessage(course);
   }
 
+  if (!course && recommendation) {
+    return recommendation.message;
+  }
+
     if (looksLikeObjectionNoTime(userText)) {
       return (
         "Entendo vocÃª ðŸ˜Š\n\n" +
@@ -2302,14 +2663,8 @@ function fallbackSalesReply(phone, userText) {
       );
     }
 
-    if (looksLikeObjectionExpensive(userText)) {
-      return (
-        "Eu entendo ðŸ˜Š\n\n" +
-        "Mas esse valor não é mensalidade, tá?\n" +
-        "Ã‰ referente ao material didÃ¡tico digital e ao acesso Ã  plataforma.\n\n" +
-        `${buildBoletoCommercialBlock()}\n\n` +
-        "Qual forma ficaria mais leve para você?"
-      );
+    if (detectPriceObjection(userText) || looksLikeObjectionExpensive(userText)) {
+      return buildNegotiationReply(entryOfferValue, course);
     }
 
     if (looksLikeThinking(userText)) {
@@ -2321,7 +2676,7 @@ function fallbackSalesReply(phone, userText) {
       );
     }
 
-    if (looksLikeStrongEnrollmentIntent(userText) || looksLikeCloseDeal(userText)) {
+    if (detectCloseMoment(userText) || looksLikeStrongEnrollmentIntent(userText) || looksLikeCloseDeal(userText)) {
       return buildWarmCloseMessage(course);
     }
 
@@ -2473,6 +2828,7 @@ function fallbackSalesReply(phone, userText) {
   if (!OPENAI_ENABLED || !OPENAI_API_KEY) return false;
   if (!cleanText) return false;
   if (looksLikeSalaryQuestion(cleanText)) return false;
+  if (detectPriceObjection(cleanText)) return false;
   if (looksLikeNegotiatingDiscount(cleanText)) return false;
     if (extractEntryOfferValue(cleanText) > 0) return false;
     if (looksLikeHello(cleanText)) return false;
@@ -3341,18 +3697,23 @@ async function generateEnrollmentBoleto(dados) {
   function buildCreateZeroResume(data) {
     return [
       "Confira os dados para criar o carnê:",
-      `Nome: ${data.nomeAluno}`,
+      `Nome: ${data.nomeAluno || "Não informado"}`,
       `CPF: ${maskCpf(data.cpf)}`,
-      `Telefone: ${data.telefoneCelular}`,
-      `E-mail: ${data.email}`,
-      `Curso: ${data.nomeCurso}`,
+      `Telefone: ${data.telefoneCelular || "Não informado"}`,
+      `E-mail: ${data.email || "Não informado"}`,
+      `Curso: ${data.nomeCurso || "Não informado"}`,
       `Valor da parcela: ${formatCurrencyBR(data.valorParcela)}`,
       `Quantidade de parcelas: ${data.quantidadeParcelas}`,
       `Primeiro vencimento: ${formatDateBR(data.vencimento)}`,
+      data.lockCommercialValues
+        ? "Obs.: valores comerciais seguem a condição oficial e só mudam com entrada + comprovante."
+        : "",
       "",
       "Se estiver tudo certo, responda *CONFIRMAR*.",
       "Se quiser cancelar, responda *CANCELAR*.",
-    ].join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   function getCreateZeroData(phone) {
@@ -3363,10 +3724,43 @@ async function generateEnrollmentBoleto(dados) {
     return convo.pendingCreateZero;
   }
 
+  function fillCreateZeroDefaults(data = {}) {
+    data.genero = data.genero || DEFAULT_GENERO;
+    data.cep = data.cep || DEFAULT_CEP;
+    data.logradouro = data.logradouro || DEFAULT_LOGRADOURO;
+    data.numero = data.numero || DEFAULT_NUMERO;
+    data.bairro = data.bairro || DEFAULT_BAIRRO;
+    data.localidade = data.localidade || DEFAULT_LOCALIDADE;
+    data.uf = data.uf || DEFAULT_UF;
+    data.dataNascimento = data.dataNascimento || "1990-01-01";
+    data.valorParcela = Number(data.valorParcela || getBoletoInstallmentValue());
+    data.quantidadeParcelas = Number(data.quantidadeParcelas || BOLETO_INSTALLMENTS);
+    data.duracaoCurso = Number(data.duracaoCurso || data.quantidadeParcelas || BOLETO_INSTALLMENTS);
+    if (!isValidYMD(data.vencimento)) {
+      data.vencimento = formatDateToYYYYMMDD(nowTs() + FIRST_DUE_IN_DAYS * 24 * 60 * 60 * 1000);
+    }
+    data.descricaoParcela = data.descricaoParcela || `Mensalidade ${data.nomeCurso || "Curso"}`;
+    return data;
+  }
+
+  async function moveCreateZeroToConfirmation(phone, addMessage = "") {
+    const convo = getConversation(phone);
+    const data = getCreateZeroData(phone);
+    fillCreateZeroDefaults(data);
+
+    convo.step = "create_zero_confirmacao";
+    convo.updatedAt = nowTs();
+    scheduleSaveConversations();
+
+    const previewData = applyEntryDiscountIfAllowed({ ...data }, convo);
+    const prefix = addMessage ? `${addMessage}\n\n` : "";
+    await sendMetaTextSmart(phone, `${prefix}${buildCreateZeroResume(previewData)}`);
+  }
+
   async function startCreateZeroFlow(phone) {
     const convo = getConversation(phone);
     convo.step = "create_zero_nome";
-    convo.pendingCreateZero = {};
+    convo.pendingCreateZero = { lockCommercialValues: true };
     scheduleSaveConversations();
 
     await sendMetaTextSmart(
@@ -3388,6 +3782,7 @@ async function generateEnrollmentBoleto(dados) {
       valorParcela: getBoletoInstallmentValue(),
       quantidadeParcelas: BOLETO_INSTALLMENTS,
       duracaoCurso: BOLETO_INSTALLMENTS,
+      lockCommercialValues: true,
       genero: DEFAULT_GENERO,
       cep: DEFAULT_CEP,
       logradouro: DEFAULT_LOGRADOURO,
@@ -3396,10 +3791,12 @@ async function generateEnrollmentBoleto(dados) {
       localidade: DEFAULT_LOCALIDADE,
       uf: DEFAULT_UF,
       dataNascimento: "1990-01-01",
+      vencimento: formatDateToYYYYMMDD(nowTs() + FIRST_DUE_IN_DAYS * 24 * 60 * 60 * 1000),
     };
 
     convo.step = "create_zero_cpf";
     scheduleSaveConversations();
+    syncLeadProfileFromConversation(phone);
 
     let msg =
       `Perfeito ðŸ˜Š\n\nVamos seguir com a nova matrÃ­cula no boleto para o curso de ${lead.course || "seu curso"}.\n\n`;
@@ -3450,6 +3847,31 @@ async function generateEnrollmentBoleto(dados) {
       }
 
       data.cpf = cpf;
+      if (data.lockCommercialValues) {
+        const currentPhone = onlyDigits(data.telefoneCelular || phone);
+        data.telefoneCelular = currentPhone;
+
+        if (currentPhone.length < 10) {
+          convo.step = "create_zero_telefone";
+          scheduleSaveConversations();
+          await sendMetaTextSmart(phone, "Agora me envie o *telefone celular do aluno* com DDD.");
+          return true;
+        }
+
+        if (!String(data.nomeCurso || "").trim()) {
+          convo.step = "create_zero_curso";
+          scheduleSaveConversations();
+          await sendMetaTextSmart(phone, "Agora me envie o *nome do curso* para finalizar seu boleto.");
+          return true;
+        }
+
+        await moveCreateZeroToConfirmation(
+          phone,
+          "Perfeito 😊\n\nJá tenho os dados necessários para gerar seu boleto."
+        );
+        return true;
+      }
+
       convo.step = "create_zero_telefone";
       scheduleSaveConversations();
       await sendMetaTextSmart(phone, "Agora me envie o *telefone celular do aluno* com DDD.");
@@ -3464,6 +3886,19 @@ async function generateEnrollmentBoleto(dados) {
       }
 
       data.telefoneCelular = tel;
+
+      if (data.lockCommercialValues) {
+        if (!String(data.nomeCurso || "").trim()) {
+          convo.step = "create_zero_curso";
+          scheduleSaveConversations();
+          await sendMetaTextSmart(phone, "Agora me envie o *nome do curso* para finalizar seu boleto.");
+          return true;
+        }
+
+        await moveCreateZeroToConfirmation(phone, "Perfeito 😊\n\nCom esse telefone já consigo seguir.");
+        return true;
+      }
+
       convo.step = "create_zero_email";
       scheduleSaveConversations();
       await sendMetaTextSmart(phone, "Agora me envie o *e-mail do aluno*.");
@@ -3472,6 +3907,19 @@ async function generateEnrollmentBoleto(dados) {
 
     if (convo.step === "create_zero_email") {
       data.email = clean;
+
+      if (data.lockCommercialValues) {
+        if (!String(data.nomeCurso || "").trim()) {
+          convo.step = "create_zero_curso";
+          scheduleSaveConversations();
+          await sendMetaTextSmart(phone, "Agora me envie o *nome do curso* para finalizar seu boleto.");
+          return true;
+        }
+
+        await moveCreateZeroToConfirmation(phone);
+        return true;
+      }
+
       convo.step = "create_zero_curso";
       scheduleSaveConversations();
       await sendMetaTextSmart(phone, "Agora me envie o *nome do curso*.");
@@ -3480,6 +3928,12 @@ async function generateEnrollmentBoleto(dados) {
 
     if (convo.step === "create_zero_curso") {
       data.nomeCurso = clean;
+
+      if (data.lockCommercialValues) {
+        await moveCreateZeroToConfirmation(phone);
+        return true;
+      }
+
       convo.step = "create_zero_valor";
       scheduleSaveConversations();
       await sendMetaTextSmart(phone, "Agora me envie o *valor da parcela*.\nExemplo: 99,90");
@@ -3487,6 +3941,15 @@ async function generateEnrollmentBoleto(dados) {
     }
 
     if (convo.step === "create_zero_valor") {
+      if (data.lockCommercialValues) {
+        await sendMetaTextSmart(
+          phone,
+          "Para nova matrícula, o valor do boleto segue a condição oficial e só muda após entrada + comprovante."
+        );
+        await moveCreateZeroToConfirmation(phone);
+        return true;
+      }
+
       const valor = Number(String(clean).replace(",", "."));
       if (!valor || valor <= 0) {
         await sendMetaTextSmart(phone, "Valor inválido. Envie algo como *99,90*.");
@@ -3501,6 +3964,15 @@ async function generateEnrollmentBoleto(dados) {
     }
 
     if (convo.step === "create_zero_quantidade") {
+      if (data.lockCommercialValues) {
+        await sendMetaTextSmart(
+          phone,
+          "A quantidade de parcelas também segue a condição oficial e só altera após entrada + comprovante."
+        );
+        await moveCreateZeroToConfirmation(phone);
+        return true;
+      }
+
       const qtd = Number(onlyDigits(clean));
       if (!qtd || qtd <= 0) {
         await sendMetaTextSmart(phone, "Quantidade inválida. Envie um número como *12*.");
@@ -3516,25 +3988,19 @@ async function generateEnrollmentBoleto(dados) {
     }
 
     if (convo.step === "create_zero_vencimento") {
+      if (data.lockCommercialValues) {
+        await moveCreateZeroToConfirmation(phone);
+        return true;
+      }
+
       if (!isValidYMD(clean)) {
         await sendMetaTextSmart(phone, "Data inválida. Envie no formato *AAAA-MM-DD*.\nExemplo: 2026-03-25");
         return true;
       }
 
       data.vencimento = clean;
-      data.genero = DEFAULT_GENERO;
-      data.cep = DEFAULT_CEP;
-      data.logradouro = DEFAULT_LOGRADOURO;
-      data.numero = DEFAULT_NUMERO;
-      data.bairro = DEFAULT_BAIRRO;
-      data.localidade = DEFAULT_LOCALIDADE;
-      data.uf = DEFAULT_UF;
-      data.dataNascimento = "1990-01-01";
-      data.descricaoParcela = `Mensalidade ${data.nomeCurso}`;
-
-      convo.step = "create_zero_confirmacao";
-      scheduleSaveConversations();
-      await sendMetaTextSmart(phone, buildCreateZeroResume(data));
+      fillCreateZeroDefaults(data);
+      await moveCreateZeroToConfirmation(phone);
       return true;
     }
 
@@ -3544,12 +4010,23 @@ async function generateEnrollmentBoleto(dados) {
         return true;
       }
 
+      fillCreateZeroDefaults(data);
+      let finalData = applyEntryDiscountIfAllowed({ ...data }, convo);
+      if (data.lockCommercialValues && !convo.entryProofReceived) {
+        finalData = {
+          ...finalData,
+          valorParcela: getBoletoInstallmentValue(),
+          quantidadeParcelas: BOLETO_INSTALLMENTS,
+          duracaoCurso: BOLETO_INSTALLMENTS,
+        };
+      }
+
       convo.step = "create_zero_processing";
       scheduleSaveConversations();
       await sendMetaTextSmart(phone, "Estou finalizando seu boleto, um momento...");
 
       try {
-        const result = await generateEnrollmentBoleto(data);
+        const result = await generateEnrollmentBoleto(finalData);
 
         const lines = [];
         lines.push("CarnÃª criado com sucesso âœ…");
@@ -3766,6 +4243,26 @@ async function handleContextualShortReply(phone, text) {
     return false;
   }
 
+async function startBoletoEnrollmentFlow(phone) {
+  const convo = getConversation(phone);
+  const lead = convo.salesLead || {};
+  lead.paymentMethod = "Boleto";
+  lead.stage = "collecting_enrollment";
+  convo.updatedAt = nowTs();
+  scheduleSaveConversations();
+  syncLeadProfileFromConversation(phone);
+
+  if (leadHasMinimumDataForCreateZero(lead)) {
+    await startCreateZeroFromSalesLead(phone);
+    return;
+  }
+
+  await sendMetaTextSmart(
+    phone,
+    "Perfeito. Como você escolheu *boleto*, agora vou solicitar seus dados para já gerar seu boleto.\n\nMe envie seu *nome completo*."
+  );
+}
+
   async function tryCollectEnrollmentData(phone, text) {
     const convo = getConversation(phone);
     const lead = convo.salesLead;
@@ -3802,13 +4299,14 @@ async function handleContextualShortReply(phone, text) {
 
     if (lead.name && lead.course && lead.paymentMethod) {
       if (lead.paymentMethod === "Boleto") {
-        await askBoletoIntent(phone);
+        await startCreateZeroFromSalesLead(phone);
         return true;
       }
 
       lead.stage = "completed";
       lead.askedEnrollment = true;
       scheduleSaveConversations();
+      syncLeadProfileFromConversation(phone);
 
       const finalMessage =
         "Perfeito ðŸ˜Š\n\n" +
@@ -3875,6 +4373,7 @@ async function handleContextualShortReply(phone, text) {
     const digits = onlyDigits(cleanText);
     const convo = getConversation(phone);
     const normalizedUserText = normalizeText(cleanText);
+    const closeMomentDetected = detectCloseMoment(cleanText);
 
     if (
       normalizedUserText &&
@@ -3910,16 +4409,42 @@ async function handleContextualShortReply(phone, text) {
     }
 
     if (looksLikeHello(cleanText) && convo.step === "awaiting_entry_direction") {
+      const profile = getLeadProfile(phone);
+      const shouldSendWelcomeBack =
+        profile &&
+        (profile.name || profile.course_interest) &&
+        nowTs() - Number(convo.lastLeadWelcomeAt || 0) > 1000 * 60 * 60 * 12;
+
+      if (shouldSendWelcomeBack) {
+        convo.lastLeadWelcomeAt = nowTs();
+        convo.updatedAt = nowTs();
+        scheduleSaveConversations();
+        await sendMetaTextSmart(phone, buildReturningLeadWelcome(profile));
+        await delay(180);
+      }
+
       await sendMainMenu(phone);
       return;
     }
 
     if (convo.step === "awaiting_entry_direction") {
+      if (closeMomentDetected) {
+        convo.entryDirection = "new_enrollment";
+        convo.step = "idle";
+        convo.salesLead.stage = "collecting_enrollment";
+        scheduleSaveConversations();
+        syncLeadProfileFromConversation(phone);
+        await sendMetaTextSmart(phone, buildWarmCloseMessage(convo.salesLead.course || ""));
+        setLastSalesPromptType(phone, "collecting_enrollment");
+        return;
+      }
+
       if (looksLikeNewEnrollmentAnswer(cleanText)) {
         convo.entryDirection = "new_enrollment";
         convo.step = "idle";
         convo.salesLead.stage = "discovering";
         scheduleSaveConversations();
+        syncLeadProfileFromConversation(phone);
 
         await sendMetaTextSmart(
           phone,
@@ -3936,6 +4461,7 @@ async function handleContextualShortReply(phone, text) {
         convo.salesLead.course = courseAtEntry;
         convo.salesLead.courseExplained = false;
         scheduleSaveConversations();
+        syncLeadProfileFromConversation(phone);
 
         if (shouldUseAI(cleanText, convo)) {
           try {
@@ -3959,6 +4485,7 @@ async function handleContextualShortReply(phone, text) {
         convo.entryDirection = "existing_student";
         convo.step = "awaiting_existing_student_need";
         scheduleSaveConversations();
+        syncLeadProfileFromConversation(phone);
 
         await sendMetaTextSmart(phone, buildExistingStudentNeedMessage());
         return;
@@ -3968,6 +4495,7 @@ async function handleContextualShortReply(phone, text) {
         convo.entryDirection = "course_discovery";
         convo.step = "idle";
         scheduleSaveConversations();
+        syncLeadProfileFromConversation(phone);
 
         await sendMetaTextSmart(phone, buildAllCoursesMessage());
         await delay(250);
@@ -4058,9 +4586,7 @@ async function handleContextualShortReply(phone, text) {
       convo.salesLead?.stage === "collecting_enrollment" &&
       looksLikeEnrollmentBoletoChoice(cleanText)
     ) {
-      convo.salesLead.paymentMethod = "Boleto";
-      scheduleSaveConversations();
-      await askBoletoIntent(phone);
+      await startBoletoEnrollmentFlow(phone);
       return;
     }
 
@@ -4103,8 +4629,14 @@ async function handleContextualShortReply(phone, text) {
     }
 
     const entryOfferValue = extractEntryOfferValue(cleanText);
-    if (entryOfferValue > 0 || looksLikeNegotiatingDiscount(cleanText)) {
-      await sendMetaTextSmart(phone, buildNegotiationReply(entryOfferValue, convo.salesLead?.course || ""));
+    if (entryOfferValue > 0) {
+      await startEntryProofFlow(phone, entryOfferValue);
+      setLastSalesPromptType(phone, "awaiting_entry_proof");
+      return;
+    }
+
+    if (looksLikeNegotiatingDiscount(cleanText)) {
+      await sendMetaTextSmart(phone, buildNegotiationReply(0, convo.salesLead?.course || ""));
       setLastSalesPromptType(phone, "negotiation_discount");
       return;
     }
@@ -4115,6 +4647,11 @@ async function handleContextualShortReply(phone, text) {
     }
 
     if (looksLikeExistingBoletoRequest(cleanText)) {
+      if (convo.entryDirection === "new_enrollment" || convo.entryDirection === "course_discovery") {
+        await startBoletoEnrollmentFlow(phone);
+        return;
+      }
+
       convo.step = "awaiting_cpf";
       convo.pendingBoleto = null;
       scheduleSaveConversations();
@@ -4137,12 +4674,36 @@ async function handleContextualShortReply(phone, text) {
       return;
     }
 
+    if (
+      convo.entryDirection !== "existing_student" &&
+      !convo.salesLead?.course &&
+      convo.salesLead?.stage !== "collecting_enrollment"
+    ) {
+      const recommendation = recommendCoursesByGoal(cleanText);
+      if (recommendation) {
+        convo.salesLead.objective = recommendation.goalLabel;
+        convo.updatedAt = nowTs();
+        scheduleSaveConversations();
+        syncLeadProfileFromConversation(phone);
+        await sendMetaTextSmart(phone, recommendation.message);
+        setLastSalesPromptType(phone, "goal_recommendation");
+        return;
+      }
+    }
+
+    if (detectPriceObjection(cleanText)) {
+      await sendMetaTextSmart(phone, buildNegotiationReply(extractEntryOfferValue(cleanText), convo.salesLead?.course || ""));
+      setLastSalesPromptType(phone, "price_objection_negotiation");
+      return;
+    }
+
     const preDetectedCourse = detectCourseMention(cleanText);
     const preDetectedIntent = detectIntent(cleanText);
 
     if (
       convo.entryDirection !== "existing_student" &&
       convo.salesLead?.stage !== "collecting_enrollment" &&
+      !closeMomentDetected &&
       !preDetectedCourse &&
       !["price", "benefits", "enroll", "boleto"].includes(preDetectedIntent) &&
       !looksLikeAskingAllCourses(cleanText) &&
@@ -4160,7 +4721,7 @@ async function handleContextualShortReply(phone, text) {
       }
     }
 
-    if (looksLikeStrongEnrollmentIntent(cleanText) || looksLikeCloseDeal(cleanText)) {
+    if (closeMomentDetected || looksLikeStrongEnrollmentIntent(cleanText) || looksLikeCloseDeal(cleanText)) {
       if (convo.salesLead?.course && !convo.salesLead?.courseExplained) {
         await sendMetaTextSmart(
           phone,
@@ -4177,6 +4738,7 @@ async function handleContextualShortReply(phone, text) {
 
       convo.salesLead.stage = "collecting_enrollment";
       scheduleSaveConversations();
+      syncLeadProfileFromConversation(phone);
       await sendMetaTextSmart(phone, buildWarmCloseMessage(convo.salesLead.course || ""));
       setLastSalesPromptType(phone, "collecting_enrollment");
       return;
@@ -4190,9 +4752,7 @@ async function handleContextualShortReply(phone, text) {
       convo.salesLead?.stage === "collecting_enrollment" &&
       extractPaymentMethod(cleanText) === "Boleto"
     ) {
-      convo.salesLead.paymentMethod = "Boleto";
-      scheduleSaveConversations();
-      await askBoletoIntent(phone);
+      await startBoletoEnrollmentFlow(phone);
       return;
     }
 
@@ -4288,9 +4848,13 @@ async function handleContextualShortReply(phone, text) {
           if (messageId) processedMetaMessages.set(messageId, nowTs());
 
           const from = normalizePhone(message?.from || "");
-          const text = extractIncomingText(message);
+          if (!from) continue;
 
-          if (!from || !text) continue;
+          const handledEntryProof = await handleEntryProofMedia(from, message);
+          if (handledEntryProof) continue;
+
+          const text = extractIncomingText(message);
+          if (!text) continue;
           await processUserMessage(from, text);
         }
       }
@@ -4386,6 +4950,7 @@ async function handleContextualShortReply(phone, text) {
         OPENAI_TRUNCATION,
         OPENAI_RETRY_COUNT,
         CONVERSATIONS_FILE,
+        LEADS_FILE,
         META_SEND_DELAY_MS,
         DUPLICATE_WINDOW_MS,
         AI_HISTORY_LIMIT,
@@ -4424,6 +4989,11 @@ async function handleContextualShortReply(phone, text) {
   app.get("/debug/conversation/:phone", (req, res) => {
     const convo = getConversation(req.params.phone);
     res.json({ ok: true, conversation: convo });
+  });
+
+  app.get("/debug/lead/:phone", (req, res) => {
+    const lead = getLeadProfile(req.params.phone);
+    res.json({ ok: true, lead: lead || null });
   });
 
   app.get("/debug/reset/:phone", (req, res) => {
@@ -4647,6 +5217,7 @@ async function handleContextualShortReply(phone, text) {
     }
   });
 
+  loadLeadProfiles();
   loadConversations();
 
   app.listen(PORT, () => {
