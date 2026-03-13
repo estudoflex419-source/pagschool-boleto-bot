@@ -1,4 +1,4 @@
-  require("dotenv").config();
+   require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -83,9 +83,28 @@
     return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
   }
 
-  function isCpf(value) {
-    return onlyDigits(value).length === 11;
-  }
+function isCpf(value) {
+  return onlyDigits(value).length === 11;
+}
+
+function isValidCpf(value) {
+  const cpf = onlyDigits(value);
+  if (cpf.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(cpf)) return false;
+
+  const calcDigit = (base, factor) => {
+    let total = 0;
+    for (let i = 0; i < base.length; i++) {
+      total += Number(base[i]) * (factor - i);
+    }
+    const mod = total % 11;
+    return mod < 2 ? 0 : 11 - mod;
+  };
+
+  const d1 = calcDigit(cpf.slice(0, 9), 10);
+  const d2 = calcDigit(cpf.slice(0, 10), 11);
+  return d1 === Number(cpf[9]) && d2 === Number(cpf[10]);
+}
 
   function formatDateBR(value) {
     if (!value) return "";
@@ -426,20 +445,30 @@ function buildSmartBoletoIntentMessage() {
 
 function buildEntryDirectionMessage() {
   return (
-    "Olá 😊\n\n" +
-    "Para eu te atender melhor, escolha uma opção:\n\n" +
-    "⬢ Nova matrícula\n" +
-    "⬢ Já sou aluno\n" +
-    "⬢ Ver cursos"
+    "Olá, seja bem-vindo(a) à Estudo Flex.\n\n" +
+    "Para eu te ajudar melhor, me diga uma opção:\n\n" +
+    "⬢ Já sou aluno(a)\n" +
+    "⬢ Quero fazer uma nova inscrição\n" +
+    "⬢ Quero saber mais sobre os cursos"
   );
 }
 
 function buildMenuWelcomeText() {
   return pickRandom([
-    "Olá 😊 Seja bem-vindo(a). Me diz como você quer seguir:",
-    "Oi 😊 Vou te atender por aqui. Escolha uma opção abaixo:",
-    "Olá! 😊 Para eu te direcionar melhor, escolha uma opção:",
+    "Olá, seja bem-vindo(a) à Estudo Flex.",
+    "Oi, é um prazer te atender na Estudo Flex.",
+    "Olá! Vou te atender por aqui da melhor forma.",
   ]);
+}
+
+function buildExistingStudentNeedMessage() {
+  return (
+    "Perfeito. Como você já é aluno(a), me fala o que você precisa:\n\n" +
+    "⬢ Segunda via de boleto\n" +
+    "⬢ Financeiro\n" +
+    "⬢ Informações do curso\n" +
+    "⬢ Suporte"
+  );
 }
 
 function buildHumanGreeting() {
@@ -566,79 +595,41 @@ function buildHumanGreeting() {
     );
   }
 
-  function buildPremiumAllCoursesMessage() {
-    return (
-      "Claro ðŸ˜Š\n\n" +
-      "Hoje trabalhamos com várias opções de cursos online, com acesso à plataforma, materiais digitais, videoaulas, atividades e avaliações.\n\n" +
-      "*Saúde*\n" +
-      "⬢ Agente de Saúde\n" +
-      "⬢ Análises Clínicas\n" +
-      "⬢ Assistente Social\n" +
-      "⬢ Auxiliar de Necropsia\n" +
-      "⬢ Auxiliar Veterinário\n" +
-      "⬢ Cuidador de Idosos\n" +
-      "⬢ Enfermagem Livre\n" +
-      "⬢ Farmácia\n" +
-      "⬢ Instrumentação Cirúrgica\n" +
-      "⬢ Nutrição\n" +
-      "⬢ Odontologia & Saúde Bucal\n" +
-      "⬢ Psicologia\n" +
-      "⬢ Radiologia e Ultrassonografia\n" +
-      "⬢ Recepcionista Hospitalar\n" +
-      "⬢ Socorrista\n\n" +
-      "*Gestão, atendimento e carreira*\n" +
-      "⬢ Administração\n" +
-      "⬢ Concurso Público\n" +
-      "⬢ Contabilidade\n" +
-      "⬢ Gestão & Logística\n" +
-      "⬢ Jovem Aprendiz\n" +
-      "⬢ Libras\n" +
-      "⬢ Operador de Caixa\n" +
-      "⬢ Pedagogia\n" +
-      "⬢ Portaria\n" +
-      "⬢ Preparatório Militar\n" +
-      "⬢ Recursos Humanos\n\n" +
-      "*Beleza e imagem*\n" +
-      "⬢ Barbeiro\n" +
-      "⬢ Beleza e Estética\n" +
-      "⬢ Cabeleireiro(a)\n" +
-      "⬢ Depilação Profissional\n" +
-      "⬢ Designer de Sobrancelhas\n" +
-      "⬢ Designer de Unhas\n" +
-      "⬢ Extensão de Cílios\n" +
-      "⬢ Maquiagem Profissionalizante\n" +
-      "⬢ Mega Hair\n" +
-      "⬢ Micropigmentação Labial\n\n" +
-      "*Tecnologia e digital*\n" +
-      "⬢ CapCut\n" +
-      "⬢ Criação de Games\n" +
-      "⬢ Designer Gráfico\n" +
-      "⬢ Designer Gráfico Canva\n" +
-      "⬢ Designer Gráfico Photoshop\n" +
-      "⬢ Digital Influencer\n" +
-      "⬢ Informática\n" +
-      "⬢ Inglês\n" +
-      "⬢ Inteligência Artificial (ChatGPT)\n" +
-      "⬢ Marketing Digital\n" +
-      "⬢ Robótica\n\n" +
-      "*Indústria, manutenção e operações*\n" +
-      "⬢ Ar Condicionado\n" +
-      "⬢ Auto Elétrica\n" +
-      "⬢ Bombeiro Civil\n" +
-      "⬢ Manutenção de Celulares\n" +
-      "⬢ Mecânica Industrial\n" +
-      "⬢ Mestre de Obras\n" +
-      "⬢ Segurança do Trabalho\n" +
-      "⬢ Soldador\n" +
-      "⬢ Topografia\n" +
-      "⬢ Torneiro Mecânico\n\n" +
-      "*Outras opções*\n" +
-      "⬢ Gastronomia & Confeitaria\n" +
-      "⬢ Massoterapia\n" +
-      "⬢ Óptica\n\n" +
-      "Se você quiser, eu também posso te indicar as opções que mais combinam com o seu objetivo.\n" +
-      "Me diz: qual área chamou mais sua atenção?"
-    );
+function buildPremiumAllCoursesMessage() {
+  const areaOrder = [
+    "Saúde",
+    "Gestão e Carreira",
+    "Beleza e Estética",
+    "Tecnologia e Digital",
+    "Indústria e Operações",
+    "Cursos Profissionalizantes",
+  ];
+
+  const grouped = new Map();
+  for (const area of areaOrder) grouped.set(area, []);
+
+  for (const course of COURSE_CATALOG) {
+    const area = course.area || "Cursos Profissionalizantes";
+    if (!grouped.has(area)) grouped.set(area, []);
+    grouped.get(area).push(course.nome);
+  }
+
+  const sections = [];
+  for (const area of areaOrder) {
+    const courses = grouped.get(area) || [];
+    if (!courses.length) continue;
+    sections.push(`*${area}*`);
+    sections.push(...courses.map((name) => `⬢ ${name}`));
+    sections.push("");
+  }
+
+  return (
+    "Claro 😊\n\n" +
+    "Trabalhamos com cursos online, com acesso à plataforma, materiais digitais, videoaulas, atividades e avaliações.\n\n" +
+    sections.join("\n").trim() +
+    "\n\nSe você quiser, eu também posso te indicar o curso mais alinhado ao seu objetivo.\n" +
+    "Você prefere opções na área da saúde, carreira administrativa, tecnologia, beleza ou indústria?"
+  );
   }
 
   /* =========================================================
@@ -666,8 +657,9 @@ function buildHumanGreeting() {
   const OPENAI_MAX_OUTPUT_TOKENS = Number(readEnv("OPENAI_MAX_OUTPUT_TOKENS") || 420);
   const OPENAI_TEMPERATURE = Number(readEnv("OPENAI_TEMPERATURE") || 0.75);
   const OPENAI_STORE = /^(1|true|yes|on|sim)$/i.test(readEnv("OPENAI_STORE") || "false");
-  const OPENAI_TRUNCATION = readEnv("OPENAI_TRUNCATION") || "auto";
-  const OPENAI_RETRY_COUNT = Number(readEnv("OPENAI_RETRY_COUNT") || 2);
+const OPENAI_TRUNCATION = readEnv("OPENAI_TRUNCATION") || "auto";
+const OPENAI_RETRY_COUNT = Number(readEnv("OPENAI_RETRY_COUNT") || 2);
+const START_ONLY_CHATBOT = /^(1|true|yes|on|sim)$/i.test(readEnv("START_ONLY_CHATBOT") || "true");
 
   const CONVERSATIONS_FILE = readEnv("CONVERSATIONS_FILE") || path.join(__dirname, "conversations.json");
 
@@ -770,6 +762,104 @@ function buildHumanGreeting() {
     "Topografia",
     "Torneiro Mecânico",
   ];
+
+function inferCourseArea(courseName) {
+  const c = normalizeForCompare(courseName);
+
+  if (/(saude|enfermagem|farmacia|clinicas|nutricao|odontologia|radiologia|socorrista|veterinario|necropsia|idosos|hospitalar|instrumentacao|psicologia)/.test(c)) {
+    return "Saúde";
+  }
+  if (/(barbeiro|cabeleireiro|sobrancelhas|cilios|depilacao|maquiagem|mega hair|micropigmentacao|beleza)/.test(c)) {
+    return "Beleza e Estética";
+  }
+  if (/(informatica|inteligencia artificial|chatgpt|designer|capcut|games|digital influencer|marketing|robotica|ingles)/.test(c)) {
+    return "Tecnologia e Digital";
+  }
+  if (/(mecanica|ar condicionado|auto eletrica|automacao|mestre de obras|soldador|torneiro|topografia|bombeiro civil|manutencao)/.test(c)) {
+    return "Indústria e Operações";
+  }
+  if (/(administracao|contabilidade|recursos humanos|logistica|gestao|operador de caixa|portaria|jovem aprendiz|concurso|pedagogia|libras|preparatorio)/.test(c)) {
+    return "Gestão e Carreira";
+  }
+  return "Cursos Profissionalizantes";
+}
+
+function inferTargetAudience(area) {
+  if (area === "Saúde") return "Quem busca entrar ou crescer em funções de atendimento e apoio na área da saúde.";
+  if (area === "Beleza e Estética") return "Quem deseja atuar com serviços de beleza, atendimento e construção de clientela.";
+  if (area === "Tecnologia e Digital") return "Quem quer trabalhar com ferramentas digitais, criação e oportunidades online.";
+  if (area === "Indústria e Operações") return "Quem busca qualificação prática para rotinas técnicas e operacionais.";
+  if (area === "Gestão e Carreira") return "Quem quer melhorar currículo e conquistar oportunidades administrativas e de carreira.";
+  return "Público que deseja qualificação prática para o mercado de trabalho.";
+}
+
+function buildCatalogDescription(courseName, area) {
+  return `Formação profissionalizante em ${courseName}, com foco prático, orientação para mercado e desenvolvimento de competências da área de ${area}.`;
+}
+
+function buildCourseCatalog() {
+  // Catálogo interno usado como fonte oficial para respostas da IA e fluxo comercial.
+  return ALL_COURSES.map((courseName) => {
+    const area = inferCourseArea(courseName);
+    return {
+      nome: courseName,
+      descricao: buildCatalogDescription(courseName, area),
+      area,
+      modalidade: "Online",
+      duracao: `${BOLETO_INSTALLMENTS} meses (ritmo flexível)`,
+      certificacao: "Certificado de conclusão",
+      publicoIndicado: inferTargetAudience(area),
+      preco: {
+        boletoTotal: BOLETO_TOTAL,
+        boletoParcelas: BOLETO_INSTALLMENTS,
+        boletoValorParcela: getBoletoInstallmentValue(),
+        pixAVista: PIX_TOTAL,
+      },
+      formasPagamento: ["Pix / à vista", "Cartão", "Boleto"],
+      observacoesComerciais:
+        "Sem mensalidade tradicional. A cobrança é referente ao material didático digital e acesso à plataforma.",
+    };
+  });
+}
+
+const COURSE_CATALOG = buildCourseCatalog();
+
+const COURSE_CATALOG_INDEX = new Map(
+  COURSE_CATALOG.map((item) => [normalizeForCompare(item.nome), item])
+);
+
+function getCatalogCourse(courseName) {
+  const normalized = normalizeForCompare(courseName);
+  if (!normalized) return null;
+
+  if (COURSE_CATALOG_INDEX.has(normalized)) return COURSE_CATALOG_INDEX.get(normalized);
+
+  const byLabel = COURSE_LABEL_MAP[normalized];
+  if (byLabel) {
+    const byLabelNormalized = normalizeForCompare(byLabel);
+    if (COURSE_CATALOG_INDEX.has(byLabelNormalized)) return COURSE_CATALOG_INDEX.get(byLabelNormalized);
+  }
+
+  for (const item of COURSE_CATALOG) {
+    const n = normalizeForCompare(item.nome);
+    if (n.includes(normalized) || normalized.includes(n)) return item;
+  }
+  return null;
+}
+
+function buildCourseCatalogContextForPrompt() {
+  return COURSE_CATALOG.map((item) => {
+    return [
+      `- Curso: ${item.nome}`,
+      `  Área: ${item.area}`,
+      `  Modalidade: ${item.modalidade}`,
+      `  Duração: ${item.duracao}`,
+      `  Certificação: ${item.certificacao}`,
+      `  Público indicado: ${item.publicoIndicado}`,
+      `  Preço referência: boleto ${formatCurrencyBR(item.preco.boletoTotal)} em ${item.preco.boletoParcelas}x de ${formatCurrencyBR(item.preco.boletoValorParcela)}; pix ${formatCurrencyBR(item.preco.pixAVista)}`,
+    ].join("\n");
+  }).join("\n");
+}
 
 const MARKET_SALARY_BY_COURSE = {
   "auxiliar veterinario": {
@@ -1286,7 +1376,7 @@ function detectIntent(text) {
 
 function looksLikeNewEnrollmentAnswer(text) {
   const t = normalizeText(text);
-  return /(nova matricula|nova matrícula|nova_matricula|nova-matricula|quero me matricular|quero fazer matricula|quero fazer matrícula|primeira matricula|primeira matrícula|ainda nao sou aluno|ainda não sou aluno|nao sou aluno|não sou aluno|novo aluno|quero começar|quero comecar)/.test(
+  return /(nova matricula|nova matrícula|nova_matricula|nova-matricula|quero fazer uma nova inscricao|quero fazer uma nova inscrição|quero me matricular|quero fazer matricula|quero fazer matrícula|primeira matricula|primeira matrícula|ainda nao sou aluno|ainda não sou aluno|nao sou aluno|não sou aluno|novo aluno|quero começar|quero comecar)/.test(
     t
   );
 }
@@ -1300,7 +1390,24 @@ function looksLikeExistingStudentAnswer(text) {
 
 function looksLikeViewCoursesAnswer(text) {
   const t = normalizeText(text);
-  return /(ver cursos|ver_cursos|quero ver cursos|mostrar cursos|lista de cursos|todos os cursos)/.test(t);
+  return /(ver cursos|ver_cursos|conhecer cursos|conhecer_cursos|quero saber mais sobre os cursos|conhecer mais sobre os cursos|quero ver cursos|mostrar cursos|lista de cursos|todos os cursos)/.test(
+    t
+  );
+}
+
+function looksLikeExistingStudentFinancialNeed(text) {
+  const t = normalizeText(text);
+  return /(segunda via|2 via|2a via|boleto|financeiro|fatura|mensalidade|parcela|pagamento)/.test(t);
+}
+
+function looksLikeExistingStudentCourseInfoNeed(text) {
+  const t = normalizeText(text);
+  return /(informacoes do curso|informações do curso|curso|conteudo|conteúdo|material|plataforma|acesso|certificado)/.test(t);
+}
+
+function looksLikeExistingStudentSupportNeed(text) {
+  const t = normalizeText(text);
+  return /(suporte|ajuda|atendimento|problema|erro|nao consigo|não consigo|dificuldade)/.test(t);
 }
 
   function looksLikeExistingBoletoRequest(text) {
@@ -1483,6 +1590,8 @@ function looksLikeViewCoursesAnswer(text) {
 
     if (!looksLikeBoletoGeneric(t)) return false;
     if (looksLikeNegotiatingDiscount(t)) return false;
+    if (convo.entryDirection === "new_enrollment" || convo.entryDirection === "course_discovery") return false;
+    if (convo.entryDirection === "existing_student") return false;
     if (String(convo.step || "").startsWith("create_zero_")) return false;
     if (convo.step === "awaiting_cpf") return false;
     if (convo.step === "awaiting_confirmation") return false;
@@ -1673,19 +1782,35 @@ function getCourseBenefits(course = "") {
 }
 
 function buildCourseBenefitsMessage(course = "") {
+  const catalog = getCatalogCourse(course);
   const benefits = getCourseBenefits(course).join("\n");
   return (
     `Benefícios diretos do curso de ${course}:\n` +
+    (catalog
+      ? `⬢ Modalidade: ${catalog.modalidade}\n⬢ Duração: ${catalog.duracao}\n⬢ Certificação: ${catalog.certificacao}\n\n`
+      : "") +
     `${benefits}\n\n` +
     "Se quiser, depois eu te explico também as condições para começar."
   );
 }
 
 function buildCourseDeepDiveMessage(course) {
+  const catalog = getCatalogCourse(course);
   const benefits = getCourseBenefits(course).join("\n");
+  const details = catalog
+    ? [
+        `⬢ Área: ${catalog.area}`,
+        `⬢ Modalidade: ${catalog.modalidade}`,
+        `⬢ Duração: ${catalog.duracao}`,
+        `⬢ Certificação: ${catalog.certificacao}`,
+        `⬢ Público indicado: ${catalog.publicoIndicado}`,
+      ].join("\n")
+    : "";
+
   return (
     `Perfeito 😊\n\n` +
     `O curso de ${course} funciona de forma totalmente online, então você consegue estudar no seu ritmo, sem precisar sair de casa.\n\n` +
+    (details ? `${details}\n\n` : "") +
     `Na plataforma, você tem acesso a videoaulas, materiais digitais, atividades, exercícios e avaliações para ir acompanhando seu desenvolvimento.\n\n` +
     `A plataforma fica disponível 24 horas, o que ajuda muito quem tem rotina corrida. A recomendação é fazer 2 aulas por semana para manter um bom progresso.\n\n` +
     `Benefícios do curso para você:\n${benefits}\n\n` +
@@ -1928,17 +2053,25 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
 
     await sendMetaButtonsSmart(
       phone,
-      buildMenuWelcomeText(),
-      [
-        { id: "nova_matricula", title: "Nova matrícula" },
-        { id: "ja_sou_aluno", title: "Já sou aluno" },
-        { id: "ver_cursos", title: "Ver cursos" },
-      ],
-      buildEntryDirectionMessage()
-    );
-  }
+      buildEntryDirectionMessage(),
+    [
+      { id: "nova_matricula", title: "Nova matrícula" },
+      { id: "ja_sou_aluno", title: "Já sou aluno" },
+      { id: "conhecer_cursos", title: "Conhecer cursos" },
+    ],
+    buildEntryDirectionMessage()
+  );
+}
 
 async function sendCourseInterestButtons(phone) {
+  if (START_ONLY_CHATBOT) {
+    await sendMetaTextSmart(
+      phone,
+      "Se quiser, me responde em texto:\n⬢ Entendi\n⬢ Ver benefícios\n⬢ Quero matrícula"
+    );
+    return;
+  }
+
   await sendMetaButtonsSmart(
     phone,
     "Quando você entender o curso, escolhe uma opção:",
@@ -1951,10 +2084,18 @@ async function sendCourseInterestButtons(phone) {
   );
 }
 
-  async function sendPaymentButtons(phone) {
-    await sendMetaButtonsSmart(
+async function sendPaymentButtons(phone) {
+  if (START_ONLY_CHATBOT) {
+    await sendMetaTextSmart(
       phone,
-      "Me diga qual forma você prefere:",
+      "Me fala em texto qual forma de pagamento você prefere: boleto, cartão ou pix/à vista."
+    );
+    return;
+  }
+
+  await sendMetaButtonsSmart(
+    phone,
+    "Me diga qual forma você prefere:",
       [
         { id: "pay_boleto", title: "Boleto" },
         { id: "pay_cartao", title: "Cartão" },
@@ -2040,6 +2181,8 @@ async function sendCourseInterestButtons(phone) {
   - Use frases naturais, de WhatsApp.
   - Se a pessoa estiver morna ou quente, puxe o fechamento com segurança.
   - Se a pessoa pedir lista de cursos, apresente todos de forma organizada.
+  - Após a triagem inicial, converse em texto livre (estilo humano), evitando formato robótico.
+  - Não dependa de botões para conduzir a conversa após o início.
   - Se a pessoa escolher boleto para matrícula, não misture isso com segunda via.
   - Segunda via é para aluno já existente.
   - Nova matrícula é para criação de boleto/carnê novo.
@@ -2078,6 +2221,14 @@ async function sendCourseInterestButtons(phone) {
 
   REFERÊNCIAS SALARIAIS (use quando fizer sentido comercial):
   ${buildSalaryPromptReferenceText()}
+
+  CATÁLOGO OFICIAL DE CURSOS (fonte única de verdade):
+  ${buildCourseCatalogContextForPrompt()}
+
+  REGRAS DO CATÁLOGO:
+  - Nunca invente curso, duração, certificado, preço ou benefício que não esteja no catálogo.
+  - Se faltar informação no catálogo, diga que vai confirmar e siga sem inventar.
+  - Ao responder dúvidas de curso, use linguagem comercial natural e sempre baseada no catálogo oficial.
 
   DADOS JÁ CONHECIDOS:
   ${knownData || "nenhum dado ainda."}
@@ -2321,8 +2472,6 @@ function fallbackSalesReply(phone, userText) {
 
   if (!OPENAI_ENABLED || !OPENAI_API_KEY) return false;
   if (!cleanText) return false;
-  if (looksLikeAskingBenefits(cleanText)) return false;
-  if (looksLikeCourseUnderstood(cleanText)) return false;
   if (looksLikeSalaryQuestion(cleanText)) return false;
   if (looksLikeNegotiatingDiscount(cleanText)) return false;
     if (extractEntryOfferValue(cleanText) > 0) return false;
@@ -2337,6 +2486,7 @@ function fallbackSalesReply(phone, userText) {
     if (convo.step === "awaiting_cpf") return false;
     if (convo.step === "awaiting_confirmation") return false;
     if (convo.step === "processing") return false;
+    if (convo.step === "awaiting_existing_student_need") return false;
     if (convo.awaitingBoletoIntent) return false;
     if (convo.step === "awaiting_entry_direction") return false;
 
@@ -2965,7 +3115,7 @@ function fallbackSalesReply(phone, userText) {
 
   async function createBoletoDoZero(dados) {
     const cpf = onlyDigits(dados.cpf);
-    if (!isCpf(cpf)) throw new Error("CPF inválido. Envie 11 números.");
+    if (!isValidCpf(cpf)) throw new Error("CPF inválido. Verifique e envie novamente.");
 
     if (!String(dados.nomeAluno || "").trim()) throw new Error("nomeAluno é obrigatório.");
     if (!String(dados.nomeCurso || "").trim()) throw new Error("nomeCurso é obrigatório.");
@@ -3068,6 +3218,21 @@ function fallbackSalesReply(phone, userText) {
     };
   }
 
+async function generateEnrollmentBoleto(dados) {
+  logVerbose("[ENROLLMENT BOLETO] início", {
+    cpf: maskCpf(dados?.cpf),
+    curso: dados?.nomeCurso,
+    telefone: maskPhone(dados?.telefoneCelular),
+  });
+
+  try {
+    return await createBoletoDoZero(dados);
+  } catch (error) {
+    console.error("[ENROLLMENT BOLETO ERROR]", error?.message || error);
+    throw error;
+  }
+}
+
   /* =========================================================
     FLOW - 2a VIA
   ========================================================= */
@@ -3090,8 +3255,8 @@ function fallbackSalesReply(phone, userText) {
     const digits = onlyDigits(cpf);
     const convo = getConversation(phone);
 
-    if (!isCpf(digits)) {
-      await sendMetaText(phone, "O CPF precisa ter 11 números. Me envie novamente só com os números.");
+    if (!isValidCpf(digits)) {
+      await sendMetaText(phone, "O CPF informado parece inválido. Me envie novamente com 11 números.");
       return;
     }
 
@@ -3279,8 +3444,8 @@ function fallbackSalesReply(phone, userText) {
 
     if (convo.step === "create_zero_cpf") {
       const cpf = onlyDigits(clean);
-      if (!isCpf(cpf)) {
-        await sendMetaTextSmart(phone, "CPF inválido. Me envie o CPF com *11 números*.");
+      if (!isValidCpf(cpf)) {
+        await sendMetaTextSmart(phone, "CPF inválido. Me envie um CPF válido com *11 números*.");
         return true;
       }
 
@@ -3381,10 +3546,10 @@ function fallbackSalesReply(phone, userText) {
 
       convo.step = "create_zero_processing";
       scheduleSaveConversations();
-      await sendMetaTextSmart(phone, "Perfeito. Estou criando o aluno, contrato, parcela e boleto no PagSchool...");
+      await sendMetaTextSmart(phone, "Estou finalizando seu boleto, um momento...");
 
       try {
-        const result = await createBoletoDoZero(data);
+        const result = await generateEnrollmentBoleto(data);
 
         const lines = [];
         lines.push("CarnÃª criado com sucesso âœ…");
@@ -3416,7 +3581,10 @@ function fallbackSalesReply(phone, userText) {
       } catch (error) {
         console.error("[CREATE ZERO ERROR]", error?.message || error);
         resetConversation(phone);
-        await sendMetaTextSmart(phone, `Não consegui criar o carnê.\n\nMotivo: ${String(error.message || error)}`);
+        await sendMetaTextSmart(
+          phone,
+          "Tive uma instabilidade ao gerar seu boleto, mas posso continuar seu atendimento e tentar novamente."
+        );
         return true;
       }
     }
@@ -3429,6 +3597,11 @@ function fallbackSalesReply(phone, userText) {
     convo.awaitingBoletoIntent = true;
     convo.step = "awaiting_boleto_intent";
     scheduleSaveConversations();
+
+    if (START_ONLY_CHATBOT) {
+      await sendMetaTextSmart(phone, buildSmartBoletoIntentMessage());
+      return;
+    }
 
     await sendMetaButtonsSmart(
       phone,
@@ -3498,6 +3671,55 @@ function fallbackSalesReply(phone, userText) {
     );
     return true;
   }
+
+async function handleExistingStudentNeed(phone, text) {
+  const convo = getConversation(phone);
+  const clean = String(text || "").trim();
+
+  // Mantém o fluxo de aluno existente separado do fluxo comercial de nova matrícula.
+  if (convo.step !== "awaiting_existing_student_need") return false;
+
+  if (looksLikeCancel(clean)) {
+    convo.step = "idle";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Tudo bem. Se quiser, posso continuar te ajudando por aqui.");
+    return true;
+  }
+
+  if (looksLikeExistingStudentFinancialNeed(clean)) {
+    convo.step = "awaiting_cpf";
+    convo.pendingBoleto = null;
+    scheduleSaveConversations();
+    await sendMetaTextSmart(
+      phone,
+      "Perfeito. Para localizar seu financeiro, me envie o *CPF do aluno* com 11 números."
+    );
+    return true;
+  }
+
+  if (looksLikeExistingStudentCourseInfoNeed(clean)) {
+    convo.step = "existing_student_course_info";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(
+      phone,
+      "Perfeito. Me fala sua dúvida sobre o curso que eu te explico agora."
+    );
+    return true;
+  }
+
+  if (looksLikeExistingStudentSupportNeed(clean)) {
+    convo.step = "existing_student_support";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(
+      phone,
+      "Claro. Me descreve seu problema com o máximo de detalhes para eu te orientar da forma mais rápida."
+    );
+    return true;
+  }
+
+  await sendMetaTextSmart(phone, buildExistingStudentNeedMessage());
+  return true;
+}
 
   /* =========================================================
     SALES HANDLERS
@@ -3701,7 +3923,7 @@ async function handleContextualShortReply(phone, text) {
 
         await sendMetaTextSmart(
           phone,
-          "Perfeito ðŸ˜Š\n\nVou te atender como *nova matrÃ­cula*.\n\nMe fala qual curso ou Ã¡rea vocÃª tem interesse."
+          "Perfeito 😊\n\nVamos fazer sua nova inscrição.\n\nMe fala qual curso você quer ou, se preferir, eu te ajudo a escolher."
         );
         return;
       }
@@ -3715,37 +3937,93 @@ async function handleContextualShortReply(phone, text) {
         convo.salesLead.courseExplained = false;
         scheduleSaveConversations();
 
+        if (shouldUseAI(cleanText, convo)) {
+          try {
+            const aiReply = await generateOpenAIReply(phone, cleanText);
+            await sendMetaTextSmart(phone, aiReply);
+            const detectedStage = detectReplyStageFromText(aiReply, true);
+            setLastSalesPromptType(phone, detectedStage);
+            return;
+          } catch (_error) {
+            // segue no fallback abaixo
+          }
+        }
+
         await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(courseAtEntry));
         markCourseAsExplained(phone, courseAtEntry);
-        await delay(300);
-        await sendCourseInterestButtons(phone);
         setLastSalesPromptType(phone, "check_understanding_before_price");
         return;
       }
 
       if (looksLikeExistingStudentAnswer(cleanText)) {
         convo.entryDirection = "existing_student";
-        convo.step = "awaiting_cpf";
+        convo.step = "awaiting_existing_student_need";
         scheduleSaveConversations();
 
-        await sendMetaTextSmart(
-          phone,
-          "Perfeito ðŸ˜Š\n\nComo vocÃª jÃ¡ Ã© nosso aluno, me envie o *CPF do aluno* para eu localizar o boleto."
-        );
+        await sendMetaTextSmart(phone, buildExistingStudentNeedMessage());
         return;
       }
 
       if (looksLikeViewCoursesAnswer(cleanText) || looksLikeAskingAllCourses(cleanText)) {
-        convo.entryDirection = "new_enrollment";
+        convo.entryDirection = "course_discovery";
         convo.step = "idle";
         scheduleSaveConversations();
 
         await sendMetaTextSmart(phone, buildAllCoursesMessage());
+        await delay(250);
+        await sendMetaTextSmart(
+          phone,
+          "Se quiser, eu já te explico melhor qualquer curso e te mostro a melhor opção para o seu objetivo."
+        );
         setLastSalesPromptType(phone, "list_all_courses");
         return;
       }
 
       await sendMainMenu(phone);
+      return;
+    }
+
+    if (await handleExistingStudentNeed(phone, cleanText)) {
+      return;
+    }
+
+    if (convo.step === "existing_student_course_info") {
+      if (looksLikeExistingStudentFinancialNeed(cleanText)) {
+        convo.step = "awaiting_cpf";
+        scheduleSaveConversations();
+        await sendMetaTextSmart(phone, "Perfeito. Me envie o *CPF do aluno* para eu verificar seu financeiro.");
+        return;
+      }
+
+      if (shouldUseAI(cleanText, convo)) {
+        try {
+          const aiReply = await generateOpenAIReply(phone, cleanText);
+          await sendMetaTextSmart(phone, aiReply);
+          return;
+        } catch (error) {
+          console.error("[OPENAI EXISTING COURSE INFO ERROR]", error?.message || error);
+        }
+      }
+
+      await sendMetaTextSmart(
+        phone,
+        "Posso te ajudar com conteúdo, acesso, certificado e funcionamento do curso. Me diz sua dúvida de forma objetiva."
+      );
+      return;
+    }
+
+    if (convo.step === "existing_student_support") {
+      if (looksLikeExistingStudentFinancialNeed(cleanText)) {
+        convo.step = "awaiting_cpf";
+        scheduleSaveConversations();
+        await sendMetaTextSmart(phone, "Perfeito. Me envie o *CPF do aluno* para consultar o financeiro.");
+        return;
+      }
+
+      await sendMetaTextSmart(
+        phone,
+        "Entendi. Estou registrando seu atendimento de suporte. Se quiser, também posso te ajudar agora com segunda via de boleto ou informações do curso."
+      );
       return;
     }
 
@@ -3859,6 +4137,29 @@ async function handleContextualShortReply(phone, text) {
       return;
     }
 
+    const preDetectedCourse = detectCourseMention(cleanText);
+    const preDetectedIntent = detectIntent(cleanText);
+
+    if (
+      convo.entryDirection !== "existing_student" &&
+      convo.salesLead?.stage !== "collecting_enrollment" &&
+      !preDetectedCourse &&
+      !["price", "benefits", "enroll", "boleto"].includes(preDetectedIntent) &&
+      !looksLikeAskingAllCourses(cleanText) &&
+      shouldUseAI(cleanText, convo)
+    ) {
+      try {
+        const aiReply = await generateOpenAIReply(phone, cleanText);
+        await sendMetaTextSmart(phone, aiReply);
+
+        const detectedStage = detectReplyStageFromText(aiReply, Boolean(convo.salesLead?.course));
+        setLastSalesPromptType(phone, detectedStage);
+        return;
+      } catch (error) {
+        console.error("[OPENAI ERROR]", error?.message || error);
+      }
+    }
+
     if (looksLikeStrongEnrollmentIntent(cleanText) || looksLikeCloseDeal(cleanText)) {
       if (convo.salesLead?.course && !convo.salesLead?.courseExplained) {
         await sendMetaTextSmart(
@@ -3952,37 +4253,6 @@ async function handleContextualShortReply(phone, text) {
       await sendCourseInterestButtons(phone);
       setLastSalesPromptType(phone, "check_understanding_before_price");
       return;
-    }
-
-    if (shouldUseAI(cleanText, convo)) {
-      try {
-        const aiReply = await generateOpenAIReply(phone, cleanText);
-        await sendMetaTextSmart(phone, aiReply);
-
-        const detectedStage = detectReplyStageFromText(aiReply, Boolean(convo.salesLead?.course));
-        setLastSalesPromptType(phone, detectedStage);
-
-        if (detectedStage === "ask_payment_preference") {
-          await delay(350);
-          await sendPaymentButtons(phone);
-        }
-
-        return;
-      } catch (error) {
-        console.error("[OPENAI ERROR]", error?.message || error);
-        const fallback = sanitizeForbiddenWords(fallbackSalesReply(phone, cleanText));
-        await sendMetaTextSmart(phone, fallback);
-
-        const detectedStage = detectReplyStageFromText(fallback, Boolean(convo.salesLead?.course));
-        setLastSalesPromptType(phone, detectedStage);
-
-        if (detectedStage === "ask_payment_preference") {
-          await delay(350);
-          await sendPaymentButtons(phone);
-        }
-
-        return;
-      }
     }
 
     await sendMetaTextSmart(
