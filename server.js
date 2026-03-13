@@ -1,4 +1,4 @@
-      require("dotenv").config();
+  require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -156,6 +156,13 @@ function isValidCpf(value) {
 
   function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function calculateHumanReplyDelay(text) {
+    const len = String(text || "").trim().length;
+    const randomBase = HUMAN_REPLY_MIN_MS + Math.floor(Math.random() * (HUMAN_REPLY_MAX_MS - HUMAN_REPLY_MIN_MS + 1));
+    const typingDelay = Math.min(1200, Math.floor(len * HUMAN_REPLY_CHAR_DELAY_MS));
+    return randomBase + typingDelay;
   }
 
   function removeAccents(text) {
@@ -727,6 +734,10 @@ const START_ONLY_CHATBOT = /^(1|true|yes|on|sim)$/i.test(readEnv("START_ONLY_CHA
   const LEADS_FILE = readEnv("LEADS_FILE") || path.join(__dirname, "leads.json");
 
   const META_SEND_DELAY_MS = Number(readEnv("META_SEND_DELAY_MS") || 950);
+  const HUMAN_REPLY_DELAY_ENABLED = /^(1|true|yes|on|sim)$/i.test(readEnv("HUMAN_REPLY_DELAY_ENABLED") || "true");
+  const HUMAN_REPLY_MIN_MS = Math.max(0, Number(readEnv("HUMAN_REPLY_MIN_MS") || 1200));
+  const HUMAN_REPLY_MAX_MS = Math.max(HUMAN_REPLY_MIN_MS, Number(readEnv("HUMAN_REPLY_MAX_MS") || 2200));
+  const HUMAN_REPLY_CHAR_DELAY_MS = Math.max(0, Number(readEnv("HUMAN_REPLY_CHAR_DELAY_MS") || 6));
   const DUPLICATE_WINDOW_MS = Number(readEnv("DUPLICATE_WINDOW_MS") || 15000);
   const AI_HISTORY_LIMIT = Number(readEnv("AI_HISTORY_LIMIT") || 10);
 
@@ -2427,6 +2438,14 @@ async function sendMetaText(phone, bodyText) {
     }
 
     const parts = splitMessage(sanitizedBody, 370);
+    const firstPart = parts[0] || sanitizedBody;
+
+    if (HUMAN_REPLY_DELAY_ENABLED) {
+      const plannedDelay = calculateHumanReplyDelay(firstPart);
+      const elapsedSinceLastBot = nowTs() - Number(convo.lastBotTextAt || 0);
+      const waitMs = Math.max(0, plannedDelay - elapsedSinceLastBot);
+      if (waitMs > 0) await delay(waitMs);
+    }
 
     for (let i = 0; i < parts.length; i++) {
       if (i > 0) await delay(META_SEND_DELAY_MS);
@@ -5394,6 +5413,10 @@ async function handleIntent(phone, text) {
         CONVERSATIONS_FILE,
         LEADS_FILE,
         META_SEND_DELAY_MS,
+        HUMAN_REPLY_DELAY_ENABLED,
+        HUMAN_REPLY_MIN_MS,
+        HUMAN_REPLY_MAX_MS,
+        HUMAN_REPLY_CHAR_DELAY_MS,
         DUPLICATE_WINDOW_MS,
         AI_HISTORY_LIMIT,
         CARD_TOTAL,
