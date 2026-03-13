@@ -1,5 +1,4 @@
   require("dotenv").config();
-  require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -636,7 +635,7 @@ function buildHumanGreeting() {
       "*Outras opções*\n" +
       "⬢ Gastronomia & Confeitaria\n" +
       "⬢ Massoterapia\n" +
-      "â€¢ Ã“ptica\n\n" +
+      "⬢ Óptica\n\n" +
       "Se você quiser, eu também posso te indicar as opções que mais combinam com o seu objetivo.\n" +
       "Me diz: qual área chamou mais sua atenção?"
     );
@@ -750,13 +749,13 @@ function buildHumanGreeting() {
     "Marketing Digital",
     "Massoterapia",
     "Mega Hair",
-    "MecÃ¢nica Industrial",
+    "Mecânica Industrial",
     "Mestre de Obras",
     "Micropigmentação Labial",
     "Nutrição",
     "Odontologia & Saúde Bucal",
     "Operador de Caixa",
-    "Ã“ptica",
+    "Óptica",
     "Pedagogia",
     "Portaria",
     "Preparatório Militar",
@@ -769,7 +768,7 @@ function buildHumanGreeting() {
     "Socorrista",
     "Soldador",
     "Topografia",
-    "Torneiro MecÃ¢nico",
+    "Torneiro Mecânico",
   ];
 
 const MARKET_SALARY_BY_COURSE = {
@@ -862,6 +861,7 @@ const MARKET_SALARY_BY_COURSE = {
       salesLead: {
         name: "",
         course: "",
+        courseExplained: false,
         paymentMethod: "",
         city: "",
         objective: "",
@@ -1085,7 +1085,7 @@ const MARKET_SALARY_BY_COURSE = {
     "criacao de games",
     "criação de games",
     "mecanica",
-    "mecÃ¢nica",
+    "mecânica",
     "ar condicionado",
     "auto eletrica",
     "auto elétrica",
@@ -1094,7 +1094,7 @@ const MARKET_SALARY_BY_COURSE = {
     "mestre de obras",
     "soldador",
     "torneiro mecanico",
-    "torneiro mecÃ¢nico",
+    "torneiro mecânico",
     "logistica",
     "logística",
     "gestao",
@@ -1172,7 +1172,7 @@ const MARKET_SALARY_BY_COURSE = {
     "automacao industrial": "Automação Industrial",
     "mestre de obras": "Mestre de Obras",
     soldador: "Soldador",
-    "torneiro mecanico": "Torneiro MecÃ¢nico",
+    "torneiro mecanico": "Torneiro Mecânico",
     logistica: "Gestão & Logística",
     gestao: "Gestão & Logística",
     "seguranca do trabalho": "Segurança do Trabalho",
@@ -1188,7 +1188,7 @@ const MARKET_SALARY_BY_COURSE = {
     "auxiliar de necropsia": "Auxiliar de Necropsia",
     "bombeiro civil": "Bombeiro Civil",
     massoterapia: "Massoterapia",
-    optica: "Ã“ptica",
+    optica: "Óptica",
     psicologia: "Psicologia",
     gastronomia: "Gastronomia & Confeitaria",
     confeitaria: "Gastronomia & Confeitaria",
@@ -1225,25 +1225,40 @@ const MARKET_SALARY_BY_COURSE = {
     );
   }
 
-  function looksLikeAskingContent(text) {
-    const t = normalizeText(text);
-    return /(conteudo|conteúdo|grade|grade curricular|materias|matérias|assuntos|o que aprende|oque aprende|como funciona|funciona como|quero saber mais)/.test(
-      t
-    );
-  }
+function looksLikeAskingContent(text) {
+  const t = normalizeText(text);
+  return /(conteudo|conteúdo|grade|grade curricular|materias|matérias|assuntos|o que aprende|oque aprende|como funciona|funciona como|quero saber mais|como_funciona)/.test(
+    t
+  );
+}
 
-  function detectIntent(text) {
-    const t = normalizeText(text);
+function looksLikeAskingBenefits(text) {
+  const t = normalizeText(text);
+  return /(beneficios|benefícios|vantagens|diferenciais|ver beneficios|ver benefícios|quero beneficios|quero benefícios|beneficio do curso|benefício do curso|quero_beneficios)/.test(
+    t
+  );
+}
 
-    if (/(quanto ganha|salario|salário|faixa salarial|media salarial|média salarial|remuneracao|remuneração|mercado de trabalho)/.test(t)) return "salary";
-    if (/(desconto|entrada|sinal|negociar|melhorar condicao|melhorar condição|tirar parcela|diminuir parcela)/.test(t))
-      return "negotiation";
-    if (/(boleto|segunda via|2 via|2a via|mensalidade|fatura|carne|carn[eê])/.test(t)) return "boleto";
-    if (/(valor|valores|preco|preço|quanto custa|quanto fica|forma de pagamento|pagamento)/.test(t)) return "price";
-    if (/(curso|estudar|certificado|formacao|formação|area|área|plataforma|material)/.test(t)) return "course";
-    if (/(matricula|matrícula|inscrever|inscricao|inscrição|quero fazer|quero comecar|quero começar|tenho interesse)/.test(t)) return "enroll";
-    return "general";
-  }
+function looksLikeCourseUnderstood(text) {
+  const t = normalizeText(text);
+  return /^(entendi|entendido|entendi sim|fez sentido|agora entendi|pode passar valores|pode me passar os valores|quero ver valores|sim|claro|show|ok|entendi_curso)$/.test(
+    t
+  );
+}
+
+function detectIntent(text) {
+  const t = normalizeText(text);
+
+  if (/(beneficios|benefícios|vantagens|diferenciais)/.test(t)) return "benefits";
+  if (/(quanto ganha|salario|salário|faixa salarial|media salarial|média salarial|remuneracao|remuneração|mercado de trabalho)/.test(t)) return "salary";
+  if (/(desconto|entrada|sinal|negociar|melhorar condicao|melhorar condição|tirar parcela|diminuir parcela)/.test(t))
+    return "negotiation";
+  if (/(boleto|segunda via|2 via|2a via|mensalidade|fatura|carne|carn[eê])/.test(t)) return "boleto";
+  if (/(valor|valores|preco|preço|quanto custa|quanto fica|forma de pagamento|pagamento|ver_valores)/.test(t)) return "price";
+  if (/(curso|estudar|certificado|formacao|formação|area|área|plataforma|material)/.test(t)) return "course";
+  if (/(matricula|matrícula|inscrever|inscricao|inscrição|quero fazer|quero comecar|quero começar|tenho interesse)/.test(t)) return "enroll";
+  return "general";
+}
 
   function looksLikeHello(text) {
     return /^(oi|ola|olá|bom dia|boa tarde|boa noite|menu|iniciar|comecar|começar|inicio)$/i.test(
@@ -1269,24 +1284,24 @@ const MARKET_SALARY_BY_COURSE = {
     return /\bboleto\b|\bcarne\b|\bcarn[eê]\b|\b2 via\b|\b2a via\b|\bsegunda via\b|\bfatura\b|\bmensalidade\b/.test(t);
   }
 
-  function looksLikeNewEnrollmentAnswer(text) {
-    const t = normalizeText(text);
-    return /(nova matricula|nova matrícula|quero me matricular|quero fazer matricula|quero fazer matrícula|primeira matricula|primeira matrícula|ainda nao sou aluno|ainda não sou aluno|nao sou aluno|não sou aluno|novo aluno|quero começar|quero comecar)/.test(
-      t
-    );
-  }
+function looksLikeNewEnrollmentAnswer(text) {
+  const t = normalizeText(text);
+  return /(nova matricula|nova matrícula|nova_matricula|nova-matricula|quero me matricular|quero fazer matricula|quero fazer matrícula|primeira matricula|primeira matrícula|ainda nao sou aluno|ainda não sou aluno|nao sou aluno|não sou aluno|novo aluno|quero começar|quero comecar)/.test(
+    t
+  );
+}
 
-  function looksLikeExistingStudentAnswer(text) {
-    const t = normalizeText(text);
-    return /(ja sou aluno|já sou aluno|sou aluno|segunda via|2 via|2a via|mensalidade|fatura|boleto atrasado|parcela em aberto|boleto antigo)/.test(
-      t
-    );
-  }
+function looksLikeExistingStudentAnswer(text) {
+  const t = normalizeText(text);
+  return /(ja sou aluno|já sou aluno|ja_sou_aluno|ja-sou-aluno|sou aluno|segunda via|2 via|2a via|mensalidade|fatura|boleto atrasado|parcela em aberto|boleto antigo)/.test(
+    t
+  );
+}
 
-  function looksLikeViewCoursesAnswer(text) {
-    const t = normalizeText(text);
-    return /(ver cursos|quero ver cursos|mostrar cursos|lista de cursos|todos os cursos)/.test(t);
-  }
+function looksLikeViewCoursesAnswer(text) {
+  const t = normalizeText(text);
+  return /(ver cursos|ver_cursos|quero ver cursos|mostrar cursos|lista de cursos|todos os cursos)/.test(t);
+}
 
   function looksLikeExistingBoletoRequest(text) {
     const t = normalizeText(text);
@@ -1476,16 +1491,19 @@ const MARKET_SALARY_BY_COURSE = {
     return true;
   }
 
-  function updateLeadFromText(phone, text) {
-    const convo = getConversation(phone);
-    const lead = convo.salesLead;
-    const clean = String(text || "").trim();
+function updateLeadFromText(phone, text) {
+  const convo = getConversation(phone);
+  const lead = convo.salesLead;
+  const clean = String(text || "").trim();
 
     const foundName = extractLikelyName(clean);
     if (foundName && !lead.name) lead.name = foundName;
 
-    const course = detectCourseMention(clean);
-    if (course && !lead.course) lead.course = course;
+  const course = detectCourseMention(clean);
+  if (course && lead.course !== course) {
+    lead.course = course;
+    lead.courseExplained = false;
+  }
 
     const paymentMethod = extractPaymentMethod(clean);
     if (paymentMethod && !lead.paymentMethod) lead.paymentMethod = paymentMethod;
@@ -1499,8 +1517,8 @@ const MARKET_SALARY_BY_COURSE = {
       else if (/concurso/.test(t)) lead.objective = "Concurso";
     }
 
-    if (detectIntent(clean) === "price") lead.askedPrice = true;
-    if (looksLikeAskingContent(clean)) lead.askedContent = true;
+  if (detectIntent(clean) === "price") lead.askedPrice = true;
+  if (looksLikeAskingContent(clean) || looksLikeAskingBenefits(clean)) lead.askedContent = true;
 
     if (course) lead.warmScore += 2;
     if (lead.askedPrice) lead.warmScore += 1;
@@ -1599,24 +1617,92 @@ const MARKET_SALARY_BY_COURSE = {
     );
   }
 
-  function setLastSalesPromptType(phone, type) {
-    const convo = getConversation(phone);
-    convo.lastSalesPromptType = String(type || "");
-    convo.lastSalesPromptAt = nowTs();
-    convo.updatedAt = nowTs();
-    scheduleSaveConversations();
+function setLastSalesPromptType(phone, type) {
+  const convo = getConversation(phone);
+  convo.lastSalesPromptType = String(type || "");
+  convo.lastSalesPromptAt = nowTs();
+  convo.updatedAt = nowTs();
+  scheduleSaveConversations();
+}
+
+function getCourseBenefits(course = "") {
+  const c = normalizeForCompare(course);
+
+  if (/designer|grafico|canva|photoshop|marketing|influencer|capcut/.test(c)) {
+    return [
+      "⬢ Desenvolvimento de portfólio para atrair clientes",
+      "⬢ Técnicas de criação visual para redes sociais e marcas",
+      "⬢ Base para começar no freelancer ou montar escritório próprio",
+      "⬢ Aulas práticas com foco no mercado digital",
+    ];
   }
 
-  function buildCourseDeepDiveMessage(course) {
-    return (
-      `Perfeito ðŸ˜Š\n\n` +
-      `O curso de ${course} funciona de forma totalmente online, então você consegue estudar no seu ritmo, sem precisar sair de casa.\n\n` +
-      `Na plataforma, você tem acesso a videoaulas, materiais digitais, atividades, exercícios e avaliações para ir acompanhando seu desenvolvimento.\n\n` +
-      `A plataforma fica disponível 24 horas, o que ajuda muito quem tem rotina corrida. A recomendação é fazer 2 aulas por semana para manter um bom progresso.\n\n` +
-      `Além disso, é uma ótima opção para quem quer se qualificar, melhorar o currículo e desenvolver conhecimento na área.\n\n` +
-      `Você quer esse curso mais para começar do zero ou para entrar logo na área?`
-    );
+  if (/cilios|sobrancelhas|maquiagem|barbeiro|cabeleireiro|depilacao|micropigmentacao|mega hair|beleza/.test(c)) {
+    return [
+      "⬢ Técnicas atuais para atendimento profissional",
+      "⬢ Aprendizado focado em prática e resultado",
+      "⬢ Base para trabalhar por conta própria ou em salão",
+      "⬢ Diferencial para aumentar ticket e fidelização de clientes",
+    ];
   }
+
+  if (/farmacia|analises clinicas|saude bucal|enfermagem|socorrista|recepcionista hospitalar|auxiliar veterinario|auxiliar de necropsia|nutricao|radiologia/.test(c)) {
+    return [
+      "⬢ Formação focada em rotina real da área da saúde",
+      "⬢ Desenvolvimento de segurança técnica para atendimento",
+      "⬢ Melhora de currículo para vagas de entrada e crescimento",
+      "⬢ Possibilidade de Carta de Estágio (mínimo de 60h)",
+    ];
+  }
+
+  if (/administracao|contabilidade|recursos humanos|gestao|logistica|operador de caixa|portaria/.test(c)) {
+    return [
+      "⬢ Base para atuar em rotinas administrativas e operacionais",
+      "⬢ Organização, produtividade e postura profissional",
+      "⬢ Conteúdo aplicado para quem busca recolocação",
+      "⬢ Qualificação para crescer dentro da empresa",
+    ];
+  }
+
+  return [
+    "⬢ Conteúdo atualizado para atuação prática",
+    "⬢ Formação online com flexibilidade de horário",
+    "⬢ Melhora de currículo e preparo para oportunidades",
+    "⬢ Suporte para evolução contínua no curso",
+  ];
+}
+
+function buildCourseBenefitsMessage(course = "") {
+  const benefits = getCourseBenefits(course).join("\n");
+  return (
+    `Benefícios diretos do curso de ${course}:\n` +
+    `${benefits}\n\n` +
+    "Se quiser, depois eu te explico também as condições para começar."
+  );
+}
+
+function buildCourseDeepDiveMessage(course) {
+  const benefits = getCourseBenefits(course).join("\n");
+  return (
+    `Perfeito 😊\n\n` +
+    `O curso de ${course} funciona de forma totalmente online, então você consegue estudar no seu ritmo, sem precisar sair de casa.\n\n` +
+    `Na plataforma, você tem acesso a videoaulas, materiais digitais, atividades, exercícios e avaliações para ir acompanhando seu desenvolvimento.\n\n` +
+    `A plataforma fica disponível 24 horas, o que ajuda muito quem tem rotina corrida. A recomendação é fazer 2 aulas por semana para manter um bom progresso.\n\n` +
+    `Benefícios do curso para você:\n${benefits}\n\n` +
+    "Se ficou claro, me responde *ENTENDI* que eu te passo os valores."
+  );
+}
+
+function markCourseAsExplained(phone, course = "") {
+  const convo = getConversation(phone);
+  if (course && (!convo.salesLead.course || convo.salesLead.course !== course)) {
+    convo.salesLead.course = course;
+  }
+  convo.salesLead.courseExplained = true;
+  if (convo.salesLead.stage === "discovering") convo.salesLead.stage = "value_building";
+  convo.updatedAt = nowTs();
+  scheduleSaveConversations();
+}
 
   function detectReplyStageFromText(text, hasCourse) {
     const norm = normalizeText(text);
@@ -1640,17 +1726,21 @@ const MARKET_SALARY_BY_COURSE = {
       return "ask_objective_after_explaining_course";
     }
 
-    if (
-      hasCourse &&
-      /posso te explicar melhor|posso te contar mais|quer que eu te explique melhor|quer que eu te conte mais|posso te explicar|posso te contar/.test(
-        norm
-      )
-    ) {
-      return "offer_more_info";
-    }
-
-    return "";
+  if (
+    hasCourse &&
+    /posso te explicar melhor|posso te contar mais|quer que eu te explique melhor|quer que eu te conte mais|posso te explicar|posso te contar/.test(
+      norm
+    )
+  ) {
+    return "offer_more_info";
   }
+
+  if (/me responde entendi|confirmar entendimento|pode passar valores|te passo os valores/.test(norm)) {
+    return "check_understanding_before_price";
+  }
+
+  return "";
+}
 
   function leadHasMinimumDataForCreateZero(lead) {
     return Boolean(
@@ -1848,18 +1938,18 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     );
   }
 
-  async function sendCourseInterestButtons(phone) {
-    await sendMetaButtonsSmart(
-      phone,
-      "Escolha como você prefere seguir:",
-      [
-        { id: "como_funciona", title: "Como funciona" },
-        { id: "ver_valores", title: "Ver valores" },
-        { id: "quero_matricula", title: "Quero matrícula" },
-      ],
-      "Escolha uma opção:\n⬢ Como funciona\n⬢ Ver valores\n⬢ Quero matrícula"
-    );
-  }
+async function sendCourseInterestButtons(phone) {
+  await sendMetaButtonsSmart(
+    phone,
+    "Quando você entender o curso, escolhe uma opção:",
+    [
+      { id: "entendi_curso", title: "Entendi" },
+      { id: "quero_beneficios", title: "Ver benefícios" },
+      { id: "quero_matricula", title: "Quero matrícula" },
+    ],
+    "Escolha uma opção:\n⬢ Entendi\n⬢ Ver benefícios\n⬢ Quero matrícula"
+  );
+}
 
   async function sendPaymentButtons(phone) {
     await sendMetaButtonsSmart(
@@ -1954,6 +2044,8 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
   - Segunda via é para aluno já existente.
   - Nova matrícula é para criação de boleto/carnê novo.
   - Se já chegou no ponto de matrícula, vá para a próxima etapa com clareza.
+  - Sempre explique o curso completo com benefícios antes de falar valores.
+  - Só apresente valores após a pessoa confirmar entendimento (ex.: "entendi", "sim", "pode passar valores").
   - Se houver objeção de preço, use negociação com entrada para reduzir parcelas.
   - Quando a pessoa perguntar sobre ganhos, use referência salarial da área para reforçar valor.
 
@@ -2014,11 +2106,12 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     return "";
   }
 
-  function fallbackSalesReply(phone, userText) {
-    const convo = getConversation(phone);
-    const course = detectCourseMention(userText) || convo.salesLead?.course || "";
-    const intent = detectIntent(userText);
-    const entryOfferValue = extractEntryOfferValue(userText);
+function fallbackSalesReply(phone, userText) {
+  const convo = getConversation(phone);
+  const course = detectCourseMention(userText) || convo.salesLead?.course || "";
+  const intent = detectIntent(userText);
+  const entryOfferValue = extractEntryOfferValue(userText);
+  const courseExplained = Boolean(convo.salesLead?.courseExplained);
 
     if (looksLikeAskingAllCourses(userText)) {
       return buildAllCoursesMessage();
@@ -2028,17 +2121,26 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
       return buildSalaryInsightMessage(course);
     }
 
-    if (entryOfferValue > 0 || looksLikeNegotiatingDiscount(userText)) {
-      return buildNegotiationReply(entryOfferValue, course);
-    }
+  if (entryOfferValue > 0 || looksLikeNegotiatingDiscount(userText)) {
+    return buildNegotiationReply(entryOfferValue, course);
+  }
 
-    if (looksLikeHello(userText)) {
-      return `${buildHumanGreeting()}\n\nMe fala qual área ou curso chamou mais sua atenção.`;
-    }
+  if (course && looksLikeAskingBenefits(userText)) {
+    return buildCourseBenefitsMessage(course);
+  }
 
-    if (looksLikeSoftYes(userText) && course) {
-      return buildCourseDeepDiveMessage(course);
-    }
+  if (course && looksLikeCourseUnderstood(userText) && courseExplained) {
+    return buildPriceMessage(course);
+  }
+
+  if (looksLikeHello(userText)) {
+    return `${buildHumanGreeting()}\n\nMe fala qual área ou curso chamou mais sua atenção.`;
+  }
+
+  if (looksLikeSoftYes(userText) && course) {
+    if (courseExplained) return buildPriceMessage(course);
+    return buildCourseDeepDiveMessage(course);
+  }
 
     if (looksLikeObjectionNoTime(userText)) {
       return (
@@ -2072,17 +2174,24 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
       return buildWarmCloseMessage(course);
     }
 
-    if (course && intent === "price") {
-      return buildPriceMessage(course);
-    }
+  if (course && intent === "price" && !courseExplained) {
+    return (
+      `Perfeito 😊\n\nAntes dos valores, deixa eu te explicar o curso de ${course} completo para você decidir com segurança:\n\n` +
+      buildCourseDeepDiveMessage(course)
+    );
+  }
 
-    if (course && looksLikeAskingContent(userText)) {
-      return buildCourseDeepDiveMessage(course);
-    }
+  if (course && intent === "price") {
+    return buildPriceMessage(course);
+  }
 
-    if (course) {
-      return `${buildCourseIntroMessage(course)}\n\n${buildSalesClosing(course)}`;
-    }
+  if (course && looksLikeAskingContent(userText)) {
+    return buildCourseDeepDiveMessage(course);
+  }
+
+  if (course) {
+    return buildCourseDeepDiveMessage(course);
+  }
 
     if (intent === "price") {
       return (
@@ -2210,10 +2319,12 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     const cleanText = String(text || "").trim();
     const digits = onlyDigits(cleanText);
 
-    if (!OPENAI_ENABLED || !OPENAI_API_KEY) return false;
-    if (!cleanText) return false;
-    if (looksLikeSalaryQuestion(cleanText)) return false;
-    if (looksLikeNegotiatingDiscount(cleanText)) return false;
+  if (!OPENAI_ENABLED || !OPENAI_API_KEY) return false;
+  if (!cleanText) return false;
+  if (looksLikeAskingBenefits(cleanText)) return false;
+  if (looksLikeCourseUnderstood(cleanText)) return false;
+  if (looksLikeSalaryQuestion(cleanText)) return false;
+  if (looksLikeNegotiatingDiscount(cleanText)) return false;
     if (extractEntryOfferValue(cleanText) > 0) return false;
     if (looksLikeHello(cleanText)) return false;
     if (looksLikeMenuRequest(cleanText)) return false;
@@ -3392,41 +3503,37 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     SALES HANDLERS
   ========================================================= */
 
-  async function handleContextualShortReply(phone, text) {
-    const convo = getConversation(phone);
-    const lead = convo.salesLead || {};
-    const clean = String(text || "").trim();
+async function handleContextualShortReply(phone, text) {
+  const convo = getConversation(phone);
+  const lead = convo.salesLead || {};
+  const clean = String(text || "").trim();
 
-    if (!looksLikeSoftYes(clean)) return false;
+  if (!looksLikeSoftYes(clean)) return false;
 
-    if (convo.lastSalesPromptType === "offer_more_info" && lead.course) {
-      lead.askedContent = true;
-      lead.stage = "value_building";
-      scheduleSaveConversations();
+  if (convo.lastSalesPromptType === "offer_more_info" && lead.course) {
+    lead.askedContent = true;
+    lead.stage = "value_building";
+    scheduleSaveConversations();
 
-      await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(lead.course));
-      setLastSalesPromptType(phone, "ask_objective_after_explaining_course");
-      return true;
-    }
+    await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(lead.course));
+    markCourseAsExplained(phone, lead.course);
+    await delay(300);
+    await sendCourseInterestButtons(phone);
+    setLastSalesPromptType(phone, "check_understanding_before_price");
+    return true;
+  }
 
-    if (convo.lastSalesPromptType === "ask_objective_after_explaining_course" && lead.course) {
-      await sendMetaTextSmart(
-        phone,
-        `Perfeito ðŸ˜Š\n\n` +
-          `Então o curso de ${lead.course} pode fazer muito sentido para você.\n\n` +
-          `Ele é uma ótima opção para quem quer se qualificar, estudar com flexibilidade e desenvolver conhecimento de forma prática.\n\n` +
-          `Se quiser, eu posso te mostrar agora como ficam as condições para começar.`
-      );
-      setLastSalesPromptType(phone, "offer_price_after_value");
-      return true;
-    }
-
-    if (convo.lastSalesPromptType === "offer_price_after_value" && lead.course) {
-      await sendMetaTextSmart(phone, buildPriceMessage(lead.course));
-      await delay(350);
-      await sendPaymentButtons(phone);
-      setLastSalesPromptType(phone, "ask_payment_preference");
-      return true;
+  if (
+    ["ask_objective_after_explaining_course", "check_understanding_before_price", "offer_price_after_value"].includes(
+      convo.lastSalesPromptType
+    ) &&
+    lead.course
+  ) {
+    await sendMetaTextSmart(phone, buildPriceMessage(lead.course));
+    await delay(350);
+    await sendPaymentButtons(phone);
+    setLastSalesPromptType(phone, "ask_payment_preference");
+    return true;
     }
 
     if (convo.lastSalesPromptType === "ask_payment_preference" && lead.course) {
@@ -3457,7 +3564,10 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     }
 
     const course = detectCourseMention(trimmed);
-    if (course && !lead.course) lead.course = course;
+    if (course && lead.course !== course) {
+      lead.course = course;
+      lead.courseExplained = false;
+    }
 
     let paymentMethod = extractPaymentMethod(trimmed);
     if (!paymentMethod && looksLikeEnrollmentBoletoChoice(trimmed)) {
@@ -3596,6 +3706,23 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
         return;
       }
 
+      const courseAtEntry = detectCourseMention(cleanText);
+      if (courseAtEntry) {
+        convo.entryDirection = "new_enrollment";
+        convo.step = "idle";
+        convo.salesLead.stage = "discovering";
+        convo.salesLead.course = courseAtEntry;
+        convo.salesLead.courseExplained = false;
+        scheduleSaveConversations();
+
+        await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(courseAtEntry));
+        markCourseAsExplained(phone, courseAtEntry);
+        await delay(300);
+        await sendCourseInterestButtons(phone);
+        setLastSalesPromptType(phone, "check_understanding_before_price");
+        return;
+      }
+
       if (looksLikeExistingStudentAnswer(cleanText)) {
         convo.entryDirection = "existing_student";
         convo.step = "awaiting_cpf";
@@ -3674,6 +3801,29 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
       return;
     }
 
+    if (looksLikeAskingBenefits(cleanText) && convo.salesLead?.course) {
+      await sendMetaTextSmart(phone, buildCourseBenefitsMessage(convo.salesLead.course));
+      setLastSalesPromptType(phone, "course_benefits");
+      return;
+    }
+
+    if (looksLikeCourseUnderstood(cleanText) && convo.salesLead?.course) {
+      if (!convo.salesLead?.courseExplained) {
+        await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(convo.salesLead.course));
+        markCourseAsExplained(phone, convo.salesLead.course);
+        await delay(300);
+        await sendCourseInterestButtons(phone);
+        setLastSalesPromptType(phone, "check_understanding_before_price");
+        return;
+      }
+
+      await sendMetaTextSmart(phone, buildPriceMessage(convo.salesLead.course));
+      await delay(350);
+      await sendPaymentButtons(phone);
+      setLastSalesPromptType(phone, "ask_payment_preference");
+      return;
+    }
+
     const entryOfferValue = extractEntryOfferValue(cleanText);
     if (entryOfferValue > 0 || looksLikeNegotiatingDiscount(cleanText)) {
       await sendMetaTextSmart(phone, buildNegotiationReply(entryOfferValue, convo.salesLead?.course || ""));
@@ -3710,6 +3860,20 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     }
 
     if (looksLikeStrongEnrollmentIntent(cleanText) || looksLikeCloseDeal(cleanText)) {
+      if (convo.salesLead?.course && !convo.salesLead?.courseExplained) {
+        await sendMetaTextSmart(
+          phone,
+          `Perfeito 😊\n\nAntes de fecharmos, vou te explicar o curso de ${convo.salesLead.course} completo para você decidir com segurança:`
+        );
+        await delay(250);
+        await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(convo.salesLead.course));
+        markCourseAsExplained(phone, convo.salesLead.course);
+        await delay(300);
+        await sendCourseInterestButtons(phone);
+        setLastSalesPromptType(phone, "check_understanding_before_price");
+        return;
+      }
+
       convo.salesLead.stage = "collecting_enrollment";
       scheduleSaveConversations();
       await sendMetaTextSmart(phone, buildWarmCloseMessage(convo.salesLead.course || ""));
@@ -3741,19 +3905,35 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
     if (
       detectedCourse &&
       !looksLikeAskingContent(cleanText) &&
+      !looksLikeAskingBenefits(cleanText) &&
       detectIntent(cleanText) !== "price" &&
       !looksLikeStrongEnrollmentIntent(cleanText) &&
       !looksLikeCloseDeal(cleanText) &&
       !looksLikeBoletoGeneric(cleanText)
     ) {
-      await sendMetaTextSmart(phone, buildCourseIntroMessage(detectedCourse));
+      await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(detectedCourse));
+      markCourseAsExplained(phone, detectedCourse);
       await delay(350);
       await sendCourseInterestButtons(phone);
-      setLastSalesPromptType(phone, "offer_more_info");
+      setLastSalesPromptType(phone, "check_understanding_before_price");
       return;
     }
 
     if (detectIntent(cleanText) === "price" && convo.salesLead.course) {
+      if (!convo.salesLead.courseExplained) {
+        await sendMetaTextSmart(
+          phone,
+          `Perfeito 😊\n\nAntes de falar dos valores, vou te explicar o curso de ${convo.salesLead.course} completo para você decidir com segurança:`
+        );
+        await delay(250);
+        await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(convo.salesLead.course));
+        markCourseAsExplained(phone, convo.salesLead.course);
+        await delay(300);
+        await sendCourseInterestButtons(phone);
+        setLastSalesPromptType(phone, "check_understanding_before_price");
+        return;
+      }
+
       await sendMetaTextSmart(phone, buildPriceMessage(convo.salesLead.course));
       await delay(350);
       await sendPaymentButtons(phone);
@@ -3767,7 +3947,10 @@ async function sendMetaDocument(phone, documentUrl, filename, caption) {
 
     if (looksLikeAskingContent(cleanText) && convo.salesLead.course) {
       await sendMetaTextSmart(phone, buildCourseDeepDiveMessage(convo.salesLead.course));
-      setLastSalesPromptType(phone, "ask_objective_after_explaining_course");
+      markCourseAsExplained(phone, convo.salesLead.course);
+      await delay(300);
+      await sendCourseInterestButtons(phone);
+      setLastSalesPromptType(phone, "check_understanding_before_price");
       return;
     }
 
