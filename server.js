@@ -1,4 +1,4 @@
-  require("dotenv").config();
+   require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -171,6 +171,14 @@ function isValidCpf(value) {
     if (/[?0-9]/.test(raw)) return false;
 
     const normalized = normalizeText(raw);
+    if (
+      /^(nova matricula|nova matrícula|ja sou aluno|já sou aluno|conhecer cursos|ver cursos|entendi|menu|inicio|início)$/.test(
+        normalized
+      )
+    ) {
+      return false;
+    }
+
     if (
       /(tem que|pagar|quanto|como|quero|valor|preco|preço|curso|boleto|pix|cartao|cartão|cpf|email|forma de pagamento|sim|nao|não|ok|entendi)/.test(
         normalized
@@ -1065,6 +1073,7 @@ const MARKET_SALARY_BY_COURSE = {
       const raw = fs.readFileSync(LEADS_FILE, "utf8");
       if (!raw.trim()) return;
       const parsed = JSON.parse(raw);
+      let changed = false;
 
       const entries = Array.isArray(parsed)
         ? parsed.map((item) => [item?.phone || "", item])
@@ -1073,10 +1082,20 @@ const MARKET_SALARY_BY_COURSE = {
       for (const [rawPhone, value] of entries) {
         const normalized = normalizeLeadProfile(rawPhone, value);
         if (!normalized) continue;
+
+        if (normalized.name && !isLikelyPersonName(normalized.name)) {
+          normalized.name = "";
+          changed = true;
+        }
+
         leadProfiles.set(normalized.phone, normalized);
       }
 
       console.log(`[LEADS] ${leadProfiles.size} perfil(is) carregado(s).`);
+      if (changed) {
+        saveLeadProfilesNow();
+        console.log("[LEADS] Nomes inválidos antigos foram limpos em leads.json.");
+      }
     } catch (error) {
       console.error("[LEADS LOAD ERROR]", error?.message || error);
     }
@@ -1162,10 +1181,11 @@ const MARKET_SALARY_BY_COURSE = {
       const raw = fs.readFileSync(CONVERSATIONS_FILE, "utf8");
       if (!raw.trim()) return;
       const parsed = JSON.parse(raw);
+      let changed = false;
 
       for (const [key, value] of Object.entries(parsed)) {
         if (!key || !value || typeof value !== "object") continue;
-        conversations.set(key, {
+        const hydrated = {
           ...createDefaultConversation(),
           ...value,
           aiHistory: Array.isArray(value.aiHistory) ? value.aiHistory : [],
@@ -1173,10 +1193,21 @@ const MARKET_SALARY_BY_COURSE = {
             ...createDefaultConversation().salesLead,
             ...(value.salesLead && typeof value.salesLead === "object" ? value.salesLead : {}),
           },
-        });
+        };
+
+        if (hydrated.salesLead?.name && !isLikelyPersonName(hydrated.salesLead.name)) {
+          hydrated.salesLead.name = "";
+          changed = true;
+        }
+
+        conversations.set(key, hydrated);
       }
 
       console.log(`[CONVERSATIONS] ${conversations.size} conversa(s) carregada(s).`);
+      if (changed) {
+        saveConversationsNow();
+        console.log("[CONVERSATIONS] Nomes inválidos antigos foram limpos em conversations.json.");
+      }
     } catch (error) {
       console.error("[CONVERSATIONS LOAD ERROR]", error?.message || error);
     }
@@ -1834,6 +1865,16 @@ function extractLikelyName(text) {
   if (!clean) return "";
 
   if (isCpf(clean)) return "";
+
+  if (looksLikeNewEnrollmentAnswer(clean)) return "";
+
+  if (looksLikeExistingStudentAnswer(clean)) return "";
+
+  if (looksLikeViewCoursesAnswer(clean)) return "";
+
+  if (looksLikeCourseUnderstood(clean)) return "";
+
+  if (looksLikeHello(clean) || looksLikeMenuRequest(clean)) return "";
 
   if (detectCourseMention(clean)) return "";
 
@@ -4474,9 +4515,23 @@ async function handleIntent(phone, text) {
   const intent = classifyUserIntent(text);
   const convo = getConversation(phone);
 
+  const step = String(convo.step || "");
+  if (
+    step.startsWith("create_zero_") ||
+    step === "awaiting_cpf" ||
+    step === "awaiting_confirmation" ||
+    step === "processing" ||
+    step === "awaiting_existing_student_need" ||
+    step === "existing_student_support" ||
+    step === "existing_student_course_info"
+  ) {
+    return false;
+  }
+
   switch(intent) {
 
     case "greeting":
+      if (convo.step !== "awaiting_entry_direction") return false;
       await sendMainMenu(phone);
       return true;
 
@@ -4486,6 +4541,11 @@ async function handleIntent(phone, text) {
       return true;
 
     case "list_courses":
+      if (convo.step === "awaiting_entry_direction") {
+        convo.entryDirection = "course_discovery";
+        convo.step = "idle";
+        scheduleSaveConversations();
+      }
       await sendMetaTextSmart(phone, buildAllCoursesMessage());
       return true;
 
@@ -4506,6 +4566,14 @@ async function handleIntent(phone, text) {
     case "course_interest":
 
       const course = detectCourseMention(text);
+      if (!course) return false;
+
+      if (convo.step === "awaiting_entry_direction") {
+        convo.entryDirection = "new_enrollment";
+        convo.step = "idle";
+        convo.salesLead.stage = "discovering";
+        scheduleSaveConversations();
+      }
 
       await sendMetaTextSmart(
         phone,
