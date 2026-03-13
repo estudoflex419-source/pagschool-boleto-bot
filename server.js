@@ -298,11 +298,13 @@ function mapGenero(input, fallback = "F") {
   return String(fallback || "F").toUpperCase();
 }
 
-function looksLikeCreateCarnetRequest(text) {
-  const t = normalizeText(text);
-  return /(criar carne|criar carn[eê]|novo carne|novo carn[eê]|gerar carne do zero|gerar carn[eê] do zero|criar boleto do zero|novo boleto do zero|matricular com carne|fazer carne|fazer carn[eê])/.test(
-    t
-  );
+function sanitizeForbiddenWords(text) {
+  let t = String(text || "");
+  t = t.replace(/\bcursos técnicos\b/gi, "cursos profissionalizantes");
+  t = t.replace(/\bcurso técnico\b/gi, "curso profissionalizante");
+  t = t.replace(/\btécnico\b/gi, "profissionalizante");
+  t = t.replace(/\btécnica\b/gi, "profissionalizante");
+  return t;
 }
 
 /* =========================================================
@@ -358,6 +360,73 @@ const AUTO_CREATE_CONTRACT = /^(1|true|yes|on|sim)$/i.test(readEnv("AUTO_CREATE_
 const AUTO_CREATE_PARCELA = /^(1|true|yes|on|sim)$/i.test(readEnv("AUTO_CREATE_PARCELA") || "true");
 
 /* =========================================================
+   COURSES
+========================================================= */
+
+const ALL_COURSES = [
+  "Administração",
+  "Agente de Saúde",
+  "Análises Clínicas",
+  "Ar Condicionado",
+  "Assistente Social",
+  "Auto Elétrica",
+  "Auxiliar de Necropsia",
+  "Auxiliar Veterinário",
+  "Barbeiro",
+  "Beleza e Estética",
+  "Bombeiro Civil",
+  "Cabeleireiro(a)",
+  "CapCut",
+  "Concurso Público",
+  "Contabilidade",
+  "Criação de Games",
+  "Cuidador de Idosos",
+  "Depilação Profissional",
+  "Designer de Sobrancelhas",
+  "Designer de Unhas",
+  "Designer Gráfico",
+  "Designer Gráfico Canva",
+  "Designer Gráfico Photoshop",
+  "Digital Influencer",
+  "Enfermagem Livre",
+  "Extensão de Cílios",
+  "Farmácia",
+  "Gastronomia & Confeitaria",
+  "Gestão & Logística",
+  "Informática",
+  "Inglês",
+  "Instrumentação Cirúrgica",
+  "Inteligência Artificial (ChatGPT)",
+  "Jovem Aprendiz",
+  "Libras",
+  "Maquiagem Profissionalizante",
+  "Manutenção de Celulares",
+  "Marketing Digital",
+  "Massoterapia",
+  "Mega Hair",
+  "Mecânica Industrial",
+  "Mestre de Obras",
+  "Micropigmentação Labial",
+  "Nutrição",
+  "Odontologia & Saúde Bucal",
+  "Operador de Caixa",
+  "Óptica",
+  "Pedagogia",
+  "Portaria",
+  "Preparatório Militar",
+  "Psicologia",
+  "Radiologia e Ultrassonografia",
+  "Recepcionista Hospitalar",
+  "Recursos Humanos",
+  "Robótica",
+  "Segurança do Trabalho",
+  "Socorrista",
+  "Soldador",
+  "Topografia",
+  "Torneiro Mecânico"
+];
+
+/* =========================================================
    LOG
 ========================================================= */
 
@@ -385,6 +454,7 @@ function createDefaultConversation() {
     lastCpf: "",
     pendingBoleto: null,
     pendingCreateZero: null,
+    awaitingBoletoIntent: false,
     aiHistory: [],
     lastUserTextNormalized: "",
     lastUserTextAt: 0,
@@ -763,6 +833,32 @@ function looksLikeHello(text) {
   );
 }
 
+function looksLikeCreateCarnetRequest(text) {
+  const t = normalizeText(text);
+  return /(criar carne|criar carn[eê]|novo carne|novo carn[eê]|gerar carne do zero|gerar carn[eê] do zero|criar boleto do zero|novo boleto do zero|matricular com carne|fazer carne|fazer carn[eê])/.test(
+    t
+  );
+}
+
+function looksLikeBoletoGeneric(text) {
+  const t = normalizeText(text);
+  return /\bboleto\b|\bcarne\b|\bcarn[eê]\b|\b2 via\b|\b2a via\b|\bsegunda via\b|\bfatura\b|\bmensalidade\b/.test(t);
+}
+
+function looksLikeNewEnrollmentAnswer(text) {
+  const t = normalizeText(text);
+  return /(nova matricula|nova matrícula|quero me matricular|quero fazer matricula|quero fazer matrícula|primeira matricula|primeira matrícula|ainda nao sou aluno|ainda não sou aluno|nao sou aluno|não sou aluno|novo aluno|quero começar|quero comecar)/.test(
+    t
+  );
+}
+
+function looksLikeExistingStudentAnswer(text) {
+  const t = normalizeText(text);
+  return /(ja sou aluno|já sou aluno|sou aluno|segunda via|2 via|2a via|mensalidade|fatura|boleto atrasado|parcela em aberto|boleto antigo)/.test(
+    t
+  );
+}
+
 function looksLikeExistingBoletoRequest(text) {
   const t = normalizeText(text);
   return /(segunda via|2 via|2a via|fatura|mensalidade|parcela em aberto|consultar boleto|ver boleto|boleto atrasado)/.test(t);
@@ -770,12 +866,16 @@ function looksLikeExistingBoletoRequest(text) {
 
 function looksLikeEnrollmentBoletoChoice(text) {
   const t = normalizeText(text);
+  return /(boleto 12x|12x de|parcelado no boleto|quero no boleto|pode ser no boleto|prefiro boleto|fechar no boleto|pagamento no boleto|boleto parcelado|\bboleto\b)/.test(
+    t
+  );
+}
 
-  if (/(boleto 12x|12x de|parcelado no boleto|quero no boleto|pode ser no boleto|prefiro boleto|fechar no boleto|pagamento no boleto|boleto parcelado)/.test(t)) {
-    return true;
-  }
-
-  return false;
+function looksLikeAskingAllCourses(text) {
+  const t = normalizeText(text);
+  return /(quais cursos|quais sao os cursos|quais são os cursos|lista de cursos|todos os cursos|me manda os cursos|me envie os cursos|que cursos voces tem|que cursos vocês tem|quais cursos voces oferecem|quais cursos vocês oferecem|catalogo de cursos|catálogo de cursos)/.test(
+    t
+  );
 }
 
 function looksLikeConfirm(text) {
@@ -830,6 +930,33 @@ function detectLeadTemperature(lead) {
   if (score >= 7) return "quente";
   if (score >= 4) return "morno";
   return "frio";
+}
+
+function buildAllCoursesMessage() {
+  const intro =
+    "Claro 😊\n\n" +
+    "Hoje trabalhamos com várias opções de cursos online, com acesso à plataforma, materiais digitais, videoaulas, atividades e avaliações.\n\n" +
+    "Estas são as áreas e cursos disponíveis:\n\n";
+
+  const courseLines = ALL_COURSES.map((course) => `• ${course}`).join("\n");
+
+  const outro =
+    "\n\nSe você quiser, eu também posso te indicar os cursos que mais combinam com o seu objetivo.\n" +
+    "Me diz: você quer uma área da saúde, administração, beleza, tecnologia, indústria ou outra área específica?";
+
+  return intro + courseLines + outro;
+}
+
+function shouldAskBoletoIntent(convo, text) {
+  const t = normalizeText(text);
+
+  if (!looksLikeBoletoGeneric(t)) return false;
+  if (String(convo.step || "").startsWith("create_zero_")) return false;
+  if (convo.step === "awaiting_cpf") return false;
+  if (convo.step === "awaiting_confirmation") return false;
+  if (convo.awaitingBoletoIntent) return false;
+
+  return true;
 }
 
 function updateLeadFromText(phone, text) {
@@ -1130,7 +1257,8 @@ async function sendMetaText(phone, bodyText) {
 
 async function sendMetaTextSmart(phone, bodyText) {
   const convo = getConversation(phone);
-  const normalized = normalizeText(bodyText);
+  const sanitizedBody = sanitizeForbiddenWords(bodyText);
+  const normalized = normalizeText(sanitizedBody);
 
   if (
     normalized &&
@@ -1141,7 +1269,7 @@ async function sendMetaTextSmart(phone, bodyText) {
     return;
   }
 
-  const parts = splitMessage(bodyText, 370);
+  const parts = splitMessage(sanitizedBody, 370);
 
   for (let i = 0; i < parts.length; i++) {
     if (i > 0) await delay(META_SEND_DELAY_MS);
@@ -1213,33 +1341,32 @@ function buildSalesSystemPrompt(convo) {
   return `
 Você é uma consultora virtual de vendas da Estudo Flex atendendo pelo WhatsApp.
 
-Seu papel é agir como uma consultora educacional humana, acolhedora, persuasiva, natural e profissional.
-Você nunca deve parecer robótica, fria, técnica demais ou automática.
+Seu papel é agir como uma consultora educacional humana, acolhedora, persuasiva, natural, estratégica e profissional.
+Você deve soar como uma atendente real, envolvente, simpática e inteligente.
 
 OBJETIVO:
-Conduzir a conversa até a matrícula com leveza, conexão e clareza.
+Conduzir a conversa até a matrícula com clareza, conexão, segurança e naturalidade.
 
 REGRAS OBRIGATÓRIAS:
 - Fale sempre em português do Brasil.
-- Respostas curtas ou médias.
-- Nunca despeje tudo de uma vez.
-- Sempre gere conexão antes de vender.
-- Sempre termine, quando fizer sentido, com uma pergunta curta que mova a conversa.
-- Nunca fale como suporte técnico.
-- Nunca diga que é uma IA.
+- Nunca fale que é IA.
+- Nunca pareça robótica.
+- Nunca despeje informação demais de uma vez.
+- Sempre responda de forma contextual, aproveitando o que a pessoa acabou de dizer.
+- Sempre que possível, termine com uma pergunta curta e estratégica.
+- Nunca reinicie a conversa sem necessidade.
+- Nunca repita blocos iguais.
+- Nunca use a palavra “técnico”, “técnica”, “curso técnico” ou “cursos técnicos”.
+- Sempre use “curso”, “curso profissionalizante”, “formação”, “capacitação” ou “qualificação”.
+- Se o assunto for segunda via, mensalidade, boleto atrasado, fatura ou parcela, oriente para o fluxo correto de boleto.
+- Se a pessoa pedir lista de cursos, cite os cursos disponíveis de forma organizada.
+- Se a pessoa pedir recomendação, indique algumas opções com base no objetivo dela.
 - Nunca invente cursos fora da lista conhecida.
 - Nunca prometa emprego.
 - Nunca prometa estágio garantido.
-- Nunca peça CPF fora do fluxo de boleto.
-- Se o assunto for boleto, 2ª via, mensalidade, pagamento de parcela, fatura ou CPF para consulta, oriente a pessoa a digitar BOLETO.
-- Se pedirem preço, explique primeiro o valor percebido e depois a condição.
-- Se a pessoa responder apenas “sim”, “quero”, “ok”, “claro” ou algo curto, continue exatamente do ponto anterior da conversa.
-- Nunca reinicie a conversa sem necessidade.
-- Nunca pergunte novamente qual curso a pessoa quer se ela já informou o curso.
-- Nunca use a palavra “mensalidade” para vender. Diga que o curso não possui mensalidade e que existe apenas a taxa do material didático digital e acesso à plataforma.
 
-COMO EXPLICAR O CURSO:
-- curso online
+COMO EXPLICAR OS CURSOS:
+- online
 - plataforma 24 horas
 - materiais digitais
 - videoaulas
@@ -1277,41 +1404,33 @@ CONDIÇÕES:
 - cartão: use somente a condição oficial do contexto
 - se a pessoa conseguir dar entrada de R$100,00, podemos descontar o equivalente a 2 parcelas
 
-Se não houver valor oficial de cartão, diga que confirma a condição certinha no fechamento.
-
 ESTILO:
 - humano
-- simpático
 - acolhedor
-- vendedor consultivo
-- sem exagero
+- consultivo
+- convincente sem exagero
+- leve
+- comercial
+- inteligente
 - sem parecer script engessado
-- com tato comercial
-- com senso de progressão
 
 ESTRATÉGIA:
-1. Acolher
-2. Descobrir curso ou área
-3. Entender objetivo
-4. Gerar valor
-5. Tratar objeção
-6. Apresentar condição
-7. Encaminhar para matrícula
+1. acolher
+2. entender interesse
+3. entender objetivo
+4. gerar valor
+5. tratar objeções
+6. apresentar condição
+7. conduzir ao fechamento
 
-QUANDO O LEAD ESTIVER QUENTE:
-Conduza para coletar:
-- nome completo
-- curso escolhido
-- forma de pagamento
-
-SE O LEAD ESTIVER FRIO:
-Seja mais leve, descubra a área, gere curiosidade e valor antes de falar de matrícula.
+SE A PESSOA PEDIR CURSOS:
+Apresente os cursos de forma organizada e natural.
 
 SE A PESSOA DISSER QUE NÃO TEM TEMPO:
-Valorize flexibilidade e acesso 24h.
+Destaque flexibilidade, acesso 24 horas e estudo no próprio ritmo.
 
 SE A PESSOA ACHAR CARO:
-Explique que não é mensalidade, e sim taxa referente a material digital, plataforma, videoaulas, atividades, avaliações e suporte.
+Explique que não é mensalidade, e sim taxa referente ao material didático digital e acesso à plataforma com videoaulas, atividades, avaliações e suporte.
 
 DADOS JÁ CONHECIDOS:
 ${knownData || "nenhum dado ainda."}
@@ -1345,11 +1464,15 @@ function fallbackSalesReply(phone, userText) {
   const course = detectCourseMention(userText) || convo.salesLead?.course || "";
   const intent = detectIntent(userText);
 
+  if (looksLikeAskingAllCourses(userText)) {
+    return buildAllCoursesMessage();
+  }
+
   if (looksLikeHello(userText)) {
     return (
       "Oi! 😊 Que bom falar com você.\n\n" +
-      "Eu posso te ajudar a encontrar um curso que combine com o seu objetivo.\n\n" +
-      "Me conta: qual curso ou área você tem mais interesse?"
+      "Eu posso te ajudar a encontrar uma formação que combine com o seu objetivo.\n\n" +
+      "Me conta: qual área mais chamou sua atenção?"
     );
   }
 
@@ -1370,7 +1493,7 @@ function fallbackSalesReply(phone, userText) {
     return (
       "Eu entendo 😊\n\n" +
       "Mas esse valor não é mensalidade, tá?\n" +
-      "É referente ao material didático digital e ao acesso à plataforma, com videoaulas, apostilas, atividades, avaliações e suporte pedagógico.\n\n" +
+      "É referente ao material didático digital e ao acesso à plataforma, com videoaulas, materiais, atividades, avaliações e suporte pedagógico.\n\n" +
       `Hoje temos estas condições:\n💰 Boleto: R$960,00 em 12x de R$80,00\n${buildCardConditionText()}\n💵 Pix / à vista: R$550,00\n\n` +
       "Qual forma ficaria mais leve para você?"
     );
@@ -1389,7 +1512,7 @@ function fallbackSalesReply(phone, userText) {
     return (
       `Ótima escolha 😊 O curso de ${course} é totalmente online, com acesso à plataforma 24 horas.\n\n` +
       "Você estuda no seu ritmo, com videoaulas, materiais digitais, atividades, exercícios e avaliações.\n\n" +
-      "Se quiser, eu posso te explicar melhor como ele funciona e para quem esse curso costuma ser mais indicado."
+      "Se quiser, eu posso te explicar melhor como ele funciona e para quem ele costuma ser mais indicado."
     );
   }
 
@@ -1404,7 +1527,7 @@ function fallbackSalesReply(phone, userText) {
   if (looksLikeAskingContent(userText)) {
     return (
       "Claro 😊\n\n" +
-      "O curso é feito pela plataforma online da escola, e você estuda com materiais digitais, vídeos, atividades, exercícios e avaliações, tudo no seu ritmo.\n\n" +
+      "Os cursos funcionam pela plataforma online da escola, com materiais digitais, videoaulas, atividades, exercícios e avaliações, tudo no seu ritmo.\n\n" +
       "A plataforma fica disponível 24 horas e a recomendação é fazer 2 aulas por semana.\n\n" +
       "Qual área chamou mais sua atenção?"
     );
@@ -1482,6 +1605,7 @@ async function generateOpenAIReply(phone, userText) {
 
       let text = extractOpenAIText(resp.data);
       text = normalizeAiReply(text);
+      text = sanitizeForbiddenWords(text);
 
       if (!text || text.length < 12) {
         text = fallbackSalesReply(phone, userText);
@@ -1490,6 +1614,8 @@ async function generateOpenAIReply(phone, userText) {
       if (String(incompleteReason).includes("max_output_tokens") && (!text || text.length < 20)) {
         text = fallbackSalesReply(phone, userText);
       }
+
+      text = sanitizeForbiddenWords(text);
 
       pushAIHistory(phone, "user", userText);
       pushAIHistory(phone, "assistant", text);
@@ -1506,7 +1632,7 @@ async function generateOpenAIReply(phone, userText) {
 
   console.error("[OPENAI ERROR FINAL]", lastError?.message || lastError);
 
-  const fallback = fallbackSalesReply(phone, userText);
+  const fallback = sanitizeForbiddenWords(fallbackSalesReply(phone, userText));
   pushAIHistory(phone, "user", userText);
   pushAIHistory(phone, "assistant", fallback);
   return fallback;
@@ -1527,6 +1653,7 @@ function shouldUseAI(text, convo) {
   if (convo.step === "awaiting_cpf") return false;
   if (convo.step === "awaiting_confirmation") return false;
   if (convo.step === "processing") return false;
+  if (convo.awaitingBoletoIntent) return false;
 
   return true;
 }
@@ -2426,7 +2553,7 @@ async function startCreateZeroFromSalesLead(phone) {
   await sendMetaTextSmart(
     phone,
     `Perfeito 😊\n\n` +
-      `Vamos seguir com a matrícula no boleto para o curso de ${lead.course || "seu curso"}.\n\n` +
+      `Vamos seguir com a nova matrícula no boleto para o curso de ${lead.course || "seu curso"}.\n\n` +
       `Agora me envie o *CPF do aluno* para eu criar o carnê no PagSchool.`
   );
 }
@@ -2438,7 +2565,7 @@ async function handleCreateZeroFlow(phone, text) {
 
   if (looksLikeCancel(clean)) {
     resetConversation(phone);
-    await sendMetaTextSmart(phone, "Tudo bem. Processo cancelado.\n\nQuando quiser recomeçar, envie *criar carnê*.");
+    await sendMetaTextSmart(phone, "Tudo bem. Processo cancelado.\n\nQuando quiser recomeçar, envie *nova matrícula*.");
     return true;
   }
 
@@ -2603,6 +2730,80 @@ async function handleCreateZeroFlow(phone, text) {
   return false;
 }
 
+async function askBoletoIntent(phone) {
+  const convo = getConversation(phone);
+  convo.awaitingBoletoIntent = true;
+  convo.step = "awaiting_boleto_intent";
+  scheduleSaveConversations();
+
+  await sendMetaTextSmart(
+    phone,
+    "Perfeito 😊\n\nPara eu te atender da forma certa, me confirma uma coisa:\n\n" +
+      "Você deseja fazer uma *nova matrícula* ou você *já é um de nossos alunos*?\n\n" +
+      "Responda com uma destas opções:\n" +
+      "• *Nova matrícula*\n" +
+      "• *Já sou aluno*"
+  );
+}
+
+async function handleBoletoIntentAnswer(phone, text) {
+  const convo = getConversation(phone);
+  const clean = String(text || "").trim();
+
+  if (!convo.awaitingBoletoIntent && convo.step !== "awaiting_boleto_intent") {
+    return false;
+  }
+
+  if (looksLikeCancel(clean)) {
+    convo.awaitingBoletoIntent = false;
+    convo.step = "idle";
+    scheduleSaveConversations();
+    await sendMetaTextSmart(phone, "Tudo bem 😊 Quando quiser, me chame novamente.");
+    return true;
+  }
+
+  if (looksLikeNewEnrollmentAnswer(clean)) {
+    convo.awaitingBoletoIntent = false;
+
+    if (leadHasMinimumDataForCreateZero(convo.salesLead)) {
+      await startCreateZeroFromSalesLead(phone);
+      return true;
+    }
+
+    convo.step = "create_zero_nome";
+    convo.pendingCreateZero = {};
+    scheduleSaveConversations();
+
+    await sendMetaTextSmart(
+      phone,
+      "Perfeito 😊\n\nVamos fazer sua *nova matrícula*.\n\nMe envie o *nome completo do aluno*."
+    );
+    return true;
+  }
+
+  if (looksLikeExistingStudentAnswer(clean)) {
+    convo.awaitingBoletoIntent = false;
+    convo.step = "awaiting_cpf";
+    convo.pendingBoleto = null;
+    scheduleSaveConversations();
+
+    await sendMetaTextSmart(
+      phone,
+      "Perfeito 😊\n\nComo você já é nosso aluno, me envie o *CPF do aluno* para eu localizar o boleto."
+    );
+    return true;
+  }
+
+  await sendMetaTextSmart(
+    phone,
+    "Para eu seguir certo, me responda assim:\n\n" +
+      "• *Nova matrícula*\n" +
+      "ou\n" +
+      "• *Já sou aluno*"
+  );
+  return true;
+}
+
 /* =========================================================
    INBOUND TEXT
 ========================================================= */
@@ -2656,7 +2857,12 @@ async function processUserMessage(phone, text) {
     step: convo.step,
     salesStage: convo.salesLead?.stage,
     lastSalesPromptType: convo.lastSalesPromptType,
+    awaitingBoletoIntent: convo.awaitingBoletoIntent,
   });
+
+  if (await handleBoletoIntentAnswer(phone, cleanText)) {
+    return;
+  }
 
   if (looksLikeCreateCarnetRequest(cleanText)) {
     await startCreateZeroFlow(phone);
@@ -2687,21 +2893,7 @@ async function processUserMessage(phone, text) {
   ) {
     convo.salesLead.paymentMethod = "Boleto";
     scheduleSaveConversations();
-
-    if (leadHasMinimumDataForCreateZero(convo.salesLead)) {
-      await startCreateZeroFromSalesLead(phone);
-      return;
-    }
-
-    await sendMetaTextSmart(
-      phone,
-      "Perfeito 😊\n\n" +
-        "Vamos seguir no boleto.\n\n" +
-        "Antes de criar o carnê, preciso confirmar:\n" +
-        `• Nome completo\n` +
-        `• Curso escolhido\n\n` +
-        "Pode me enviar esses dados?"
-    );
+    await askBoletoIntent(phone);
     return;
   }
 
@@ -2711,6 +2903,11 @@ async function processUserMessage(phone, text) {
   ) {
     const handled = await handleCreateZeroFlow(phone, digits);
     if (handled) return;
+  }
+
+  if (shouldAskBoletoIntent(convo, cleanText)) {
+    await askBoletoIntent(phone);
+    return;
   }
 
   if (looksLikeExistingBoletoRequest(cleanText)) {
@@ -2754,14 +2951,17 @@ async function processUserMessage(phone, text) {
   ) {
     convo.salesLead.paymentMethod = "Boleto";
     scheduleSaveConversations();
-
-    if (leadHasMinimumDataForCreateZero(convo.salesLead)) {
-      await startCreateZeroFromSalesLead(phone);
-      return;
-    }
+    await askBoletoIntent(phone);
+    return;
   }
 
   if (await handleContextualShortReply(phone, cleanText)) {
+    return;
+  }
+
+  if (looksLikeAskingAllCourses(cleanText)) {
+    await sendMetaTextSmart(phone, buildAllCoursesMessage());
+    setLastSalesPromptType(phone, "list_all_courses");
     return;
   }
 
@@ -2778,16 +2978,14 @@ async function processUserMessage(phone, text) {
 
       const detectedStage = detectReplyStageFromText(aiReply, Boolean(convo.salesLead?.course));
       setLastSalesPromptType(phone, detectedStage);
-
       return;
     } catch (error) {
       console.error("[OPENAI ERROR]", error?.message || error);
-      const fallback = fallbackSalesReply(phone, cleanText);
+      const fallback = sanitizeForbiddenWords(fallbackSalesReply(phone, cleanText));
       await sendMetaTextSmart(phone, fallback);
 
       const detectedStage = detectReplyStageFromText(fallback, Boolean(convo.salesLead?.course));
       setLastSalesPromptType(phone, detectedStage);
-
       return;
     }
   }
@@ -2946,7 +3144,7 @@ app.get("/debug/env", (_req, res) => {
 
 app.get("/debug/openai/test", async (req, res) => {
   try {
-    const prompt = String(req.query.q || "quero saber sobre o curso de administração");
+    const prompt = String(req.query.q || "quais cursos vocês têm?");
     const reply = await generateOpenAIReply("debug-openai", prompt);
     res.json({ ok: true, model: OPENAI_MODEL, reply });
   } catch (error) {
@@ -3132,7 +3330,7 @@ app.get("/debug/pagschool/test-create-zero", async (_req, res) => {
       cpf: "11111111111",
       telefoneCelular: "13999999999",
       email: "teste@exemplo.com",
-      nomeCurso: "ATEND FARMACIA",
+      nomeCurso: "Farmácia",
       valorParcela: 99.9,
       quantidadeParcelas: 12,
       duracaoCurso: 12,
