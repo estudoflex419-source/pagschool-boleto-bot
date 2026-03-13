@@ -1,4 +1,4 @@
-   require("dotenv").config();
+    require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -3933,11 +3933,15 @@ async function generateEnrollmentBoleto(dados) {
     const convo = getConversation(phone);
     const lead = convo.salesLead || {};
     const previous = convo.pendingCreateZero || {};
+    const previousCpf = onlyDigits(previous.cpf || "");
+    const hasPrefilledCpf = isValidCpf(previousCpf);
+    const prefilledPhone = onlyDigits(previous.telefoneCelular || phone);
 
     convo.pendingCreateZero = {
       nomeAluno: lead.name || previous.nomeAluno || "",
       nomeCurso: lead.course || previous.nomeCurso || "",
-      telefoneCelular: onlyDigits(phone),
+      cpf: hasPrefilledCpf ? previousCpf : "",
+      telefoneCelular: prefilledPhone,
       email: previous.email || "",
       valorParcela: getBoletoInstallmentValue(),
       quantidadeParcelas: BOLETO_INSTALLMENTS,
@@ -3954,9 +3958,17 @@ async function generateEnrollmentBoleto(dados) {
       vencimento: formatDateToYYYYMMDD(nowTs() + FIRST_DUE_IN_DAYS * 24 * 60 * 60 * 1000),
     };
 
-    convo.step = "create_zero_cpf";
+    convo.step = hasPrefilledCpf ? "create_zero_confirmacao" : "create_zero_cpf";
     scheduleSaveConversations();
     syncLeadProfileFromConversation(phone);
+
+    if (hasPrefilledCpf) {
+      await moveCreateZeroToConfirmation(
+        phone,
+        `Perfeito 😊\n\nJá preenchi seus dados para a matrícula no boleto do curso de ${lead.course || "seu curso"}.`
+      );
+      return;
+    }
 
     let msg =
       `Perfeito ðŸ˜Š\n\nVamos seguir com a nova matrÃ­cula no boleto para o curso de ${lead.course || "seu curso"}.\n\n`;
@@ -4419,7 +4431,7 @@ async function startBoletoEnrollmentFlow(phone) {
 
   await sendMetaTextSmart(
     phone,
-    "Perfeito. Como você escolheu *boleto*, agora vou solicitar seus dados para já gerar seu boleto.\n\nMe envie seu *nome completo*."
+    "Perfeito. Como você escolheu *boleto*, agora vou solicitar seus dados para já gerar seu boleto.\n\nMe envie seu *nome completo*.\n\nSe preferir, pode mandar em uma única mensagem: *Nome completo + CPF*."
   );
 }
 
@@ -4440,6 +4452,18 @@ async function startBoletoEnrollmentFlow(phone) {
 
     if (!convo.pendingCreateZero.email && combined.email) {
       convo.pendingCreateZero.email = combined.email;
+    }
+
+    const cpfFromText = onlyDigits(trimmed);
+    if (!convo.pendingCreateZero.cpf && isValidCpf(cpfFromText)) {
+      convo.pendingCreateZero.cpf = cpfFromText;
+    }
+
+    if (!convo.pendingCreateZero.telefoneCelular) {
+      const maybePhone = onlyDigits(trimmed);
+      if (maybePhone.length >= 10 && maybePhone.length <= 13) {
+        convo.pendingCreateZero.telefoneCelular = maybePhone;
+      }
     }
 
     const course = detectCourseMention(trimmed);
@@ -4561,6 +4585,25 @@ async function handleIntent(phone, text) {
         phone,
         buildNegotiationReply(0, convo.salesLead.course)
       );
+      return true;
+
+    case "payment_boleto":
+      if (convo.entryDirection === "existing_student") return false;
+
+      if (!convo.salesLead?.course) {
+        await sendMetaTextSmart(
+          phone,
+          "Perfeito. Para gerar seu boleto de matrícula, me fala primeiro qual curso você escolheu."
+        );
+        return true;
+      }
+
+      convo.entryDirection = "new_enrollment";
+      convo.step = "idle";
+      convo.updatedAt = nowTs();
+      scheduleSaveConversations();
+      syncLeadProfileFromConversation(phone);
+      await startBoletoEnrollmentFlow(phone);
       return true;
 
     case "course_interest":
