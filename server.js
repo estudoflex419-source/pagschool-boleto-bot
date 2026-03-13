@@ -4574,19 +4574,25 @@ async function handleIntent(phone, text) {
     convo.lastUserTextAt = nowTs();
 
     updateLeadFromText(phone, cleanText);
-    const detectedCourse = detectCourseMention(cleanText);
-
-    if (!detectedCourse && /curso|estudar|fazer/i.test(cleanText)) {
-      await sendMetaTextSmart(
-        phone,
-        "Não encontrei esse curso no nosso catálogo. Posso te mostrar as opções disponíveis."
-      );
-      return;
-    }
 
     const handledIntent = await handleIntent(phone, cleanText);
 
     if (handledIntent) {
+      return;
+    }
+
+    const detectedCourse = detectCourseMention(cleanText);
+    const classifiedIntent = classifyUserIntent(cleanText);
+
+    if (
+      !detectedCourse &&
+      !["greeting", "menu", "list_courses", "enroll", "payment_boleto", "boleto_second_copy"].includes(classifiedIntent) &&
+      /(curso de|curso em|quero o curso|quero curso|sobre o curso|esse curso|estudar o curso|fazer o curso)/i.test(cleanText)
+    ) {
+      await sendMetaTextSmart(
+        phone,
+        "Não encontrei esse curso no nosso catálogo. Posso te mostrar as opções disponíveis."
+      );
       return;
     }
 
