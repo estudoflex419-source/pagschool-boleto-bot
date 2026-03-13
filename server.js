@@ -1,4 +1,4 @@
-    require("dotenv").config();
+      require("dotenv").config();
 
   const express = require("express");
   const cors = require("cors");
@@ -81,6 +81,14 @@
     const digits = onlyDigits(value);
     if (digits.length !== 11) return digits;
     return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
+  }
+
+  function normalizePhoneForPagSchool(value) {
+    const digits = onlyDigits(value);
+    if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+      return digits.slice(2);
+    }
+    return digits;
   }
 
 function isCpf(value) {
@@ -184,6 +192,10 @@ function isValidCpf(value) {
         normalized
       )
     ) {
+      return false;
+    }
+
+    if (/\bquer\b|condicao|condicoes|condição|condições/.test(normalized)) {
       return false;
     }
 
@@ -419,7 +431,7 @@ function normalizeOutgoingText(text) {
   function extractNameAndEmail(text) {
     const email = extractEmail(text);
     const clean = String(text || "").replace(email, "").trim();
-    const normalizedName = extractLikelyName(clean) || toTitleCase(clean);
+    const normalizedName = extractLikelyName(clean);
     return {
       name: normalizedName || "",
       email: email || "",
@@ -3512,7 +3524,7 @@ function fallbackSalesReply(phone, userText) {
   async function createAlunoPagSchool(dados) {
     const payload = {
       cpf: onlyDigits(dados.cpf),
-      telefoneCelular: onlyDigits(dados.telefoneCelular || dados.telefone || ""),
+      telefoneCelular: normalizePhoneForPagSchool(dados.telefoneCelular || dados.telefone || ""),
       telefoneFixo: onlyDigits(dados.telefoneFixo || ""),
       nomeAluno: String(dados.nomeAluno || "").trim(),
       dataNascimento: formatDateToYYYYMMDD(dados.dataNascimento || "1990-01-01"),
@@ -3885,6 +3897,7 @@ async function generateEnrollmentBoleto(dados) {
   }
 
   function fillCreateZeroDefaults(data = {}) {
+    data.nomeAluno = isLikelyPersonName(data.nomeAluno) ? toTitleCase(data.nomeAluno) : "";
     data.genero = data.genero || DEFAULT_GENERO;
     data.cep = data.cep || DEFAULT_CEP;
     data.logradouro = data.logradouro || DEFAULT_LOGRADOURO;
@@ -3893,6 +3906,7 @@ async function generateEnrollmentBoleto(dados) {
     data.localidade = data.localidade || DEFAULT_LOCALIDADE;
     data.uf = data.uf || DEFAULT_UF;
     data.dataNascimento = data.dataNascimento || "1990-01-01";
+    data.telefoneCelular = normalizePhoneForPagSchool(data.telefoneCelular || "");
     data.valorParcela = Number(data.valorParcela || getBoletoInstallmentValue());
     data.quantidadeParcelas = Number(data.quantidadeParcelas || BOLETO_INSTALLMENTS);
     data.duracaoCurso = Number(data.duracaoCurso || data.quantidadeParcelas || BOLETO_INSTALLMENTS);
@@ -3935,11 +3949,20 @@ async function generateEnrollmentBoleto(dados) {
     const previous = convo.pendingCreateZero || {};
     const previousCpf = onlyDigits(previous.cpf || "");
     const hasPrefilledCpf = isValidCpf(previousCpf);
-    const prefilledPhone = onlyDigits(previous.telefoneCelular || phone);
+    const prefilledPhone = normalizePhoneForPagSchool(previous.telefoneCelular || phone);
+    const hasPrefilledPhone = prefilledPhone.length >= 10;
+    const prefilledName = isLikelyPersonName(lead.name)
+      ? toTitleCase(lead.name)
+      : isLikelyPersonName(previous.nomeAluno)
+      ? toTitleCase(previous.nomeAluno)
+      : "";
+    const hasPrefilledName = Boolean(prefilledName);
+    const prefilledCourse = String(lead.course || previous.nomeCurso || "").trim();
+    const hasPrefilledCourse = Boolean(prefilledCourse);
 
     convo.pendingCreateZero = {
-      nomeAluno: lead.name || previous.nomeAluno || "",
-      nomeCurso: lead.course || previous.nomeCurso || "",
+      nomeAluno: prefilledName,
+      nomeCurso: prefilledCourse,
       cpf: hasPrefilledCpf ? previousCpf : "",
       telefoneCelular: prefilledPhone,
       email: previous.email || "",
@@ -3958,14 +3981,29 @@ async function generateEnrollmentBoleto(dados) {
       vencimento: formatDateToYYYYMMDD(nowTs() + FIRST_DUE_IN_DAYS * 24 * 60 * 60 * 1000),
     };
 
-    convo.step = hasPrefilledCpf ? "create_zero_confirmacao" : "create_zero_cpf";
+    const canGoDirectConfirmation = hasPrefilledName && hasPrefilledCpf && hasPrefilledPhone && hasPrefilledCourse;
+    if (canGoDirectConfirmation) convo.step = "create_zero_confirmacao";
+    else if (!hasPrefilledName) convo.step = "create_zero_nome";
+    else if (!hasPrefilledCpf) convo.step = "create_zero_cpf";
+    else if (!hasPrefilledPhone) convo.step = "create_zero_telefone";
+    else if (!hasPrefilledCourse) convo.step = "create_zero_curso";
+    else convo.step = "create_zero_cpf";
+
     scheduleSaveConversations();
     syncLeadProfileFromConversation(phone);
 
-    if (hasPrefilledCpf) {
+    if (canGoDirectConfirmation) {
       await moveCreateZeroToConfirmation(
         phone,
         `Perfeito 😊\n\nJá preenchi seus dados para a matrícula no boleto do curso de ${lead.course || "seu curso"}.`
+      );
+      return;
+    }
+
+    if (!hasPrefilledName) {
+      await sendMetaTextSmart(
+        phone,
+        "Perfeito 😊\n\nPara criar seu boleto de matrícula, me envie seu *nome completo*."
       );
       return;
     }
@@ -3998,7 +4036,7 @@ async function generateEnrollmentBoleto(dados) {
     }
 
     if (convo.step === "create_zero_nome") {
-      const nome = extractLikelyName(clean) || toTitleCase(clean);
+      const nome = extractLikelyName(clean);
       if (!nome || nome.length < 5) {
         await sendMetaTextSmart(phone, "Me envie o *nome completo do aluno*.");
         return true;
@@ -4020,7 +4058,7 @@ async function generateEnrollmentBoleto(dados) {
 
       data.cpf = cpf;
       if (data.lockCommercialValues) {
-        const currentPhone = onlyDigits(data.telefoneCelular || phone);
+        const currentPhone = normalizePhoneForPagSchool(data.telefoneCelular || phone);
         data.telefoneCelular = currentPhone;
 
         if (currentPhone.length < 10) {
@@ -4051,7 +4089,7 @@ async function generateEnrollmentBoleto(dados) {
     }
 
     if (convo.step === "create_zero_telefone") {
-      const tel = onlyDigits(clean);
+      const tel = normalizePhoneForPagSchool(clean);
       if (tel.length < 10) {
         await sendMetaTextSmart(phone, "Telefone inválido. Me envie o *telefone com DDD*.");
         return true;
@@ -4183,6 +4221,31 @@ async function generateEnrollmentBoleto(dados) {
       }
 
       fillCreateZeroDefaults(data);
+      if (!isLikelyPersonName(data.nomeAluno)) {
+        convo.step = "create_zero_nome";
+        scheduleSaveConversations();
+        await sendMetaTextSmart(phone, "Faltou um *nome completo válido* para gerar o boleto. Me envie o nome completo do aluno.");
+        return true;
+      }
+      if (!isValidCpf(data.cpf)) {
+        convo.step = "create_zero_cpf";
+        scheduleSaveConversations();
+        await sendMetaTextSmart(phone, "Faltou um *CPF válido* para gerar o boleto. Me envie o CPF com 11 números.");
+        return true;
+      }
+      if (normalizePhoneForPagSchool(data.telefoneCelular || "").length < 10) {
+        convo.step = "create_zero_telefone";
+        scheduleSaveConversations();
+        await sendMetaTextSmart(phone, "Faltou um *telefone válido com DDD* para gerar o boleto.");
+        return true;
+      }
+      if (!String(data.nomeCurso || "").trim()) {
+        convo.step = "create_zero_curso";
+        scheduleSaveConversations();
+        await sendMetaTextSmart(phone, "Faltou o *curso escolhido* para gerar o boleto.");
+        return true;
+      }
+
       let finalData = applyEntryDiscountIfAllowed({ ...data }, convo);
       if (data.lockCommercialValues && !convo.entryProofReceived) {
         finalData = {
@@ -4460,7 +4523,7 @@ async function startBoletoEnrollmentFlow(phone) {
     }
 
     if (!convo.pendingCreateZero.telefoneCelular) {
-      const maybePhone = onlyDigits(trimmed);
+      const maybePhone = normalizePhoneForPagSchool(trimmed);
       if (maybePhone.length >= 10 && maybePhone.length <= 13) {
         convo.pendingCreateZero.telefoneCelular = maybePhone;
       }
