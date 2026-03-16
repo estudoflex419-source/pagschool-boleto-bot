@@ -59,6 +59,10 @@ app.get("/meta/webhook", (req, res) => {
   }
 })
 
+function isEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim())
+}
+
 function resetConversation(convo) {
   Object.assign(convo, {
     step: "menu",
@@ -70,6 +74,7 @@ function resetConversation(convo) {
     name: "",
     cpf: "",
     birthDate: "",
+    email: "",
     gender: "",
     phone: "",
     cep: "",
@@ -323,6 +328,16 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
       }
 
       convo.birthDate = text
+      convo.step = "collecting_email"
+      return { text: "Perfeito 😊 Agora me envie seu melhor e-mail." }
+    }
+
+    if (convo.step === "collecting_email") {
+      if (!isEmailAddress(text)) {
+        return { text: "Me envie um e-mail válido, por favor. Exemplo: nome@dominio.com" }
+      }
+
+      convo.email = String(text || "").trim().toLowerCase()
       convo.step = "collecting_gender"
       return { text: sales.askGender() }
     }
@@ -425,6 +440,7 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
         telefoneCelular: convo.phone || "",
         nomeAluno: convo.name,
         dataNascimento: convo.birthDate,
+        email: convo.email,
         uf: convo.state,
         genero: convo.gender,
         cep: convo.cep,
@@ -445,11 +461,11 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
 
       if (created?.error) {
         return {
-          text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do boleto.
+          text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do carnê.
 
 Motivo: ${created.error}
 
-Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do carnê.`
+Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do boleto.`
         }
       }
 
