@@ -9,17 +9,12 @@ module.exports = {
   META_VERIFY_TOKEN: process.env.META_VERIFY_TOKEN || "",
 
   OPENAI_KEY: process.env.OPENAI_API_KEY || "",
+  OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4.1-mini",
 
   PAGSCHOOL_BASE_URL:
     process.env.PAGSCHOOL_BASE_URL ||
     process.env.PAGSCHOOL_ENDPOINT ||
     "",
   PAGSCHOOL_EMAIL: process.env.PAGSCHOOL_EMAIL || "",
-  PAGSCHOOL_PASSWORD: process.env.PAGSCHOOL_PASSWORD || "",
-
-  // aliases para compatibilidade com código antigo
-  PAGSCHOOL_URL:
-    process.env.PAGSCHOOL_BASE_URL ||
-    process.env.PAGSCHOOL_ENDPOINT ||
-    ""
+  PAGSCHOOL_PASSWORD: process.env.PAGSCHOOL_PASSWORD || ""
 }
