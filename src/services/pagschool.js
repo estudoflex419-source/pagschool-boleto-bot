@@ -335,7 +335,8 @@ function buildContractPayload(input, alunoId) {
     vencimentoPrimeiraParcela: buildFirstDueDate(dueDay),
     descontoAdimplencia: plan.descontoAdimplencia,
     descontoAdimplenciaValorFixo: plan.descontoAdimplenciaValorFixo,
-    aluno_id: alunoId
+    aluno_id: alunoId,
+    numeroParcelaInicial: 1
   }
 }
 
