@@ -8,10 +8,23 @@ const morgan = require("morgan")
 const { PORT, META_VERIFY_TOKEN } = require("./config")
 const { sendText } = require("./services/meta")
 const { askAI } = require("./services/openai")
-const { buscarAluno } = require("./services/pagschool")
+const {
+  obterSegundaViaPorCpf,
+  criarMatriculaComCarne
+} = require("./services/pagschool")
 const { getConversation } = require("./crm/conversations")
 const sales = require("./sales/salesFlow")
-const { normalize, isCPF } = require("./utils/text")
+const {
+  normalize,
+  isCPF,
+  isDateBR,
+  detectGender,
+  isCEP,
+  isUF,
+  normalizeUF,
+  extractPhoneFromWhatsApp,
+  detectDueDay
+} = require("./utils/text")
 
 const app = express()
 
@@ -25,7 +38,7 @@ app.get("/health", (req, res) => {
 })
 
 app.get("/", (req, res) => {
-  res.send("ESTUDO FLEX BOT V2 ONLINE 🚀")
+  res.send("ESTUDO FLEX BOT V3 ONLINE 🚀")
 })
 
 app.get("/meta/webhook", (req, res) => {
@@ -47,34 +60,69 @@ app.get("/meta/webhook", (req, res) => {
 })
 
 function resetConversation(convo) {
-  convo.step = "menu"
-  convo.path = ""
-  convo.course = ""
-  convo.goal = ""
-  convo.experience = ""
-  convo.payment = ""
-  convo.name = ""
-  convo.cpf = ""
-  convo.lastQuestion = ""
+  Object.assign(convo, {
+    step: "menu",
+    path: "",
+    course: "",
+    goal: "",
+    experience: "",
+    payment: "",
+    name: "",
+    cpf: "",
+    birthDate: "",
+    gender: "",
+    phone: "",
+    cep: "",
+    street: "",
+    number: "",
+    complement: "",
+    neighborhood: "",
+    city: "",
+    state: "",
+    dueDay: "",
+    alunoId: null,
+    contratoId: null,
+    parcelaId: null,
+    nossoNumero: ""
+  })
 }
 
-async function processExistingStudent(cpf) {
-  try {
-    const aluno = await buscarAluno(cpf)
-
-    if (aluno) {
-      return "Perfeito 😊 Localizei seu cadastro. Agora vou seguir com a sua solicitação de segunda via."
-    }
-
-    return "Não encontrei cadastro com esse CPF. Se você quiser, eu também posso te ajudar com uma nova matrícula."
-  } catch (error) {
-    console.log("[PAGSCHOOL EXISTING STUDENT ERROR]", error.message)
-    return "Não consegui localizar seu cadastro agora. Me confirma seu CPF novamente, por favor."
+function buildSecondViaMessage(result) {
+  if (!result?.aluno) {
+    return "Não encontrei cadastro com esse CPF. Se quiser, eu também posso te ajudar com uma nova matrícula."
   }
+
+  if (!result?.parcela) {
+    return "Localizei seu cadastro, mas não encontrei parcela em aberto para gerar a segunda via agora."
+  }
+
+  const parts = ["Perfeito 😊 Localizei sua segunda via."]
+
+  if (result.contract?.nomeCurso) {
+    parts.push(`Curso: ${result.contract.nomeCurso}`)
+  }
+
+  if (result.parcela?.numeroParcela) {
+    parts.push(`Parcela: ${result.parcela.numeroParcela}`)
+  }
+
+  if (result.parcela?.vencimento) {
+    parts.push(`Vencimento: ${result.parcela.vencimento}`)
+  }
+
+  if (result.linhaDigitavel) {
+    parts.push(`Linha digitável: ${result.linhaDigitavel}`)
+  }
+
+  if (result.pdfUrl) {
+    parts.push(`PDF: ${result.pdfUrl}`)
+  }
+
+  return parts.join("\n")
 }
 
 async function fallbackAI(text, convo) {
-  return await askAI(text, {
+  return askAI(text, {
     step: convo.step,
     path: convo.path,
     course: convo.course,
@@ -105,6 +153,7 @@ async function processMessage(phone, text) {
     if (sales.isExistingStudentIntent(text) && convo.step !== "post_sale") {
       convo.path = "existing_student"
       convo.step = "existing_student_cpf"
+
       return "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
     }
 
@@ -114,8 +163,11 @@ async function processMessage(phone, text) {
       }
 
       convo.cpf = text
+
+      const secondVia = await obterSegundaViaPorCpf(text)
       convo.step = "existing_student_done"
-      return await processExistingStudent(text)
+
+      return buildSecondViaMessage(secondVia)
     }
 
     if (sales.isNewEnrollmentIntent(text) && convo.step !== "post_sale") {
@@ -157,12 +209,14 @@ Me diz qual curso te chamou mais atenção?`
     if (convo.step === "diagnosis_goal") {
       convo.goal = text
       convo.step = "diagnosis_experience"
+
       return "Entendi 😊 E você está começando do zero ou já teve algum contato com essa área?"
     }
 
     if (convo.step === "diagnosis_experience") {
       convo.experience = text
       convo.step = "offer_transition"
+
       return sales.buildValueConnection(convo)
     }
 
@@ -173,12 +227,14 @@ Me diz qual curso te chamou mais atenção?`
         sales.detectCloseMoment(text)
       ) {
         convo.step = "payment_choice"
+
         return `${sales.materialPitch()}
 
 ${sales.investmentMessage()}`
       }
 
       const aiReply = await fallbackAI(text, convo)
+
       if (aiReply) return aiReply
 
       return `Sem problema 😊
@@ -190,11 +246,13 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
       const paymentMethod = sales.detectPaymentMethod(text)
 
       if (!paymentMethod) {
-        return "Sem problema 😊 Me diz qual opção fica melhor para você: boleto, cartão ou PIX?"
+        return "Sem problema 😊 Me diz qual opção fica melhor para você: Carnê, cartão ou PIX?"
       }
 
       convo.payment = paymentMethod
+      convo.phone = extractPhoneFromWhatsApp(phone) || ""
       convo.step = "collecting_name"
+
       return sales.askName(convo.course, convo.payment)
     }
 
@@ -210,8 +268,125 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
       }
 
       convo.cpf = text
+      convo.step = "collecting_birth"
+      return sales.askBirthDate()
+    }
+
+    if (convo.step === "collecting_birth") {
+      if (!isDateBR(text)) {
+        return "Me envie sua data de nascimento no formato DD/MM/AAAA, por favor."
+      }
+
+      convo.birthDate = text
+      convo.step = "collecting_gender"
+      return sales.askGender()
+    }
+
+    if (convo.step === "collecting_gender") {
+      const gender = detectGender(text)
+
+      if (!gender) {
+        return "Me responda com M para masculino ou F para feminino."
+      }
+
+      convo.gender = gender
+      convo.step = "collecting_cep"
+      return sales.askCEP()
+    }
+
+    if (convo.step === "collecting_cep") {
+      if (!isCEP(text)) {
+        return "Me envie seu CEP com 8 números, por favor."
+      }
+
+      convo.cep = text
+      convo.step = "collecting_street"
+      return sales.askStreet()
+    }
+
+    if (convo.step === "collecting_street") {
+      convo.street = text
+      convo.step = "collecting_number"
+      return sales.askNumber()
+    }
+
+    if (convo.step === "collecting_number") {
+      if (!String(text || "").trim()) {
+        return "Me envie o número do endereço, por favor."
+      }
+
+      convo.number = String(text).trim()
+      convo.step = "collecting_complement"
+      return sales.askComplement()
+    }
+
+    if (convo.step === "collecting_complement") {
+      convo.complement = /sem complemento/i.test(text) ? "" : text
+      convo.step = "collecting_neighborhood"
+      return sales.askNeighborhood()
+    }
+
+    if (convo.step === "collecting_neighborhood") {
+      convo.neighborhood = text
+      convo.step = "collecting_city"
+      return sales.askCity()
+    }
+
+    if (convo.step === "collecting_city") {
+      convo.city = text
+      convo.step = "collecting_state"
+      return sales.askState()
+    }
+
+    if (convo.step === "collecting_state") {
+      if (!isUF(text)) {
+        return "Me envie apenas a sigla do estado, por favor. Exemplo: SP."
+      }
+
+      convo.state = normalizeUF(text)
+
+      if (convo.payment === "Carnê") {
+        convo.step = "collecting_due_day"
+        return sales.askDueDay()
+      }
+
       convo.step = "post_sale"
-      return sales.finalEnrollmentMessage(convo)
+      return sales.cardOrPixMessage(convo)
+    }
+
+    if (convo.step === "collecting_due_day") {
+      const dueDay = detectDueDay(text)
+
+      if (!dueDay) {
+        return "Me informe um dia de vencimento entre 1 e 28, por favor."
+      }
+
+      convo.dueDay = dueDay
+
+      const created = await criarMatriculaComCarne({
+        cpf: convo.cpf,
+        telefoneCelular: convo.phone || "",
+        nomeAluno: convo.name,
+        dataNascimento: convo.birthDate,
+        uf: convo.state,
+        genero: convo.gender,
+        cep: convo.cep,
+        logradouro: convo.street,
+        enderecoComplemento: convo.complement,
+        bairro: convo.neighborhood,
+        local: convo.city,
+        numero: convo.number,
+        nomeCurso: convo.course,
+        dueDay
+      })
+
+      convo.step = "post_sale"
+
+      const secondViaText = buildSecondViaMessage(created.secondVia)
+
+      return `${sales.finalEnrollmentMessage(convo)}
+
+${secondViaText}`
     }
 
     if (convo.step === "post_sale") {
@@ -222,6 +397,7 @@ Se surgir qualquer dúvida, pode me chamar por aqui.`
     }
 
     const aiReply = await fallbackAI(text, convo)
+
     if (aiReply) return aiReply
 
     return sales.menu()
