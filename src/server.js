@@ -6,11 +6,12 @@ const helmet = require("helmet")
 const morgan = require("morgan")
 
 const { PORT, META_VERIFY_TOKEN } = require("./config")
-const { sendText } = require("./services/meta")
+const { sendText, sendDocument } = require("./services/meta")
 const { askAI } = require("./services/openai")
 const {
   obterSegundaViaPorCpf,
-  criarMatriculaComCarne
+  criarMatriculaComCarne,
+  baixarPdfParcela
 } = require("./services/pagschool")
 const { getConversation } = require("./crm/conversations")
 const sales = require("./sales/salesFlow")
@@ -33,12 +34,12 @@ app.use(helmet({ contentSecurityPolicy: false }))
 app.use(morgan("dev"))
 app.use(express.json({ limit: "5mb" }))
 
-app.get("/health", (req, res) => {
+app.get("/health", (_req, res) => {
   res.json({ status: "ok" })
 })
 
-app.get("/", (req, res) => {
-  res.send("ESTUDO FLEX BOT V3 ONLINE 🚀")
+app.get("/", (_req, res) => {
+  res.send("ESTUDO FLEX BOT V4 ONLINE 🚀")
 })
 
 app.get("/meta/webhook", (req, res) => {
@@ -48,7 +49,6 @@ app.get("/meta/webhook", (req, res) => {
     const challenge = req.query["hub.challenge"]
 
     if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
-      console.log("Webhook Meta verificado com sucesso.")
       return res.status(200).send(challenge)
     }
 
@@ -87,7 +87,7 @@ function resetConversation(convo) {
   })
 }
 
-function buildSecondViaMessage(result) {
+function buildSecondViaText(result) {
   if (!result?.aluno) {
     return "Não encontrei cadastro com esse CPF. Se quiser, eu também posso te ajudar com uma nova matrícula."
   }
@@ -96,29 +96,30 @@ function buildSecondViaMessage(result) {
     return "Localizei seu cadastro, mas não encontrei parcela em aberto para gerar a segunda via agora."
   }
 
-  const parts = ["Perfeito 😊 Localizei sua segunda via."]
+  const lines = []
+  lines.push("Perfeito 😊 Localizei sua segunda via.")
 
   if (result.contract?.nomeCurso) {
-    parts.push(`Curso: ${result.contract.nomeCurso}`)
-  }
-
-  if (result.parcela?.numeroParcela) {
-    parts.push(`Parcela: ${result.parcela.numeroParcela}`)
+    lines.push(`Curso: ${result.contract.nomeCurso}`)
   }
 
   if (result.parcela?.vencimento) {
-    parts.push(`Vencimento: ${result.parcela.vencimento}`)
+    lines.push(`Vencimento: ${result.parcela.vencimento}`)
+  }
+
+  if (result.parcela?.valor) {
+    lines.push(`Valor: R$ ${Number(result.parcela.valor).toFixed(2).replace(".", ",")}`)
   }
 
   if (result.linhaDigitavel) {
-    parts.push(`Linha digitável: ${result.linhaDigitavel}`)
+    lines.push(`Linha digitável: ${result.linhaDigitavel}`)
   }
 
   if (result.pdfUrl) {
-    parts.push(`PDF: ${result.pdfUrl}`)
+    lines.push("Estou enviando o PDF logo abaixo.")
   }
 
-  return parts.join("\n")
+  return lines.join("\n")
 }
 
 async function fallbackAI(text, convo) {
@@ -143,81 +144,89 @@ async function processMessage(phone, text) {
     }
 
     if (!normalizedText) {
-      return sales.menu()
+      return { text: sales.menu() }
     }
 
     if (sales.isGreeting(text) && convo.step === "menu") {
-      return sales.menu()
+      return { text: sales.menu() }
     }
 
     if (sales.isExistingStudentIntent(text) && convo.step !== "post_sale") {
       convo.path = "existing_student"
       convo.step = "existing_student_cpf"
 
-      return "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
+      return {
+        text: "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
+      }
     }
 
     if (convo.step === "existing_student_cpf") {
       if (!isCPF(text)) {
-        return "Me envie seu CPF com 11 números para eu localizar seu cadastro, por favor."
+        return { text: "Me envie seu CPF com 11 números para eu localizar seu cadastro, por favor." }
       }
 
       convo.cpf = text
-
       const secondVia = await obterSegundaViaPorCpf(text)
       convo.step = "existing_student_done"
 
-      return buildSecondViaMessage(secondVia)
+      return {
+        text: buildSecondViaText(secondVia),
+        documentUrl: secondVia?.pdfUrl || "",
+        filename: secondVia?.nossoNumero
+          ? `carne-${secondVia.nossoNumero}.pdf`
+          : "carne.pdf",
+        caption: "Segue a sua segunda via em PDF."
+      }
     }
 
     if (sales.isNewEnrollmentIntent(text) && convo.step !== "post_sale") {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
-      return sales.newEnrollmentIntro()
+      return { text: sales.newEnrollmentIntro() }
     }
 
     if (sales.isCourseListIntent(text) && !convo.course && convo.step !== "post_sale") {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
-      return sales.showCourses()
+      return { text: sales.showCourses() }
     }
 
     if (course && convo.step !== "post_sale") {
       convo.path = "new_enrollment"
       convo.course = course.name
       convo.step = "diagnosis_goal"
-      return sales.presentCourse(course)
+      return { text: sales.presentCourse(course) }
     }
 
     if (sales.isPriceQuestion(text) && !convo.course && convo.step !== "post_sale") {
-      return `Os cursos são gratuitos 😊
+      return {
+        text: `Os cursos são gratuitos 😊
 
 Existe apenas o investimento do material didático, que eu te explico direitinho depois que eu entender qual curso faz mais sentido para você.
 
 Me diz qual curso te chamou mais atenção?`
+      }
     }
 
     const objectionReply = sales.getObjectionReply(text, convo.course)
     if (objectionReply && convo.step !== "post_sale") {
-      return objectionReply
+      return { text: objectionReply }
     }
 
     if (convo.step === "course_selection") {
-      return sales.showCourses()
+      return { text: sales.showCourses() }
     }
 
     if (convo.step === "diagnosis_goal") {
       convo.goal = text
       convo.step = "diagnosis_experience"
-
-      return "Entendi 😊 E você está começando do zero ou já teve algum contato com essa área?"
+      return { text: "Entendi 😊 E você está começando do zero ou já teve algum contato com essa área?" }
     }
 
     if (convo.step === "diagnosis_experience") {
       convo.experience = text
       convo.step = "offer_transition"
-
-      return sales.buildValueConnection(convo)
+      return { text: sales.buildValueConnection(convo) }
     }
 
     if (convo.step === "offer_transition") {
@@ -228,137 +237,140 @@ Me diz qual curso te chamou mais atenção?`
       ) {
         convo.step = "payment_choice"
 
-        return `${sales.materialPitch()}
+        return {
+          text: `${sales.materialPitch()}
 
 ${sales.investmentMessage()}`
+        }
       }
 
       const aiReply = await fallbackAI(text, convo)
+      if (aiReply) return { text: aiReply }
 
-      if (aiReply) return aiReply
-
-      return `Sem problema 😊
+      return {
+        text: `Sem problema 😊
 
 Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.course} e depois te mostrar as formas disponíveis.`
+      }
     }
 
     if (convo.step === "payment_choice") {
       const paymentMethod = sales.detectPaymentMethod(text)
 
       if (!paymentMethod) {
-        return "Sem problema 😊 Me diz qual opção fica melhor para você: Carnê, cartão ou PIX?"
+        return { text: "Sem problema 😊 Me diz qual opção fica melhor para você: Carnê, cartão ou PIX?" }
       }
 
       convo.payment = paymentMethod
       convo.phone = extractPhoneFromWhatsApp(phone) || ""
       convo.step = "collecting_name"
 
-      return sales.askName(convo.course, convo.payment)
+      return { text: sales.askName(convo.course, convo.payment) }
     }
 
     if (convo.step === "collecting_name") {
       convo.name = text
       convo.step = "collecting_cpf"
-      return sales.askCPF()
+      return { text: sales.askCPF() }
     }
 
     if (convo.step === "collecting_cpf") {
       if (!isCPF(text)) {
-        return "O CPF que você enviou parece inválido. Me manda apenas os 11 números, por favor."
+        return { text: "O CPF que você enviou parece inválido. Me manda apenas os 11 números, por favor." }
       }
 
       convo.cpf = text
       convo.step = "collecting_birth"
-      return sales.askBirthDate()
+      return { text: sales.askBirthDate() }
     }
 
     if (convo.step === "collecting_birth") {
       if (!isDateBR(text)) {
-        return "Me envie sua data de nascimento no formato DD/MM/AAAA, por favor."
+        return { text: "Me envie sua data de nascimento no formato DD/MM/AAAA, por favor." }
       }
 
       convo.birthDate = text
       convo.step = "collecting_gender"
-      return sales.askGender()
+      return { text: sales.askGender() }
     }
 
     if (convo.step === "collecting_gender") {
       const gender = detectGender(text)
 
       if (!gender) {
-        return "Me responda com M para masculino ou F para feminino."
+        return { text: "Me responda com M para masculino ou F para feminino." }
       }
 
       convo.gender = gender
       convo.step = "collecting_cep"
-      return sales.askCEP()
+      return { text: sales.askCEP() }
     }
 
     if (convo.step === "collecting_cep") {
       if (!isCEP(text)) {
-        return "Me envie seu CEP com 8 números, por favor."
+        return { text: "Me envie seu CEP com 8 números, por favor." }
       }
 
       convo.cep = text
       convo.step = "collecting_street"
-      return sales.askStreet()
+      return { text: sales.askStreet() }
     }
 
     if (convo.step === "collecting_street") {
       convo.street = text
       convo.step = "collecting_number"
-      return sales.askNumber()
+      return { text: sales.askNumber() }
     }
 
     if (convo.step === "collecting_number") {
       if (!String(text || "").trim()) {
-        return "Me envie o número do endereço, por favor."
+        return { text: "Me envie o número do endereço, por favor." }
       }
 
       convo.number = String(text).trim()
       convo.step = "collecting_complement"
-      return sales.askComplement()
+      return { text: sales.askComplement() }
     }
 
     if (convo.step === "collecting_complement") {
       convo.complement = /sem complemento/i.test(text) ? "" : text
       convo.step = "collecting_neighborhood"
-      return sales.askNeighborhood()
+      return { text: sales.askNeighborhood() }
     }
 
     if (convo.step === "collecting_neighborhood") {
       convo.neighborhood = text
       convo.step = "collecting_city"
-      return sales.askCity()
+      return { text: sales.askCity() }
     }
 
     if (convo.step === "collecting_city") {
       convo.city = text
       convo.step = "collecting_state"
-      return sales.askState()
+      return { text: sales.askState() }
     }
 
     if (convo.step === "collecting_state") {
       if (!isUF(text)) {
-        return "Me envie apenas a sigla do estado, por favor. Exemplo: SP."
+        return { text: "Me envie apenas a sigla do estado, por favor. Exemplo: SP." }
       }
 
       convo.state = normalizeUF(text)
 
       if (convo.payment === "Carnê") {
         convo.step = "collecting_due_day"
-        return sales.askDueDay()
+        return { text: sales.askDueDay() }
       }
 
       convo.step = "post_sale"
-      return sales.cardOrPixMessage(convo)
+      return { text: sales.cardOrPixMessage(convo) }
     }
 
     if (convo.step === "collecting_due_day") {
       const dueDay = detectDueDay(text)
 
       if (!dueDay) {
-        return "Me informe um dia de vencimento entre 1 e 28, por favor."
+        return { text: "Me informe um dia de vencimento entre 1 e 28, por favor." }
       }
 
       convo.dueDay = dueDay
@@ -382,28 +394,34 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
 
       convo.step = "post_sale"
 
-      const secondViaText = buildSecondViaMessage(created.secondVia)
+      return {
+        text: `${sales.finalEnrollmentMessage(convo)}
 
-      return `${sales.finalEnrollmentMessage(convo)}
-
-${secondViaText}`
+${buildSecondViaText(created.secondVia)}`,
+        documentUrl: created.secondVia?.pdfUrl || "",
+        filename: created.secondVia?.nossoNumero
+          ? `carne-${created.secondVia.nossoNumero}.pdf`
+          : "carne.pdf",
+        caption: "Segue o PDF do seu carnê."
+      }
     }
 
     if (convo.step === "post_sale") {
-      return `Perfeito 😊
+      return {
+        text: `Perfeito 😊
 
 Sua solicitação já ficou registrada.
 Se surgir qualquer dúvida, pode me chamar por aqui.`
+      }
     }
 
     const aiReply = await fallbackAI(text, convo)
+    if (aiReply) return { text: aiReply }
 
-    if (aiReply) return aiReply
-
-    return sales.menu()
+    return { text: sales.menu() }
   } catch (error) {
     console.error("Erro no processamento da mensagem:", error)
-    return "Tive um pequeno problema aqui. Pode me enviar novamente sua mensagem?"
+    return { text: "Tive um pequeno problema aqui. Pode me enviar novamente sua mensagem?" }
   }
 }
 
@@ -427,8 +445,17 @@ app.post("/meta/webhook", async (req, res) => {
 
     const response = await processMessage(phone, text)
 
-    if (response) {
-      await sendText(phone, response)
+    if (response?.text) {
+      await sendText(phone, response.text)
+    }
+
+    if (response?.documentUrl) {
+      await sendDocument(
+        phone,
+        response.documentUrl,
+        response.filename,
+        response.caption
+      )
     }
 
     return res.sendStatus(200)
@@ -438,14 +465,38 @@ app.post("/meta/webhook", async (req, res) => {
   }
 })
 
-app.use((req, res) => {
+app.get("/carne/pdf/:parcelaId/:nossoNumero", async (req, res) => {
+  try {
+    const parcelaId = String(req.params.parcelaId || "")
+    const nossoNumero = String(req.params.nossoNumero || "")
+
+    if (!parcelaId || !nossoNumero) {
+      return res.status(400).send("parcelaId e nossoNumero são obrigatórios")
+    }
+
+    const resp = await baixarPdfParcela(parcelaId, nossoNumero)
+    const contentType = String(resp?.headers?.["content-type"] || "").toLowerCase()
+
+    if (contentType.includes("application/pdf")) {
+      res.setHeader("Content-Type", "application/pdf")
+      res.setHeader("Content-Disposition", `inline; filename="carne-${nossoNumero}.pdf"`)
+      return res.status(200).send(resp.data)
+    }
+
+    return res.status(500).send("A PagSchool não retornou um PDF válido.")
+  } catch (error) {
+    return res.status(500).send(String(error.message || error))
+  }
+})
+
+app.use((_req, res) => {
   res.status(404).json({
     ok: false,
     message: "Rota não encontrada"
   })
 })
 
-app.use((error, req, res, next) => {
+app.use((error, _req, res, _next) => {
   console.error("Erro interno do servidor:", error)
   res.status(500).json({
     ok: false,
