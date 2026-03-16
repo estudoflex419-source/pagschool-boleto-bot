@@ -503,6 +503,16 @@ function buildFirstDueDate(day) {
   return `${year}-${String(month).padStart(2, "0")}-${String(dueDay).padStart(2, "0")}`
 }
 
+function addMonthsToISO(isoDate, monthsToAdd) {
+  const [y, m, d] = String(isoDate).split("-").map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setMonth(dt.getMonth() + monthsToAdd)
+
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(
+    dt.getDate()
+  ).padStart(2, "0")}`
+}
+
 async function criarContratoCarne({ alunoId, nomeCurso, cpf, dueDay }) {
   const body = {
     numeroContrato: buildNumeroContrato(cpf),
@@ -544,6 +554,31 @@ async function gerarCarneBoletos(contratoId) {
   return resp.data
 }
 
+async function criarParcelaManual({ contratoId, valor, vencimento, descricao }) {
+  const body = {
+    valor,
+    descricao: descricao || "Parcela inicial do carnê",
+    vencimento,
+    contrato_id: contratoId
+  }
+
+  const resp = await pagSchoolRequest({
+    method: "post",
+    docPath: "/api/parcela-contrato/create",
+    data: body
+  })
+
+  const data = resp.data || {}
+
+  return {
+    id:
+      data?.id ||
+      data?.data?.id ||
+      getByKeys(data, ["id", "parcelaId", "idParcela"]),
+    raw: data
+  }
+}
+
 async function gerarBoletoDaParcela(parcelaId) {
   const resp = await pagSchoolRequest({
     method: "post",
@@ -579,6 +614,29 @@ async function baixarPdfParcela(parcelaId, nossoNumero) {
     docPath: `/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
     responseType: "arraybuffer"
   })
+}
+
+async function garantirParcelaInicialSeNecessario({ contratoId, dueDay }) {
+  try {
+    await gerarCarneBoletos(contratoId)
+    return
+  } catch (error) {
+    const message = String(error.message || "")
+
+    if (!/sem parcelas disponiveis para pagamento/i.test(message) &&
+        !/sem parcelas disponíveis para pagamento/i.test(message)) {
+      throw error
+    }
+
+    console.log("[PAGSCHOOL FALLBACK] contrato sem parcelas, criando primeira parcela manualmente")
+
+    await criarParcelaManual({
+      contratoId,
+      valor: 80,
+      vencimento: buildFirstDueDate(dueDay),
+      descricao: "Parcela 1 do carnê"
+    })
+  }
 }
 
 async function obterSegundaViaPorCpf(cpf) {
@@ -649,7 +707,10 @@ async function criarMatriculaComCarne(payload) {
     throw new Error(`Contrato criado sem id: ${JSON.stringify(contrato).slice(0, 500)}`)
   }
 
-  await gerarCarneBoletos(contratoId)
+  await garantirParcelaInicialSeNecessario({
+    contratoId,
+    dueDay: payload.dueDay
+  })
 
   const secondVia = await obterSegundaViaPorCpf(payload.cpf)
 
