@@ -39,7 +39,7 @@ app.get("/health", (_req, res) => {
 })
 
 app.get("/", (_req, res) => {
-  res.send("ESTUDO FLEX BOT V5 ONLINE 🚀")
+  res.send("ESTUDO FLEX BOT V6 ONLINE 🚀")
 })
 
 app.get("/meta/webhook", (req, res) => {
@@ -87,6 +87,26 @@ function resetConversation(convo) {
   })
 }
 
+function wantsReset(text) {
+  const t = normalize(text || "")
+  return [
+    "menu",
+    "inicio",
+    "início",
+    "reiniciar",
+    "recomeçar",
+    "recomecar",
+    "voltar",
+    "começar novamente",
+    "comecar novamente"
+  ].includes(t)
+}
+
+function formatMoney(value) {
+  const n = Number(value || 0)
+  return n.toFixed(2).replace(".", ",")
+}
+
 function buildSecondViaText(result) {
   if (!result?.aluno) {
     return "Não encontrei cadastro com esse CPF. Se quiser, eu também posso te ajudar com uma nova matrícula."
@@ -103,12 +123,16 @@ function buildSecondViaText(result) {
     lines.push(`Curso: ${result.contract.nomeCurso}`)
   }
 
+  if (result.parcela?.numeroParcela) {
+    lines.push(`Parcela: ${result.parcela.numeroParcela}`)
+  }
+
   if (result.parcela?.vencimento) {
     lines.push(`Vencimento: ${result.parcela.vencimento}`)
   }
 
   if (result.parcela?.valor) {
-    lines.push(`Valor: R$ ${Number(result.parcela.valor).toFixed(2).replace(".", ",")}`)
+    lines.push(`Valor: R$ ${formatMoney(result.parcela.valor)}`)
   }
 
   if (result.linhaDigitavel) {
@@ -143,6 +167,11 @@ async function processMessage(phone, text) {
       resetConversation(convo)
     }
 
+    if (wantsReset(text)) {
+      resetConversation(convo)
+      return { text: sales.menu() }
+    }
+
     if (!normalizedText) {
       return { text: sales.menu() }
     }
@@ -151,7 +180,7 @@ async function processMessage(phone, text) {
       return { text: sales.menu() }
     }
 
-    if (sales.isExistingStudentIntent(text) && convo.step !== "post_sale") {
+    if (sales.isExistingStudentIntent(text)) {
       convo.path = "existing_student"
       convo.step = "existing_student_cpf"
 
@@ -179,26 +208,26 @@ async function processMessage(phone, text) {
       }
     }
 
-    if (sales.isNewEnrollmentIntent(text) && convo.step !== "post_sale") {
+    if (sales.isNewEnrollmentIntent(text)) {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       return { text: sales.newEnrollmentIntro() }
     }
 
-    if (sales.isCourseListIntent(text) && !convo.course && convo.step !== "post_sale") {
+    if (sales.isCourseListIntent(text) && !convo.course) {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       return { text: sales.showCourses() }
     }
 
-    if (course && convo.step !== "post_sale") {
+    if (course) {
       convo.path = "new_enrollment"
       convo.course = course.name
       convo.step = "diagnosis_goal"
       return { text: sales.presentCourse(course) }
     }
 
-    if (sales.isPriceQuestion(text) && !convo.course && convo.step !== "post_sale") {
+    if (sales.isPriceQuestion(text) && !convo.course) {
       return {
         text: `Os cursos são gratuitos 😊
 
@@ -269,7 +298,11 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
     }
 
     if (convo.step === "collecting_name") {
-      convo.name = text
+      if (!String(text || "").trim()) {
+        return { text: "Me envie seu nome completo, por favor." }
+      }
+
+      convo.name = String(text).trim()
       convo.step = "collecting_cpf"
       return { text: sales.askCPF() }
     }
@@ -317,7 +350,11 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
     }
 
     if (convo.step === "collecting_street") {
-      convo.street = text
+      if (!String(text || "").trim()) {
+        return { text: "Me envie o logradouro, por favor." }
+      }
+
+      convo.street = String(text).trim()
       convo.step = "collecting_number"
       return { text: sales.askNumber() }
     }
@@ -333,19 +370,27 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
     }
 
     if (convo.step === "collecting_complement") {
-      convo.complement = /sem complemento/i.test(text) ? "" : text
+      convo.complement = /sem complemento/i.test(text) ? "" : String(text || "").trim()
       convo.step = "collecting_neighborhood"
       return { text: sales.askNeighborhood() }
     }
 
     if (convo.step === "collecting_neighborhood") {
-      convo.neighborhood = text
+      if (!String(text || "").trim()) {
+        return { text: "Me envie seu bairro, por favor." }
+      }
+
+      convo.neighborhood = String(text).trim()
       convo.step = "collecting_city"
       return { text: sales.askCity() }
     }
 
     if (convo.step === "collecting_city") {
-      convo.city = text
+      if (!String(text || "").trim()) {
+        return { text: "Me envie sua cidade, por favor." }
+      }
+
+      convo.city = String(text).trim()
       convo.step = "collecting_state"
       return { text: sales.askState() }
     }
@@ -393,6 +438,20 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
       })
 
       convo.step = "post_sale"
+      convo.alunoId = created?.aluno?.id || null
+      convo.contratoId = created?.contrato?.id || null
+      convo.parcelaId = created?.secondVia?.parcela?.id || null
+      convo.nossoNumero = created?.secondVia?.nossoNumero || ""
+
+      if (created?.error) {
+        return {
+          text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do boleto.
+
+Motivo: ${created.error}
+
+Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do carnê.`
+        }
+      }
 
       if (created?.carnePendente || !created?.secondVia?.parcela) {
         return {
