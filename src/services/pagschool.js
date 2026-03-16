@@ -329,7 +329,3 @@ module.exports = {
   obterSegundaViaPorCpf,
   criarMatriculaComCarne
 }
-  return r.data
-}
-
-module.exports={buscarAluno}
