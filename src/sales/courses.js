@@ -1,166 +1,299 @@
 module.exports = [
   {
     name: "Administração",
-    aliases: ["administracao", "administração"],
-    summary: "ideal para quem quer desenvolver visão organizacional, rotinas administrativas e apoio à gestão.",
-    audience: "bom para quem quer começar na área administrativa ou fortalecer o currículo."
+    aliases: ["administracao", "administração", "admin"],
+    shortDescription: "uma formação muito boa para quem quer atuar com organização, rotinas administrativas e apoio à gestão.",
+    idealFor: "quem quer melhorar o currículo e entrar ou crescer na área administrativa.",
+    benefits: [
+      "aprendizado prático",
+      "boa base para área administrativa",
+      "ótimo reforço de currículo"
+    ]
   },
   {
     name: "Agente de Saúde",
     aliases: ["agente de saude", "agente de saúde"],
-    summary: "voltado para quem deseja atuar com orientação, prevenção e apoio à comunidade.",
-    audience: "uma boa opção para quem gosta de cuidar de pessoas e trabalhar com atendimento."
+    shortDescription: "um curso voltado para quem quer atuar com orientação, prevenção e apoio à comunidade.",
+    idealFor: "quem gosta de cuidar de pessoas e quer crescer na área da saúde.",
+    benefits: [
+      "formação introdutória",
+      "área com bastante procura",
+      "desenvolvimento profissional"
+    ]
   },
   {
     name: "Análises Clínicas",
     aliases: ["analises clinicas", "análises clínicas"],
-    summary: "indicado para quem quer aprender sobre rotinas de apoio laboratorial e organização técnica.",
-    audience: "interessante para quem quer entrar na área da saúde com foco técnico."
+    shortDescription: "uma excelente opção para quem quer conhecer rotinas laboratoriais e apoio técnico.",
+    idealFor: "quem deseja entrar na área da saúde e ampliar o currículo.",
+    benefits: [
+      "base para área da saúde",
+      "conteúdo técnico introdutório",
+      "valorização profissional"
+    ]
   },
   {
     name: "Auxiliar Veterinário",
     aliases: ["auxiliar veterinario", "auxiliar veterinário", "veterinario", "veterinário"],
-    summary: "ótimo para quem gosta de animais e quer aprender apoio prático à rotina veterinária.",
-    audience: "boa porta de entrada para quem quer atuar com cuidado animal."
+    shortDescription: "ideal para quem gosta de animais e quer aprender apoio à rotina veterinária.",
+    idealFor: "quem quer trabalhar com cuidado animal ou começar nessa área.",
+    benefits: [
+      "área querida por quem ama animais",
+      "conteúdo introdutório prático",
+      "boa porta de entrada"
+    ]
   },
   {
     name: "Barbeiro",
     aliases: ["barbeiro"],
-    summary: "focado em técnicas de atendimento, imagem pessoal e rotina profissional na barbearia.",
-    audience: "excelente para quem quer gerar renda com um serviço muito procurado."
+    shortDescription: "um curso muito interessante para quem quer desenvolver habilidade prática e gerar renda.",
+    idealFor: "quem quer começar a trabalhar por conta própria ou aumentar a renda.",
+    benefits: [
+      "área prática",
+      "possibilidade de renda",
+      "boa opção para empreender"
+    ]
   },
   {
     name: "Cabeleireiro",
     aliases: ["cabeleireiro", "cabelereiro"],
-    summary: "ideal para quem quer aprender cuidados, beleza e atendimento ao público.",
-    audience: "uma área muito interessante para quem quer empreender ou aumentar renda."
+    shortDescription: "uma ótima escolha para quem quer atuar com beleza, atendimento e imagem pessoal.",
+    idealFor: "quem quer trabalhar com estética e atendimento ao público.",
+    benefits: [
+      "área de beleza sempre procurada",
+      "boa para empreender",
+      "gera valor profissional"
+    ]
   },
   {
     name: "Contabilidade",
     aliases: ["contabilidade"],
-    summary: "voltado para quem quer entender rotinas financeiras, organização e apoio contábil.",
-    audience: "fortalece muito o currículo para funções administrativas."
+    shortDescription: "uma formação útil para quem quer aprender rotinas financeiras e apoio contábil.",
+    idealFor: "quem quer crescer na área administrativa e financeira.",
+    benefits: [
+      "fortalece currículo administrativo",
+      "boa base profissional",
+      "mais organização e visão financeira"
+    ]
   },
   {
     name: "Cuidador de Idosos",
     aliases: ["cuidador de idosos", "idosos"],
-    summary: "indicado para quem quer atuar com cuidado, atenção e apoio humanizado.",
-    audience: "uma área com demanda e muito valor humano."
+    shortDescription: "um curso muito humano, voltado para cuidado, atenção e apoio no dia a dia.",
+    idealFor: "quem gosta de cuidar de pessoas e quer atuar nessa área.",
+    benefits: [
+      "área com propósito",
+      "formação valorizada",
+      "boa oportunidade profissional"
+    ]
   },
   {
     name: "Designer Gráfico",
     aliases: ["designer grafico", "designer gráfico", "design grafico", "design gráfico"],
-    summary: "ideal para quem quer trabalhar com criatividade, identidade visual e produção digital.",
-    audience: "bom tanto para começar na área quanto para prestar serviços."
+    shortDescription: "um curso interessante para quem gosta de criatividade, identidade visual e produção digital.",
+    idealFor: "quem quer aprender algo moderno e útil para trabalhar com internet ou serviços.",
+    benefits: [
+      "área criativa",
+      "pode ajudar a gerar renda",
+      "boa valorização de currículo"
+    ]
   },
   {
     name: "Enfermagem",
     aliases: ["enfermagem"],
-    summary: "voltado para quem quer aprender fundamentos de apoio e rotina na área da saúde.",
-    audience: "uma formação que agrega muito para quem quer crescer nesse setor."
+    shortDescription: "uma formação importante para quem quer conhecer melhor a área da saúde e apoio profissional.",
+    idealFor: "quem deseja crescer na área da saúde.",
+    benefits: [
+      "área valorizada",
+      "conteúdo introdutório importante",
+      "ajuda no crescimento profissional"
+    ]
   },
   {
     name: "Farmácia",
     aliases: ["farmacia", "farmácia"],
-    summary: "indicado para quem quer atuar com apoio em rotinas de farmácia e atendimento.",
-    audience: "excelente para quem quer entrar na área de saúde e varejo farmacêutico."
+    shortDescription: "ideal para quem quer aprender sobre atendimento e rotina de apoio em farmácia.",
+    idealFor: "quem quer entrar na área de saúde e atendimento.",
+    benefits: [
+      "área muito buscada",
+      "fortalece currículo",
+      "boa opção para mercado de trabalho"
+    ]
   },
   {
     name: "Gastronomia",
     aliases: ["gastronomia"],
-    summary: "ideal para quem quer aprender técnicas, organização e visão prática da área alimentícia.",
-    audience: "ótima opção para quem quer empreender ou atuar em cozinhas profissionais."
+    shortDescription: "uma ótima opção para quem quer aprender mais sobre preparo, rotina e organização da área alimentícia.",
+    idealFor: "quem gosta da área culinária ou pensa em empreender.",
+    benefits: [
+      "área prática",
+      "boa para renda",
+      "desenvolvimento profissional"
+    ]
   },
   {
     name: "Gestão e Logística",
-    aliases: ["gestao e logistica", "gestão e logística", "logistica", "logística", "gestão"],
-    summary: "focado em organização, processos, estoque e movimentação operacional.",
-    audience: "muito interessante para quem quer atuar em empresas, centros logísticos e operações."
+    aliases: ["gestao e logistica", "gestão e logística", "logistica", "logística"],
+    shortDescription: "um curso voltado para organização, processos, estoque e rotina operacional.",
+    idealFor: "quem quer atuar em empresas, operações e logística.",
+    benefits: [
+      "área ampla",
+      "boa procura no mercado",
+      "fortalece o currículo"
+    ]
   },
   {
     name: "Inglês",
     aliases: ["ingles", "inglês"],
-    summary: "ideal para quem quer ampliar oportunidades e fortalecer o currículo.",
-    audience: "muito útil tanto para crescimento pessoal quanto profissional."
+    shortDescription: "uma formação muito boa para ampliar oportunidades pessoais e profissionais.",
+    idealFor: "quem quer evoluir no currículo e se destacar mais.",
+    benefits: [
+      "diferencial profissional",
+      "crescimento pessoal",
+      "mais oportunidades"
+    ]
   },
   {
     name: "Informática",
     aliases: ["informatica", "informática"],
-    summary: "indicado para quem quer dominar ferramentas básicas e ganhar mais segurança no dia a dia.",
-    audience: "excelente para quem está começando e quer melhorar o currículo."
+    shortDescription: "ideal para quem quer ganhar mais segurança com ferramentas do dia a dia.",
+    idealFor: "quem está começando e quer melhorar o currículo.",
+    benefits: [
+      "base muito útil",
+      "ajuda no mercado de trabalho",
+      "ótimo para iniciantes"
+    ]
   },
   {
     name: "Marketing Digital",
     aliases: ["marketing digital", "marketing"],
-    summary: "focado em presença online, divulgação e estratégias digitais.",
-    audience: "ótimo para quem quer vender mais, empreender ou trabalhar com internet."
+    shortDescription: "um curso ótimo para quem quer aprender divulgação, internet e presença digital.",
+    idealFor: "quem quer vender mais, empreender ou trabalhar online.",
+    benefits: [
+      "área em crescimento",
+      "boa para renda",
+      "conhecimento moderno"
+    ]
   },
   {
     name: "Massoterapia",
     aliases: ["massoterapia"],
-    summary: "ideal para quem quer atuar com bem-estar, relaxamento e atendimento individualizado.",
-    audience: "uma boa opção para quem quer prestar serviço e gerar renda."
+    shortDescription: "uma boa opção para quem quer atuar com bem-estar, atendimento e cuidado.",
+    idealFor: "quem quer trabalhar prestando serviço e gerar renda.",
+    benefits: [
+      "área de atendimento",
+      "possibilidade de renda",
+      "desenvolvimento profissional"
+    ]
   },
   {
     name: "Nutrição",
     aliases: ["nutricao", "nutrição"],
-    summary: "voltado para quem quer aprender fundamentos da área e ampliar conhecimentos em saúde.",
-    audience: "muito interessante para quem gosta da área do cuidado e bem-estar."
+    shortDescription: "ideal para quem quer ampliar conhecimentos ligados à saúde e bem-estar.",
+    idealFor: "quem gosta da área do cuidado e quer fortalecer o currículo.",
+    benefits: [
+      "área valorizada",
+      "boa base de conhecimento",
+      "crescimento profissional"
+    ]
   },
   {
     name: "Odontologia",
     aliases: ["odontologia"],
-    summary: "indicado para quem quer conhecer rotinas de apoio e organização na área odontológica.",
-    audience: "agrega valor para quem quer entrar no setor da saúde."
+    shortDescription: "um curso interessante para quem quer aprender sobre rotina de apoio na área odontológica.",
+    idealFor: "quem quer entrar na área da saúde com mais preparo.",
+    benefits: [
+      "fortalece currículo",
+      "área importante",
+      "mais preparo profissional"
+    ]
   },
   {
     name: "Operador de Caixa",
     aliases: ["operador de caixa", "caixa"],
-    summary: "focado em atendimento, organização e rotinas do varejo.",
-    audience: "excelente para quem quer entrar no mercado de trabalho mais rápido."
+    shortDescription: "uma formação boa para quem quer atuar com atendimento, rotina de loja e varejo.",
+    idealFor: "quem quer entrar no mercado de trabalho mais rápido.",
+    benefits: [
+      "área com bastante oportunidade",
+      "boa porta de entrada",
+      "fortalece o currículo"
+    ]
   },
   {
     name: "Pedagogia",
     aliases: ["pedagogia"],
-    summary: "ideal para quem quer crescer na área educacional e desenvolver conhecimentos ligados à aprendizagem.",
-    audience: "muito bom para quem se identifica com educação, cuidado e formação de pessoas."
+    shortDescription: "uma excelente escolha para quem se identifica com educação, desenvolvimento e aprendizagem.",
+    idealFor: "quem quer crescer na área educacional e fortalecer sua formação.",
+    benefits: [
+      "área muito respeitada",
+      "bom crescimento profissional",
+      "fortalece a área educacional"
+    ]
   },
   {
     name: "Psicologia",
     aliases: ["psicologia"],
-    summary: "indicado para quem quer ampliar conhecimentos sobre comportamento humano e relações interpessoais.",
-    audience: "uma área que agrega valor tanto pessoal quanto profissional."
+    shortDescription: "um curso muito interessante para quem quer aprender mais sobre comportamento humano e relações interpessoais.",
+    idealFor: "quem gosta de desenvolvimento humano e quer agregar valor ao currículo.",
+    benefits: [
+      "área valorizada",
+      "conhecimento muito útil",
+      "crescimento pessoal e profissional"
+    ]
   },
   {
     name: "Recepcionista Hospitalar",
     aliases: ["recepcionista hospitalar", "recepcionista"],
-    summary: "focado em atendimento, organização e postura profissional no ambiente da saúde.",
-    audience: "ótimo para quem quer entrar na área hospitalar com mais preparo."
+    shortDescription: "ideal para quem quer atuar com atendimento, organização e rotina na área da saúde.",
+    idealFor: "quem quer entrar no ambiente hospitalar com mais preparo.",
+    benefits: [
+      "boa porta de entrada",
+      "área de atendimento valorizada",
+      "fortalece currículo"
+    ]
   },
   {
     name: "Recursos Humanos",
     aliases: ["recursos humanos", "rh"],
-    summary: "curso voltado para rotina de recrutamento, seleção, comunicação interna e desenvolvimento de pessoas.",
-    audience: "muito interessante para quem quer atuar na área administrativa e de pessoas.",
-    siteInfo: "No site, o curso aparece com carga horária de 196h e destaca um mercado estratégico e dinâmico, ligado à gestão de talentos e desenvolvimento organizacional."
+    shortDescription: "uma formação muito boa para quem quer aprender sobre recrutamento, seleção e gestão de pessoas.",
+    idealFor: "quem quer crescer na área administrativa e de pessoas.",
+    benefits: [
+      "área estratégica",
+      "fortalece currículo",
+      "boa oportunidade profissional"
+    ]
   },
   {
     name: "Robótica",
     aliases: ["robotica", "robótica"],
-    summary: "ideal para quem gosta de tecnologia, lógica e inovação.",
-    audience: "uma área moderna que chama atenção no currículo."
+    shortDescription: "ideal para quem gosta de tecnologia, inovação e lógica.",
+    idealFor: "quem quer aprender algo moderno e diferenciado.",
+    benefits: [
+      "área moderna",
+      "grande valor no currículo",
+      "aprendizado diferenciado"
+    ]
   },
   {
     name: "Segurança do Trabalho",
     aliases: ["seguranca do trabalho", "segurança do trabalho"],
-    summary: "voltado para prevenção, segurança, saúde ocupacional e orientação em ambientes de trabalho.",
-    audience: "excelente para quem quer atuar com prevenção, normas e cuidado com equipes.",
-    siteInfo: "No site, o curso aparece com carga horária de 196h e fala em ações prevencionistas, legislação, meio ambiente, higiene ocupacional e prevenção de riscos."
+    shortDescription: "uma ótima opção para quem quer aprender sobre prevenção, segurança e cuidado com ambientes de trabalho.",
+    idealFor: "quem quer crescer em uma área importante e valorizada.",
+    benefits: [
+      "área com responsabilidade",
+      "fortalece currículo",
+      "boa valorização profissional"
+    ]
   },
   {
     name: "Socorrista",
     aliases: ["socorrista"],
-    summary: "indicado para quem quer aprender noções importantes de apoio e resposta em situações de urgência.",
-    audience: "muito valorizado para quem gosta da área de cuidado e ação rápida."
+    shortDescription: "um curso muito interessante para quem quer aprender noções importantes de apoio em situações de urgência.",
+    idealFor: "quem gosta da área do cuidado e quer desenvolver preparo profissional.",
+    benefits: [
+      "área respeitada",
+      "aprendizado relevante",
+      "fortalece o currículo"
+    ]
   }
 ]
