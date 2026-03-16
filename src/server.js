@@ -39,7 +39,7 @@ app.get("/health", (_req, res) => {
 })
 
 app.get("/", (_req, res) => {
-  res.send("ESTUDO FLEX BOT V6 ONLINE 🚀")
+  res.send("ESTUDO FLEX BOT V7 ONLINE 🚀")
 })
 
 app.get("/meta/webhook", (req, res) => {
@@ -110,6 +110,79 @@ function wantsReset(text) {
 function formatMoney(value) {
   const n = Number(value || 0)
   return n.toFixed(2).replace(".", ",")
+}
+
+function buildPaymentChoiceMessage() {
+  return `Perfeito 😊
+
+Agora me diga qual forma de pagamento você prefere:
+
+1 - Carnê
+2 - Cartão
+3 - PIX
+
+Me responda apenas com o número da opção ou com o nome da forma de pagamento.`
+}
+
+function buildPixMessage() {
+  return `Perfeito 😊
+
+Seus dados foram registrados na opção PIX à vista.
+
+Segue a chave para pagamento:
+
+*PIX:*
+*CNPJ:* 22211962/000122
+*NOME:* ALEXANDER PHILADELPHO BEZERRA
+
+Assim que realizar o pagamento, me envie o comprovante por aqui para darmos continuidade.`
+}
+
+function buildCardMessage(course) {
+  return `Perfeito 😊
+
+Seus dados foram registrados para ${course || "o curso"} na opção cartão.
+
+Agora nossa equipe vai seguir com as próximas orientações de pagamento pelos canais oficiais.`
+}
+
+function buildPostSaleReply(text, convo) {
+  const t = normalize(text || "")
+
+  if (
+    t.includes("plataforma") ||
+    t.includes("cadê minha plataforma") ||
+    t.includes("cade minha plataforma") ||
+    t.includes("acesso") ||
+    t.includes("login")
+  ) {
+    if (convo.payment === "PIX") {
+      return `Perfeito 😊
+
+Assim que o pagamento via PIX for identificado e confirmado, nossa equipe seguirá com a liberação do acesso à plataforma.
+
+Se você já pagou, pode me enviar o comprovante por aqui.`
+    }
+
+    if (convo.payment === "Carnê") {
+      return `Perfeito 😊
+
+Assim que o pagamento do carnê for confirmado, nossa equipe seguirá com a liberação do acesso à plataforma.
+
+Se precisar, eu também posso continuar te ajudando por aqui.`
+    }
+
+    return `Perfeito 😊
+
+Assim que o pagamento for confirmado, nossa equipe seguirá com a liberação do acesso à plataforma.
+
+Se precisar, eu também posso continuar te ajudando por aqui.`
+  }
+
+  return `Perfeito 😊
+
+Sua solicitação já ficou registrada.
+Se surgir qualquer dúvida, pode me chamar por aqui.`
 }
 
 function buildSecondViaText(result) {
@@ -270,12 +343,7 @@ Me diz qual curso te chamou mais atenção?`
         sales.detectCloseMoment(text)
       ) {
         convo.step = "payment_choice"
-
-        return {
-          text: `${sales.materialPitch()}
-
-${sales.investmentMessage()}`
-        }
+        return { text: buildPaymentChoiceMessage() }
       }
 
       const aiReply = await fallbackAI(text, convo)
@@ -289,17 +357,43 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
     }
 
     if (convo.step === "payment_choice") {
-      const paymentMethod = sales.detectPaymentMethod(text)
+      const raw = String(text || "").trim().toLowerCase()
 
-      if (!paymentMethod) {
-        return { text: "Sem problema 😊 Me diz qual opção fica melhor para você: Carnê, cartão ou PIX?" }
+      if (
+        raw === "1" ||
+        raw.includes("carne") ||
+        raw.includes("carnê") ||
+        raw.includes("boleto")
+      ) {
+        convo.payment = "Carnê"
+        convo.phone = extractPhoneFromWhatsApp(phone) || ""
+        convo.step = "collecting_name"
+        return { text: sales.askName(convo.course, convo.payment) }
       }
 
-      convo.payment = paymentMethod
-      convo.phone = extractPhoneFromWhatsApp(phone) || ""
-      convo.step = "collecting_name"
+      if (
+        raw === "2" ||
+        raw.includes("cartao") ||
+        raw.includes("cartão")
+      ) {
+        convo.payment = "Cartão"
+        convo.phone = extractPhoneFromWhatsApp(phone) || ""
+        convo.step = "collecting_name"
+        return { text: sales.askName(convo.course, convo.payment) }
+      }
 
-      return { text: sales.askName(convo.course, convo.payment) }
+      if (
+        raw === "3" ||
+        raw === "pix" ||
+        raw.includes("pix")
+      ) {
+        convo.payment = "PIX"
+        convo.phone = extractPhoneFromWhatsApp(phone) || ""
+        convo.step = "collecting_name"
+        return { text: sales.askName(convo.course, convo.payment) }
+      }
+
+      return { text: buildPaymentChoiceMessage() }
     }
 
     if (convo.step === "collecting_name") {
@@ -423,7 +517,12 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
       }
 
       convo.step = "post_sale"
-      return { text: sales.cardOrPixMessage(convo) }
+
+      if (convo.payment === "PIX") {
+        return { text: buildPixMessage() }
+      }
+
+      return { text: buildCardMessage(convo.course) }
     }
 
     if (convo.step === "collecting_due_day") {
@@ -491,12 +590,7 @@ ${buildSecondViaText(created.secondVia)}`,
     }
 
     if (convo.step === "post_sale") {
-      return {
-        text: `Perfeito 😊
-
-Sua solicitação já ficou registrada.
-Se surgir qualquer dúvida, pode me chamar por aqui.`
-      }
+      return { text: buildPostSaleReply(text, convo) }
     }
 
     const aiReply = await fallbackAI(text, convo)
