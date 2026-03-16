@@ -1,7 +1,9 @@
 module.exports = {
   PORT: process.env.PORT || 3000,
 
-  META_GRAPH_VERSION: process.env.META_GRAPH_VERSION || "v19.0",
+  PUBLIC_BASE_URL: String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/, ""),
+
+  META_GRAPH_VERSION: process.env.META_GRAPH_VERSION || "v22.0",
   META_TOKEN: process.env.META_ACCESS_TOKEN || process.env.META_TOKEN,
   META_PHONE_ID: process.env.META_PHONE_NUMBER_ID || process.env.META_PHONE_ID,
   META_VERIFY_TOKEN: process.env.META_VERIFY_TOKEN,
