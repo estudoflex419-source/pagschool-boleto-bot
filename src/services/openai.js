@@ -1,39 +1,91 @@
 const axios = require("axios")
 const { OPENAI_KEY, OPENAI_MODEL } = require("../config")
 
-function buildSystemPrompt(context = {}) {
-  return `Você é a atendente da Estudo Flex no WhatsApp.
-
-Regras:
-- fale de forma humana, simpática e natural
-- nunca diga que é IA, robô ou assistente virtual
-- responda de forma curta e clara
-- faça no máximo 1 pergunta por vez
-- evite respostas mecânicas
-- mantenha o foco em matrícula, cursos, pagamentos e acesso
-- se o cliente escolheu PIX, informe os dados:
-  CNPJ: 22211962/000122
-  NOME: ALEXANDER PHILADELPHO BEZERRA
-- se perguntarem sobre acesso à plataforma, diga que a liberação acontece após confirmação do pagamento
-
-Contexto:
-- etapa: ${context.step || ""}
-- curso: ${context.course || ""}
-- pagamento: ${context.payment || ""}
-- objetivo: ${context.goal || ""}
-- experiência: ${context.experience || ""}`
+function compact(value) {
+  return String(value || "").trim()
 }
 
-function extractText(data) {
-  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+function buildSystemPrompt(context = {}) {
+  const action = compact(context.action)
+  const step = compact(context.step)
+  const course = compact(context.course)
+  const payment = compact(context.payment)
+  const goal = compact(context.goal)
+  const experience = compact(context.experience)
+  const name = compact(context.name)
+  const city = compact(context.city)
+  const state = compact(context.state)
+
+  return `Você é a atendente comercial da Estudo Flex no WhatsApp.
+
+Seu estilo:
+- fale como uma atendente humana, simpática, acolhedora e natural
+- nunca diga que é IA, robô ou assistente virtual
+- evite respostas com cara de script
+- fale de forma simples, leve e convincente
+- use mensagens curtas e naturais
+- faça no máximo 1 pergunta por vez
+- não escreva textos enormes
+- não seja seca e nem excessivamente formal
+
+Seu papel:
+- atender interessados em cursos
+- explicar cursos de forma humana
+- conduzir a matrícula com naturalidade
+- responder dúvidas sobre pagamento e acesso
+- ajudar a fechar a matrícula sem parecer forçada
+
+Regras:
+- não invente preços, prazos ou regras que não estejam no contexto
+- mantenha foco no curso que a pessoa demonstrou interesse
+- se a pessoa perguntou sobre acesso/plataforma, explique que a liberação acontece após a confirmação do pagamento
+- se o pagamento escolhido foi PIX, pode orientar com naturalidade e pedir o comprovante
+- não use markdown complicado
+- responda como WhatsApp real
+
+Dados fixos para PIX à vista:
+CNPJ: 22211962/000122
+NOME: ALEXANDER PHILADELPHO BEZERRA
+
+Contexto atual:
+- ação desejada: ${action || "geral"}
+- etapa: ${step || "não informada"}
+- curso: ${course || "não informado"}
+- pagamento: ${payment || "não informado"}
+- objetivo: ${goal || "não informado"}
+- experiência: ${experience || "não informada"}
+- nome: ${name || "não informado"}
+- cidade: ${city || "não informada"}
+- estado: ${state || "não informado"}
+
+Objetivo da resposta:
+- soar humana
+- parecer atendimento real
+- vender com naturalidade
+- evitar robotização
+- conduzir a conversa com leveza`
+}
+
+function buildUserPrompt(text, context = {}) {
+  return `Mensagem do cliente:
+"${compact(text)}"
+
+Responda apenas com a mensagem que deve ser enviada no WhatsApp.`
+}
+
+function extractTextFromResponse(data) {
+  if (!data) return ""
+
+  if (typeof data.output_text === "string" && data.output_text.trim()) {
     return data.output_text.trim()
   }
 
-  if (Array.isArray(data?.output)) {
+  if (Array.isArray(data.output)) {
     const parts = []
 
     for (const item of data.output) {
       if (!Array.isArray(item?.content)) continue
+
       for (const content of item.content) {
         if (typeof content?.text === "string" && content.text.trim()) {
           parts.push(content.text.trim())
@@ -41,42 +93,55 @@ function extractText(data) {
       }
     }
 
-    return parts.join("\n").trim()
+    if (parts.length) {
+      return parts.join("\n").trim()
+    }
   }
 
   return ""
 }
 
+function sanitizeAssistantText(text) {
+  return String(text || "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\s+\n/g, "\n")
+    .trim()
+}
+
 async function askAI(text, context = {}) {
   try {
-    if (!OPENAI_KEY) return ""
+    if (!OPENAI_KEY) {
+      return ""
+    }
+
+    const payload = {
+      model: OPENAI_MODEL || "gpt-4.1-mini",
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: buildSystemPrompt(context)
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: buildUserPrompt(text, context)
+            }
+          ]
+        }
+      ],
+      max_output_tokens: 220
+    }
 
     const resp = await axios.post(
       "https://api.openai.com/v1/responses",
-      {
-        model: OPENAI_MODEL || "gpt-4.1-mini",
-        input: [
-          {
-            role: "system",
-            content: [
-              {
-                type: "input_text",
-                text: buildSystemPrompt(context)
-              }
-            ]
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: `Mensagem do cliente: "${String(text || "").trim()}"`
-              }
-            ]
-          }
-        ],
-        max_output_tokens: 220
-      },
+      payload,
       {
         headers: {
           Authorization: `Bearer ${OPENAI_KEY}`,
@@ -92,9 +157,9 @@ async function askAI(text, context = {}) {
       return ""
     }
 
-    return extractText(resp.data)
+    return sanitizeAssistantText(extractTextFromResponse(resp.data))
   } catch (error) {
-    console.error("Erro no askAI:", error.message || error)
+    console.error("Erro no askAI:", error?.message || error)
     return ""
   }
 }
