@@ -2,7 +2,8 @@ const axios = require("axios")
 const {
   PAGSCHOOL_URL,
   PAGSCHOOL_EMAIL,
-  PAGSCHOOL_PASSWORD
+  PAGSCHOOL_PASSWORD,
+  PUBLIC_BASE_URL
 } = require("../config")
 
 const {
@@ -11,160 +12,439 @@ const {
   normalizeUF
 } = require("../utils/text")
 
-let tokenCache = null
-let tokenCacheAt = 0
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+const tokenCache = {
+  token: "",
+  exp: 0
 }
 
-function normalizeBaseUrl(url) {
-  let base = String(url || "").trim().replace(/\/+$/, "")
+function getByKeys(obj, keys) {
+  if (!obj || typeof obj !== "object") return undefined
 
-  if (base.endsWith("/api")) {
-    base = base.slice(0, -4)
-  }
-
-  return base
-}
-
-function getBaseUrl() {
-  return normalizeBaseUrl(PAGSCHOOL_URL)
-}
-
-function isTemporaryStatus(status) {
-  return [520, 522, 523, 524].includes(Number(status))
-}
-
-function buildHttpError(label, resp) {
-  const body =
-    typeof resp?.data === "string"
-      ? resp.data.slice(0, 500)
-      : JSON.stringify(resp?.data || {}).slice(0, 500)
-
-  const error = new Error(`${label} falhou (${resp?.status}): ${body}`)
-  error.status = resp?.status
-  error.isTemporary = isTemporaryStatus(resp?.status)
-  return error
-}
-
-async function requestWithRetry(requestFn, label, attempts = 3) {
-  let lastError = null
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      const resp = await requestFn()
-
-      if (resp.status >= 200 && resp.status < 300) {
-        return resp
-      }
-
-      throw buildHttpError(label, resp)
-    } catch (error) {
-      lastError = error
-
-      const temporary =
-        error?.isTemporary ||
-        /timeout|timed out|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up/i.test(
-          String(error?.message || "")
-        )
-
-      console.log(`[PAGSCHOOL RETRY] ${label} tentativa ${attempt}/${attempts}`)
-      console.log(`[PAGSCHOOL RETRY ERROR]`, error.message)
-
-      if (!temporary || attempt === attempts) {
-        throw error
-      }
-
-      await sleep(attempt * 2000)
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+      return obj[key]
     }
   }
 
-  throw lastError
+  return undefined
 }
 
-function createApi(token) {
-  return axios.create({
-    baseURL: getBaseUrl(),
-    timeout: 30000,
-    headers: token
-      ? {
-          Authorization: `JWT ${token}`
-        }
-      : {},
-    validateStatus: () => true
-  })
-}
+function findFirstArray(input) {
+  if (Array.isArray(input)) return input
+  if (!input || typeof input !== "object") return []
 
-function parseRows(data) {
-  if (Array.isArray(data)) return data
-  if (Array.isArray(data?.rows)) return data.rows
-  if (Array.isArray(data?.data)) return data.data
-  if (Array.isArray(data?.result)) return data.result
+  const preferredKeys = [
+    "rows",
+    "data",
+    "items",
+    "result",
+    "results",
+    "content",
+    "alunos",
+    "contratos",
+    "parcelas",
+    "boletos",
+    "list"
+  ]
+
+  for (const key of preferredKeys) {
+    if (Array.isArray(input[key])) return input[key]
+  }
+
+  for (const value of Object.values(input)) {
+    if (Array.isArray(value)) return value
+
+    if (value && typeof value === "object") {
+      const inner = findFirstArray(value)
+      if (inner.length) return inner
+    }
+  }
+
   return []
 }
 
-async function login() {
-  const now = Date.now()
+function collectObjects(input, maxItems = 400) {
+  const result = []
+  const stack = [input]
+  const seen = new Set()
 
-  if (tokenCache && now - tokenCacheAt < 20 * 60 * 1000) {
-    return tokenCache
+  while (stack.length && result.length < maxItems) {
+    const current = stack.pop()
+    if (!current || typeof current !== "object") continue
+    if (seen.has(current)) continue
+
+    seen.add(current)
+
+    if (!Array.isArray(current)) {
+      result.push(current)
+    }
+
+    const values = Array.isArray(current) ? current : Object.values(current)
+
+    for (const value of values) {
+      if (value && typeof value === "object") {
+        stack.push(value)
+      }
+    }
   }
 
-  const api = createApi()
-
-  const url = "/api/auth/authenticate"
-  console.log("[PAGSCHOOL AUTH URL]", `${getBaseUrl()}${url}`)
-
-  const resp = await requestWithRetry(
-    () =>
-      api.post(url, {
-        email: PAGSCHOOL_EMAIL,
-        password: PAGSCHOOL_PASSWORD
-      }),
-    "Autenticação PagSchool",
-    3
-  )
-
-  tokenCache = resp.data?.token
-  tokenCacheAt = now
-
-  if (!tokenCache) {
-    throw new Error("Token PagSchool não retornado")
-  }
-
-  return tokenCache
+  return result
 }
 
-async function withApi() {
-  const token = await login()
-  return createApi(token)
+function dedupeStrings(items) {
+  return [...new Set(items.filter(Boolean))]
+}
+
+function buildPagSchoolUrls(docPath) {
+  const base = String(PAGSCHOOL_URL || "").replace(/\/$/, "")
+  const path = `/${String(docPath || "").replace(/^\/+/, "")}`
+
+  const pathWithoutApi = path.replace(/^\/api\b/, "") || "/"
+  const isBaseApi = /\/api$/i.test(base)
+
+  if (isBaseApi) {
+    return dedupeStrings([
+      `${base}${pathWithoutApi}`,
+      `${base}${path}`
+    ])
+  }
+
+  return dedupeStrings([
+    `${base}${path}`,
+    `${base}/api${pathWithoutApi}`
+  ])
+}
+
+async function pagSchoolRequestNoAuth({
+  method = "get",
+  docPath,
+  params,
+  data,
+  responseType = "json"
+}) {
+  const urls = buildPagSchoolUrls(docPath)
+  const errors = []
+
+  for (const url of urls) {
+    const resp = await axios({
+      method,
+      url,
+      params,
+      data,
+      responseType,
+      timeout: 30000,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      validateStatus: () => true
+    }).catch((err) => ({
+      status: 0,
+      data: err.message,
+      headers: {},
+      url
+    }))
+
+    if (resp.status >= 200 && resp.status < 300) {
+      return { ...resp, triedUrl: url }
+    }
+
+    errors.push({
+      url,
+      status: resp.status,
+      data: resp.data
+    })
+  }
+
+  throw new Error(JSON.stringify(errors))
+}
+
+async function getPagSchoolToken(forceRefresh = false) {
+  if (!forceRefresh && tokenCache.token && Date.now() < tokenCache.exp) {
+    return tokenCache.token
+  }
+
+  const attempts = [
+    {
+      docPath: "/api/authenticate",
+      data: { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD }
+    },
+    {
+      docPath: "/authenticate",
+      data: { email: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD }
+    }
+  ]
+
+  const errors = []
+
+  for (const attempt of attempts) {
+    try {
+      console.log("[PAGSCHOOL AUTH TRY]", attempt.docPath, buildPagSchoolUrls(attempt.docPath))
+      const resp = await pagSchoolRequestNoAuth({
+        method: "post",
+        docPath: attempt.docPath,
+        data: attempt.data
+      })
+
+      const token =
+        resp?.data?.token ||
+        resp?.data?.jwt ||
+        resp?.data?.accessToken ||
+        resp?.data?.data?.token ||
+        resp?.data?.data?.jwt ||
+        resp?.data?.data?.accessToken ||
+        ""
+
+      if (token) {
+        tokenCache.token = String(token)
+        tokenCache.exp = Date.now() + 1000 * 60 * 50
+        return tokenCache.token
+      }
+
+      errors.push({
+        docPath: attempt.docPath,
+        triedUrl: resp.triedUrl,
+        data: resp.data
+      })
+    } catch (error) {
+      errors.push({
+        docPath: attempt.docPath,
+        error: String(error.message || error)
+      })
+    }
+  }
+
+  throw new Error(`Não consegui autenticar na PagSchool: ${JSON.stringify(errors)}`)
+}
+
+async function pagSchoolRequest(
+  { method = "get", docPath, params, data, responseType = "json" },
+  retry = true
+) {
+  const token = await getPagSchoolToken(false)
+  const urls = buildPagSchoolUrls(docPath)
+  const errors = []
+
+  for (const url of urls) {
+    for (const authHeader of [`JWT ${token}`, `Bearer ${token}`]) {
+      const resp = await axios({
+        method,
+        url,
+        params,
+        data,
+        responseType,
+        timeout: 30000,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader
+        },
+        validateStatus: () => true
+      }).catch((err) => ({
+        status: 0,
+        data: err.message,
+        headers: {},
+        url
+      }))
+
+      if (resp.status === 401 && retry) {
+        await getPagSchoolToken(true)
+        return pagSchoolRequest({ method, docPath, params, data, responseType }, false)
+      }
+
+      if (resp.status >= 200 && resp.status < 300) {
+        return { ...resp, triedUrl: url }
+      }
+
+      errors.push({
+        url,
+        auth: authHeader.startsWith("JWT ") ? "JWT" : "Bearer",
+        status: resp.status,
+        data: resp.data
+      })
+    }
+  }
+
+  throw new Error(JSON.stringify(errors))
+}
+
+function normalizeAluno(raw, cpf) {
+  if (!raw || typeof raw !== "object") return null
+
+  const id = getByKeys(raw, ["id", "alunoId", "idAluno", "pessoaId", "userId"])
+  const nome = getByKeys(raw, ["nome", "nomeAluno", "name"])
+  const rawCpf = getByKeys(raw, ["cpf", "documento", "cpfAluno"])
+
+  if (!id) return null
+
+  return {
+    id,
+    nome: nome || "Aluno",
+    cpf: onlyDigits(rawCpf || cpf),
+    telefone:
+      getByKeys(raw, ["telefoneCelular", "telefone", "celular", "whatsapp", "fone"]) || "",
+    raw
+  }
+}
+
+function extractAlunoFromResponse(data, cpf) {
+  const cpfDigits = onlyDigits(cpf)
+  const objects = collectObjects(data)
+
+  for (const obj of objects) {
+    const objCpf = onlyDigits(getByKeys(obj, ["cpf", "documento", "cpfAluno"]) || "")
+    if (cpfDigits && objCpf && objCpf === cpfDigits) {
+      const aluno = normalizeAluno(obj, cpfDigits)
+      if (aluno) return aluno
+    }
+  }
+
+  for (const obj of objects) {
+    const aluno = normalizeAluno(obj, cpfDigits)
+    if (aluno) return aluno
+  }
+
+  const arr = findFirstArray(data)
+  for (const item of arr) {
+    const aluno = normalizeAluno(item, cpfDigits)
+    if (aluno) return aluno
+  }
+
+  return null
+}
+
+function normalizeParcela(raw) {
+  if (!raw || typeof raw !== "object") return null
+
+  const id = getByKeys(raw, ["id", "parcelaId", "idParcela"])
+  if (!id) return null
+
+  return {
+    id,
+    status: String(getByKeys(raw, ["status", "situacao"]) || "").toUpperCase(),
+    valor: Number(getByKeys(raw, ["valor", "valorParcela", "saldo"]) || 0),
+    valorPago: Number(getByKeys(raw, ["valorPago"]) || 0),
+    vencimento: getByKeys(raw, ["vencimento", "dataVencimento"]),
+    numeroBoleto: getByKeys(raw, ["numeroBoleto", "linhaDigitavel", "codigoBarras"]) || "",
+    nossoNumero: getByKeys(raw, ["nossoNumero"]) || "",
+    linkPDF: getByKeys(raw, ["linkPDF", "pdfUrl", "urlPdf"]) || "",
+    raw
+  }
+}
+
+function isParcelaEmAberto(parcela) {
+  const status = String(parcela?.status || "").toUpperCase()
+
+  if (status.includes("PAGO")) return false
+  if (status.includes("QUITADO")) return false
+  if (status.includes("CANCEL")) return false
+  if (status.includes("BAIXADO")) return false
+
+  if (
+    Number(parcela?.valor || 0) > 0 &&
+    Number(parcela?.valorPago || 0) >= Number(parcela?.valor || 0)
+  ) {
+    return false
+  }
+
+  return true
+}
+
+function normalizeContrato(raw) {
+  if (!raw || typeof raw !== "object") return null
+
+  const id = getByKeys(raw, ["id", "contratoId", "idContrato"])
+  if (!id) return null
+
+  const parcelasRaw = Array.isArray(raw.parcelas) ? raw.parcelas : []
+  const parcelas = parcelasRaw.map(normalizeParcela).filter(Boolean)
+
+  return {
+    id,
+    status: String(getByKeys(raw, ["status", "situacao"]) || "").toUpperCase(),
+    nomeCurso: getByKeys(raw, ["nomeCurso", "curso", "nome_curso"]) || "",
+    parcelas,
+    raw
+  }
+}
+
+function extractContratosFromResponse(data) {
+  const arr = findFirstArray(data)
+  if (arr.length) return arr.map(normalizeContrato).filter(Boolean)
+
+  const objects = collectObjects(data)
+  return objects.map(normalizeContrato).filter(Boolean)
+}
+
+function selectBestContrato(contratos) {
+  if (!Array.isArray(contratos) || !contratos.length) return null
+
+  const withOpenParcela = contratos.find((c) => c.parcelas.some(isParcelaEmAberto))
+  if (withOpenParcela) return withOpenParcela
+
+  const active = contratos.find((c) => !String(c.status || "").includes("CANCEL"))
+  if (active) return active
+
+  return contratos[0]
+}
+
+function selectBestParcela(contrato) {
+  if (!contrato || !Array.isArray(contrato.parcelas)) return null
+
+  const abertas = contrato.parcelas.filter(isParcelaEmAberto)
+
+  abertas.sort((a, b) => {
+    const da = new Date(a.vencimento || 0).getTime() || 0
+    const db = new Date(b.vencimento || 0).getTime() || 0
+    return da - db
+  })
+
+  if (abertas.length) return abertas[0]
+  return contrato.parcelas[0] || null
 }
 
 async function buscarAluno(cpf) {
-  const api = await withApi()
-  const cleanCpf = onlyDigits(cpf)
+  const cpfDigits = onlyDigits(cpf)
 
-  const url = `/api/aluno/all?limit=20&offset=0&filter=${encodeURIComponent(cleanCpf)}`
-  console.log("[PAGSCHOOL BUSCAR ALUNO URL]", `${getBaseUrl()}${url}`)
+  const attempts = [
+    { params: { cpf: cpfDigits, list: false, limit: 20 } },
+    { params: { filtro: cpfDigits, list: false, limit: 20 } },
+    { params: { filters: cpfDigits, list: false, limit: 20 } },
+    { params: { cpfResponsavel: cpfDigits, list: false, limit: 20 } },
+    { params: { list: false, limit: 100 } }
+  ]
 
-  const resp = await requestWithRetry(
-    () => api.get(url),
-    "Pesquisa de alunos",
-    3
-  )
+  const errors = []
 
-  const rows = parseRows(resp.data)
+  for (const attempt of attempts) {
+    try {
+      const resp = await pagSchoolRequest({
+        method: "get",
+        docPath: "/api/aluno/all",
+        params: attempt.params
+      })
 
-  return rows.find((item) => onlyDigits(item?.cpf) === cleanCpf) || rows[0] || null
+      const aluno = extractAlunoFromResponse(resp.data, cpfDigits)
+
+      if (aluno) return aluno
+
+      errors.push({
+        params: attempt.params,
+        triedUrl: resp.triedUrl,
+        result: "Aluno não encontrado nessa tentativa"
+      })
+    } catch (error) {
+      errors.push({
+        params: attempt.params,
+        error: String(error.message || error)
+      })
+    }
+  }
+
+  throw new Error(`Aluno não encontrado para o CPF ${cpfDigits}. Tentativas: ${JSON.stringify(errors)}`)
 }
 
 async function criarAluno(payload) {
-  const api = await withApi()
-  const cleanCpf = onlyDigits(payload.cpf)
-
   const body = {
-    cpf: cleanCpf,
+    cpf: onlyDigits(payload.cpf),
     telefoneCelular: onlyDigits(payload.telefoneCelular),
     nomeAluno: payload.nomeAluno,
     dataNascimento: brDateToISO(payload.dataNascimento),
@@ -176,27 +456,24 @@ async function criarAluno(payload) {
     bairro: payload.bairro,
     local: payload.local,
     numero: String(payload.numero),
-    email: payload.email || `${cleanCpf}@aluno.estudoflex.com`
+    email: payload.email || `${onlyDigits(payload.cpf)}@aluno.estudoflex.com`
   }
 
-  const url = "/api/aluno/new"
-  console.log("[PAGSCHOOL CRIAR ALUNO URL]", `${getBaseUrl()}${url}`)
-
-  const resp = await requestWithRetry(
-    () => api.post(url, body),
-    "Criação de aluno",
-    3
-  )
+  const resp = await pagSchoolRequest({
+    method: "post",
+    docPath: "/api/aluno/new",
+    data: body
+  })
 
   return resp.data
 }
 
 async function buscarOuCriarAluno(payload) {
-  const existente = await buscarAluno(payload.cpf)
-
-  if (existente) return existente
-
-  return criarAluno(payload)
+  try {
+    return await buscarAluno(payload.cpf)
+  } catch (_error) {
+    return criarAluno(payload)
+  }
 }
 
 function buildNumeroContrato(cpf) {
@@ -226,13 +503,12 @@ function buildFirstDueDate(day) {
 }
 
 async function criarContratoCarne({ alunoId, nomeCurso, cpf, dueDay }) {
-  const api = await withApi()
-
   const body = {
     numeroContrato: buildNumeroContrato(cpf),
     nomeCurso,
     duracaoCurso: 12,
     valorParcela: 80,
+    Parcelas: 12,
     quantidadeParcelas: 12,
     diaProximoVencimento: Number(dueDay),
     primeiroVencimentoParcela: buildFirstDueDate(dueDay),
@@ -241,144 +517,112 @@ async function criarContratoCarne({ alunoId, nomeCurso, cpf, dueDay }) {
     numeroParcelaInicial: 1
   }
 
-  const url = "/api/contrato/create"
-  console.log("[PAGSCHOOL CRIAR CONTRATO URL]", `${getBaseUrl()}${url}`)
-
-  const resp = await requestWithRetry(
-    () => api.post(url, body),
-    "Criação de contrato",
-    3
-  )
+  const resp = await pagSchoolRequest({
+    method: "post",
+    docPath: "/api/contrato/create",
+    data: body
+  })
 
   return resp.data
 }
 
 async function buscarContratosPorAluno(alunoId) {
-  const api = await withApi()
+  const resp = await pagSchoolRequest({
+    method: "get",
+    docPath: `/api/contrato/by-aluno/${alunoId}`
+  })
 
-  const url = `/api/contrato/by-aluno/${alunoId}`
-  console.log("[PAGSCHOOL CONTRATOS URL]", `${getBaseUrl()}${url}`)
+  const contratos = extractContratosFromResponse(resp.data)
 
-  const resp = await requestWithRetry(
-    () => api.get(url),
-    "Contratos por aluno",
-    3
-  )
-
-  return parseRows(resp.data)
-}
-
-function pickOpenParcel(contracts) {
-  for (const contract of contracts) {
-    const parcelas = Array.isArray(contract?.parcelas) ? contract.parcelas : []
-
-    const byNextId = parcelas.find(
-      (p) =>
-        Number(p?.id) === Number(contract?.proximaparcela_id) &&
-        p?.status !== "PAGO"
-    )
-
-    if (byNextId) {
-      return { contract, parcela: byNextId }
-    }
-
-    const firstOpen = parcelas.find((p) => p?.status !== "PAGO")
-
-    if (firstOpen) {
-      return { contract, parcela: firstOpen }
-    }
-  }
-
-  return {
-    contract: contracts[0] || null,
-    parcela: null
-  }
+  return contratos
 }
 
 async function gerarCarneBoletos(contratoId) {
-  const api = await withApi()
-
-  const url = `/api/contrato/gerar-carne-boletos/${contratoId}`
-  console.log("[PAGSCHOOL GERAR CARNE URL]", `${getBaseUrl()}${url}`)
-
-  const resp = await requestWithRetry(
-    () => api.get(url),
-    "Geração de carnê",
-    3
-  )
+  const resp = await pagSchoolRequest({
+    method: "get",
+    docPath: `/api/contrato/gerar-carne-boletos/${contratoId}`
+  })
 
   return resp.data
 }
 
-function parseLinhaDigitavel(parcela) {
-  try {
-    if (parcela?.emissaoSicrediJson) {
-      const parsed = JSON.parse(parcela.emissaoSicrediJson)
-      return parsed?.linhaDigitavel || null
-    }
-  } catch (error) {}
+async function gerarBoletoDaParcela(parcelaId) {
+  const resp = await pagSchoolRequest({
+    method: "post",
+    docPath: `/api/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`,
+    data: {}
+  })
 
-  return parcela?.numeroBoleto || null
+  const data = resp.data || {}
+  const nossoNumero =
+    data?.nossoNumero ||
+    data?.data?.nossoNumero ||
+    getByKeys(data, ["nossoNumero"]) ||
+    ""
+
+  return {
+    nossoNumero,
+    raw: data,
+    triedUrl: resp.triedUrl
+  }
 }
 
-async function gerarBoletoParcela(parcelaId) {
-  const api = await withApi()
+function buildPublicPdfUrl(parcelaId, nossoNumero) {
+  if (!PUBLIC_BASE_URL) return ""
 
-  const url = `/api/parcela-contrato/gerar-boleto-parcela/${parcelaId}`
-  console.log("[PAGSCHOOL GERAR PARCELA URL]", `${getBaseUrl()}${url}`)
-
-  const resp = await requestWithRetry(
-    () => api.post(url),
-    "Geração de boleto da parcela",
-    3
-  )
-
-  return resp.data
+  return `${PUBLIC_BASE_URL}/carne/pdf/${encodeURIComponent(parcelaId)}/${encodeURIComponent(
+    String(nossoNumero || "sem-nosso-numero")
+  )}`
 }
 
-function montarPdfParcela(parcelaId, nossoNumero) {
-  return `${getBaseUrl()}/api/parcela-contrato/pdf/${parcelaId}/${nossoNumero}`
+async function baixarPdfParcela(parcelaId, nossoNumero) {
+  return pagSchoolRequest({
+    method: "get",
+    docPath: `/api/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
+    responseType: "arraybuffer"
+  })
 }
 
 async function obterSegundaViaPorCpf(cpf) {
   const aluno = await buscarAluno(cpf)
+  const contratos = await buscarContratosPorAluno(aluno.id)
+  const contrato = selectBestContrato(contratos)
 
-  if (!aluno) return null
-
-  const contracts = await buscarContratosPorAluno(aluno.id)
-
-  if (!contracts.length) {
+  if (!contrato) {
     return {
       aluno,
-      contracts: [],
+      contract: null,
       parcela: null
     }
   }
 
-  const { contract, parcela } = pickOpenParcel(contracts)
+  let parcela = selectBestParcela(contrato)
 
   if (!parcela) {
     return {
       aluno,
-      contract,
+      contract: contrato,
       parcela: null
     }
   }
 
-  let enrichedParcel = parcela
+  let nossoNumero = parcela.nossoNumero || ""
+  let linhaDigitavel = parcela.numeroBoleto || ""
 
-  if (!enrichedParcel?.nossoNumero) {
-    enrichedParcel = await gerarBoletoParcela(parcela.id)
+  if (!nossoNumero) {
+    const gerado = await gerarBoletoDaParcela(parcela.id)
+    nossoNumero = gerado.nossoNumero || ""
   }
+
+  const pdfUrl = nossoNumero ? buildPublicPdfUrl(parcela.id, nossoNumero) : ""
 
   return {
     aluno,
-    contract,
-    parcela: enrichedParcel,
-    linhaDigitavel: parseLinhaDigitavel(enrichedParcel),
-    pdfUrl: enrichedParcel?.nossoNumero
-      ? montarPdfParcela(enrichedParcel.id, enrichedParcel.nossoNumero)
-      : null
+    contract: contrato,
+    parcela,
+    nossoNumero,
+    linhaDigitavel,
+    pdfUrl
   }
 }
 
@@ -397,10 +641,14 @@ async function criarMatriculaComCarne(payload) {
     dueDay: payload.dueDay
   })
 
-  const contratoId = contrato?.id || contrato?._id
+  const contratoId =
+    contrato?.id ||
+    contrato?._id ||
+    contrato?.data?.id ||
+    contrato?.data?._id
 
   if (!contratoId) {
-    throw new Error("Contrato criado sem id")
+    throw new Error(`Contrato criado sem id: ${JSON.stringify(contrato).slice(0, 500)}`)
   }
 
   await gerarCarneBoletos(contratoId)
@@ -418,5 +666,6 @@ module.exports = {
   buscarAluno,
   buscarOuCriarAluno,
   obterSegundaViaPorCpf,
-  criarMatriculaComCarne
+  criarMatriculaComCarne,
+  baixarPdfParcela
 }
