@@ -17,6 +17,10 @@ const tokenCache = {
   exp: 0
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function getByKeys(obj, keys) {
   if (!obj || typeof obj !== "object") return undefined
 
@@ -402,6 +406,10 @@ function selectBestParcela(contrato) {
   return contrato.parcelas[0] || null
 }
 
+function findContratoById(contratos, contratoId) {
+  return contratos.find((item) => String(item.id) === String(contratoId)) || null
+}
+
 async function buscarAluno(cpf) {
   const cpfDigits = onlyDigits(cpf)
 
@@ -503,16 +511,6 @@ function buildFirstDueDate(day) {
   return `${year}-${String(month).padStart(2, "0")}-${String(dueDay).padStart(2, "0")}`
 }
 
-function addMonthsToISO(isoDate, monthsToAdd) {
-  const [y, m, d] = String(isoDate).split("-").map(Number)
-  const dt = new Date(y, m - 1, d)
-  dt.setMonth(dt.getMonth() + monthsToAdd)
-
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(
-    dt.getDate()
-  ).padStart(2, "0")}`
-}
-
 async function criarContratoCarne({ alunoId, nomeCurso, cpf, dueDay }) {
   const body = {
     numeroContrato: buildNumeroContrato(cpf),
@@ -554,31 +552,6 @@ async function gerarCarneBoletos(contratoId) {
   return resp.data
 }
 
-async function criarParcelaManual({ contratoId, valor, vencimento, descricao }) {
-  const body = {
-    valor,
-    descricao: descricao || "Parcela inicial do carnê",
-    vencimento,
-    contrato_id: contratoId
-  }
-
-  const resp = await pagSchoolRequest({
-    method: "post",
-    docPath: "/api/parcela-contrato/create",
-    data: body
-  })
-
-  const data = resp.data || {}
-
-  return {
-    id:
-      data?.id ||
-      data?.data?.id ||
-      getByKeys(data, ["id", "parcelaId", "idParcela"]),
-    raw: data
-  }
-}
-
 async function gerarBoletoDaParcela(parcelaId) {
   const resp = await pagSchoolRequest({
     method: "post",
@@ -616,26 +589,68 @@ async function baixarPdfParcela(parcelaId, nossoNumero) {
   })
 }
 
-async function garantirParcelaInicialSeNecessario({ contratoId, dueDay }) {
-  try {
-    await gerarCarneBoletos(contratoId)
-    return
-  } catch (error) {
-    const message = String(error.message || "")
+async function esperarParcelasDoContrato(alunoId, contratoId, attempts = 6, delayMs = 2500) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    console.log(`[PAGSCHOOL WAIT PARCELAS] tentativa ${attempt}/${attempts}`)
 
-    if (!/sem parcelas disponiveis para pagamento/i.test(message) &&
-        !/sem parcelas disponíveis para pagamento/i.test(message)) {
-      throw error
+    const contratos = await buscarContratosPorAluno(alunoId)
+    const contrato = findContratoById(contratos, contratoId)
+
+    if (contrato) {
+      const parcela = selectBestParcela(contrato)
+
+      if (parcela) {
+        return { contrato, parcela }
+      }
     }
 
-    console.log("[PAGSCHOOL FALLBACK] contrato sem parcelas, criando primeira parcela manualmente")
+    if (attempt < attempts) {
+      await sleep(delayMs)
+    }
+  }
 
-    await criarParcelaManual({
-      contratoId,
-      valor: 80,
-      vencimento: buildFirstDueDate(dueDay),
-      descricao: "Parcela 1 do carnê"
-    })
+  return { contrato: null, parcela: null }
+}
+
+async function obterSegundaViaPorContrato(aluno, contratoId) {
+  const contratos = await buscarContratosPorAluno(aluno.id)
+  const contrato = findContratoById(contratos, contratoId)
+
+  if (!contrato) {
+    return {
+      aluno,
+      contract: null,
+      parcela: null
+    }
+  }
+
+  let parcela = selectBestParcela(contrato)
+
+  if (!parcela) {
+    return {
+      aluno,
+      contract: contrato,
+      parcela: null
+    }
+  }
+
+  let nossoNumero = parcela.nossoNumero || ""
+  const linhaDigitavel = parcela.numeroBoleto || ""
+
+  if (!nossoNumero) {
+    const gerado = await gerarBoletoDaParcela(parcela.id)
+    nossoNumero = gerado.nossoNumero || ""
+  }
+
+  const pdfUrl = nossoNumero ? buildPublicPdfUrl(parcela.id, nossoNumero) : ""
+
+  return {
+    aluno,
+    contract: contrato,
+    parcela,
+    nossoNumero,
+    linhaDigitavel,
+    pdfUrl
   }
 }
 
@@ -707,17 +722,40 @@ async function criarMatriculaComCarne(payload) {
     throw new Error(`Contrato criado sem id: ${JSON.stringify(contrato).slice(0, 500)}`)
   }
 
-  await garantirParcelaInicialSeNecessario({
-    contratoId,
-    dueDay: payload.dueDay
-  })
+  let carnePendente = false
 
-  const secondVia = await obterSegundaViaPorCpf(payload.cpf)
+  try {
+    await gerarCarneBoletos(contratoId)
+  } catch (error) {
+    const msg = String(error.message || "")
+
+    if (
+      /sem parcelas disponiveis para pagamento/i.test(msg) ||
+      /sem parcelas disponíveis para pagamento/i.test(msg)
+    ) {
+      console.log("[PAGSCHOOL INFO] contrato criado, aguardando parcelas aparecerem na plataforma")
+      carnePendente = true
+    } else {
+      throw error
+    }
+  }
+
+  let secondVia = await obterSegundaViaPorContrato(aluno, contratoId)
+
+  if (!secondVia?.parcela && carnePendente) {
+    const waited = await esperarParcelasDoContrato(alunoId, contratoId, 6, 2500)
+
+    if (waited?.contrato && waited?.parcela) {
+      secondVia = await obterSegundaViaPorContrato(aluno, contratoId)
+      carnePendente = false
+    }
+  }
 
   return {
     aluno,
     contrato,
-    secondVia
+    secondVia,
+    carnePendente
   }
 }
 
