@@ -1,13 +1,13 @@
 const axios = require("axios")
-const { META_PHONE_ID, META_TOKEN } = require("../config")
+const { META_PHONE_ID, META_TOKEN, META_GRAPH_VERSION } = require("../config")
 
 async function sendText(phone, text) {
   try {
-    const url = `https://graph.facebook.com/v19.0/${META_PHONE_ID}/messages`
+    const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${META_PHONE_ID}/messages`
 
     const payload = {
       messaging_product: "whatsapp",
-      to: String(phone),
+      to: String(phone).replace(/\D/g, ""),
       type: "text",
       text: { body: String(text) }
     }
