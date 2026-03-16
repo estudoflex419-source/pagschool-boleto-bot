@@ -1,76 +1,67 @@
 const axios = require("axios")
-const { OPENAI_KEY } = require("../config")
+const { OPENAI_KEY, OPENAI_MODEL } = require("../config")
+
+function buildSystemPrompt(context = {}) {
+  return `Você é a atendente da Estudo Flex no WhatsApp.
+
+Regras:
+- fale de forma humana, simpática e natural
+- nunca diga que é IA, robô ou assistente virtual
+- responda de forma curta e clara
+- faça no máximo 1 pergunta por vez
+- evite respostas mecânicas
+- mantenha o foco em matrícula, cursos, pagamentos e acesso
+- se o cliente escolheu PIX, informe os dados:
+  CNPJ: 22211962/000122
+  NOME: ALEXANDER PHILADELPHO BEZERRA
+- se perguntarem sobre acesso à plataforma, diga que a liberação acontece após confirmação do pagamento
+
+Contexto:
+- etapa: ${context.step || ""}
+- curso: ${context.course || ""}
+- pagamento: ${context.payment || ""}
+- objetivo: ${context.goal || ""}
+- experiência: ${context.experience || ""}`
+}
 
 function extractText(data) {
-  try {
-    const output = data?.output || []
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim()
+  }
 
-    for (const item of output) {
-      if (!item?.content) continue
+  if (Array.isArray(data?.output)) {
+    const parts = []
 
+    for (const item of data.output) {
+      if (!Array.isArray(item?.content)) continue
       for (const content of item.content) {
-        if (content?.text) return content.text
-        if (content?.type === "output_text" && content?.text) return content.text
+        if (typeof content?.text === "string" && content.text.trim()) {
+          parts.push(content.text.trim())
+        }
       }
     }
 
-    return null
-  } catch (error) {
-    return null
+    return parts.join("\n").trim()
   }
+
+  return ""
 }
 
-async function askAI(question, context = {}) {
-  if (!OPENAI_KEY) return null
-
-  const systemPrompt = `
-Você é a consultora virtual da Estudo Flex.
-
-Missão:
-Converter interessados em alunos matriculados com conversa humana, leve e consultiva.
-
-Regras obrigatórias:
-- Fale em português do Brasil.
-- Seja humana, acolhedora e objetiva.
-- Frases curtas.
-- Nunca pareça robô.
-- O curso é gratuito.
-- Existe apenas o investimento do material didático.
-- Não usar a palavra "boleto" no fluxo comercial de nova matrícula.
-- Para nova matrícula, usar sempre a palavra "Carnê".
-- "Boleto", "segunda via" e "parcela" são assuntos de aluno já matriculado.
-- Nunca abrir a conversa falando valores.
-- Só mostrar valores quando houver interesse claro.
-- Após a matrícula, parar o fluxo de vendas.
-
-Benefícios do material didático:
-- Apostilas digitais
-- Atividades
-- Vídeos educativos
-- Avaliações
-- Carta de estágio
-
-Valores:
-- Carnê: R$ 960,00 em 12x de R$ 80,00
-- Cartão: R$ 780,00 em 12x de R$ 65,00
-- PIX ou à vista: R$ 550,00
-
-Contexto atual:
-${JSON.stringify(context, null, 2)}
-`.trim()
-
+async function askAI(text, context = {}) {
   try {
-    const response = await axios.post(
+    if (!OPENAI_KEY) return ""
+
+    const resp = await axios.post(
       "https://api.openai.com/v1/responses",
       {
-        model: "gpt-4.1-mini",
+        model: OPENAI_MODEL || "gpt-4.1-mini",
         input: [
           {
             role: "system",
             content: [
               {
                 type: "input_text",
-                text: systemPrompt
+                text: buildSystemPrompt(context)
               }
             ]
           },
@@ -79,32 +70,35 @@ ${JSON.stringify(context, null, 2)}
             content: [
               {
                 type: "input_text",
-                text: question
+                text: `Mensagem do cliente: "${String(text || "").trim()}"`
               }
             ]
           }
-        ]
+        ],
+        max_output_tokens: 220
       },
       {
         headers: {
           Authorization: `Bearer ${OPENAI_KEY}`,
           "Content-Type": "application/json"
         },
+        timeout: 30000,
         validateStatus: () => true
       }
     )
 
-    if (response.status >= 400) {
-      console.log("[OPENAI STATUS]", response.status)
-      console.log("[OPENAI DATA]", JSON.stringify(response.data))
-      return null
+    if (resp.status < 200 || resp.status >= 300) {
+      console.error("OPENAI ERROR:", resp.status, resp.data)
+      return ""
     }
 
-    return extractText(response.data)
+    return extractText(resp.data)
   } catch (error) {
-    console.log("[OPENAI ERROR]", error.message)
-    return null
+    console.error("Erro no askAI:", error.message || error)
+    return ""
   }
 }
 
-module.exports = { askAI }
+module.exports = {
+  askAI
+}
