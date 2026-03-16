@@ -25,7 +25,7 @@ app.get("/health", (req, res) => {
 })
 
 app.get("/", (req, res) => {
-  res.send("ESTUDO FLEX BOT COMERCIAL ONLINE 🚀")
+  res.send("ESTUDO FLEX BOT V2 ONLINE 🚀")
 })
 
 app.get("/meta/webhook", (req, res) => {
@@ -48,18 +48,19 @@ app.get("/meta/webhook", (req, res) => {
 
 function resetConversation(convo) {
   convo.step = "menu"
+  convo.path = ""
   convo.course = ""
   convo.goal = ""
   convo.experience = ""
   convo.payment = ""
   convo.name = ""
   convo.cpf = ""
-  convo.path = ""
+  convo.lastQuestion = ""
 }
 
-async function processExistingStudent(text) {
+async function processExistingStudent(cpf) {
   try {
-    const aluno = await buscarAluno(text)
+    const aluno = await buscarAluno(cpf)
 
     if (aluno) {
       return "Perfeito 😊 Localizei seu cadastro. Agora vou seguir com a sua solicitação de segunda via."
@@ -70,6 +71,17 @@ async function processExistingStudent(text) {
     console.log("[PAGSCHOOL EXISTING STUDENT ERROR]", error.message)
     return "Não consegui localizar seu cadastro agora. Me confirma seu CPF novamente, por favor."
   }
+}
+
+async function fallbackAI(text, convo) {
+  return await askAI(text, {
+    step: convo.step,
+    path: convo.path,
+    course: convo.course,
+    goal: convo.goal,
+    experience: convo.experience,
+    payment: convo.payment
+  })
 }
 
 async function processMessage(phone, text) {
@@ -90,7 +102,7 @@ async function processMessage(phone, text) {
       return sales.menu()
     }
 
-    if (sales.isExistingStudentIntent(text)) {
+    if (sales.isExistingStudentIntent(text) && convo.step !== "post_sale") {
       convo.path = "existing_student"
       convo.step = "existing_student_cpf"
       return "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
@@ -102,29 +114,30 @@ async function processMessage(phone, text) {
       }
 
       convo.cpf = text
+      convo.step = "existing_student_done"
       return await processExistingStudent(text)
     }
 
-    if (sales.isNewEnrollmentIntent(text)) {
+    if (sales.isNewEnrollmentIntent(text) && convo.step !== "post_sale") {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       return sales.newEnrollmentIntro()
     }
 
-    if (sales.isCourseListIntent(text) && !convo.course) {
+    if (sales.isCourseListIntent(text) && !convo.course && convo.step !== "post_sale") {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       return sales.showCourses()
     }
 
-    if (course) {
+    if (course && convo.step !== "post_sale") {
       convo.path = "new_enrollment"
       convo.course = course.name
       convo.step = "diagnosis_goal"
       return sales.presentCourse(course)
     }
 
-    if (sales.isPriceQuestion(text) && !convo.course) {
+    if (sales.isPriceQuestion(text) && !convo.course && convo.step !== "post_sale") {
       return `Os cursos são gratuitos 😊
 
 Existe apenas o investimento do material didático, que eu te explico direitinho depois que eu entender qual curso faz mais sentido para você.
@@ -133,45 +146,39 @@ Me diz qual curso te chamou mais atenção?`
     }
 
     const objectionReply = sales.getObjectionReply(text, convo.course)
-    if (objectionReply) {
+    if (objectionReply && convo.step !== "post_sale") {
       return objectionReply
     }
 
     if (convo.step === "course_selection") {
-      return `Claro 😊
-
-${sales.showCourses()}`
+      return sales.showCourses()
     }
 
     if (convo.step === "diagnosis_goal") {
       convo.goal = text
       convo.step = "diagnosis_experience"
-
       return "Entendi 😊 E você está começando do zero ou já teve algum contato com essa área?"
     }
 
     if (convo.step === "diagnosis_experience") {
       convo.experience = text
       convo.step = "offer_transition"
-
       return sales.buildValueConnection(convo)
     }
 
     if (convo.step === "offer_transition") {
-      if (sales.isAffirmative(text) || sales.isPriceQuestion(text)) {
+      if (
+        sales.isAffirmative(text) ||
+        sales.isPriceQuestion(text) ||
+        sales.detectCloseMoment(text)
+      ) {
         convo.step = "payment_choice"
         return `${sales.materialPitch()}
 
 ${sales.investmentMessage()}`
       }
 
-      const aiReply = await askAI(text, {
-        stage: convo.step,
-        course: convo.course,
-        goal: convo.goal,
-        experience: convo.experience
-      })
-
+      const aiReply = await fallbackAI(text, convo)
       if (aiReply) return aiReply
 
       return `Sem problema 😊
@@ -188,7 +195,6 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
 
       convo.payment = paymentMethod
       convo.step = "collecting_name"
-
       return sales.askName(convo.course, convo.payment)
     }
 
@@ -205,7 +211,6 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
 
       convo.cpf = text
       convo.step = "post_sale"
-
       return sales.finalEnrollmentMessage(convo)
     }
 
@@ -216,13 +221,7 @@ Sua solicitação já ficou registrada.
 Se surgir qualquer dúvida, pode me chamar por aqui.`
     }
 
-    const aiReply = await askAI(text, {
-      stage: convo.step,
-      course: convo.course,
-      path: convo.path,
-      payment: convo.payment
-    })
-
+    const aiReply = await fallbackAI(text, convo)
     if (aiReply) return aiReply
 
     return sales.menu()
