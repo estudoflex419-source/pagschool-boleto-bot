@@ -11,21 +11,6 @@ const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/,
 const PAGSCHOOL_EMAIL = String(process.env.PAGSCHOOL_EMAIL || "")
 const PAGSCHOOL_PASSWORD = String(process.env.PAGSCHOOL_PASSWORD || "")
 
-// Ajuste aqui se a sua doc de aluno usar caminhos diferentes
-const ALUNO_SEARCH_PATHS = [
-  "/aluno/cpf",
-  "/aluno/buscar-por-cpf",
-  "/aluno/search-by-cpf"
-]
-
-const ALUNO_CREATE_PATHS = [
-  "/aluno/create",
-  "/aluno/store",
-  "/aluno"
-]
-
-// Catálogo simples para matrícula automática
-// Você pode editar valores e parcelas aqui
 const COURSE_CATALOG = {
   "ATENDENTE DE FARMACIA": {
     nomeCurso: "ATEND FARMACIA",
@@ -50,12 +35,34 @@ let tokenCache = {
   expiresAt: 0
 }
 
-function sanitizeCPF(value) {
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function sanitizeDigits(value) {
   return String(value || "").replace(/\D/g, "")
 }
 
-function sanitizePhone(value) {
-  return String(value || "").replace(/\D/g, "")
+function sanitizeCPF(value) {
+  return sanitizeDigits(value)
+}
+
+function sanitizeCEP(value) {
+  return sanitizeDigits(value).slice(0, 8)
+}
+
+function sanitizePhoneBR(value) {
+  let digits = sanitizeDigits(value)
+
+  if (digits.startsWith("55") && digits.length >= 12) {
+    digits = digits.slice(2)
+  }
+
+  if (digits.length > 11) {
+    digits = digits.slice(-11)
+  }
+
+  return digits
 }
 
 function normalizeCourseName(value) {
@@ -69,7 +76,9 @@ function normalizeCourseName(value) {
 function toISODateFromBR(dateBR) {
   const raw = String(dateBR || "").trim()
   const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
-  if (!match) return ""
+
+  if (!match) return raw
+
   const [, dd, mm, yyyy] = match
   return `${yyyy}-${mm}-${dd}`
 }
@@ -103,10 +112,11 @@ function buildNumeroContrato() {
 
 function getCoursePlan(nomeCurso) {
   const normalized = normalizeCourseName(nomeCurso)
+
   return (
     COURSE_CATALOG[normalized] || {
       nomeCurso: nomeCurso || "CURSO",
-      duracaoCurso: 24,
+      duracaoCurso: Number(process.env.DEFAULT_DURACAO_CURSO || 24),
       valorParcela: Number(process.env.DEFAULT_VALOR_PARCELA || 100),
       quantidadeParcelas: Number(process.env.DEFAULT_QUANTIDADE_PARCELAS || 24),
       descontoAdimplencia: 0,
@@ -123,6 +133,7 @@ function buildPdfUrl(parcelaId, nossoNumero) {
 function parseToken(data) {
   if (!data) return ""
   if (typeof data === "string") return data
+
   return (
     data.token ||
     data.accessToken ||
@@ -153,6 +164,7 @@ async function tryRequest(method, url, config = {}) {
 
 async function authenticate() {
   const now = Date.now()
+
   if (tokenCache.token && tokenCache.expiresAt > now) {
     return tokenCache.token
   }
@@ -195,15 +207,20 @@ async function apiRequest(method, path, data, responseType = "json") {
   const token = await authenticate()
   const url = `${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`
 
+  const headers = {
+    Authorization: `JWT ${token}`
+  }
+
+  if (responseType === "json") {
+    headers["Content-Type"] = "application/json"
+  }
+
   const resp = await axios({
     method,
     url,
     data,
     responseType,
-    headers: {
-      Authorization: `JWT ${token}`,
-      "Content-Type": "application/json"
-    },
+    headers,
     validateStatus: () => true
   })
 
@@ -218,44 +235,42 @@ async function apiRequest(method, path, data, responseType = "json") {
   return resp
 }
 
-function extractAlunoFromResponse(data) {
-  if (!data) return null
+function extractAlunoFromRows(data, wantedCpf = "") {
+  const rows = Array.isArray(data?.rows)
+    ? data.rows
+    : Array.isArray(data)
+      ? data
+      : []
 
-  if (Array.isArray(data) && data[0]) {
-    return data[0]
+  if (!rows.length) return null
+
+  if (wantedCpf) {
+    const exact = rows.find(item => sanitizeCPF(item?.cpf) === wantedCpf)
+    if (exact) return exact
   }
 
-  if (data.aluno) return data.aluno
-  if (data.data?.aluno) return data.data.aluno
-  if (data.data && !Array.isArray(data.data)) return data.data
-  if (data.id) return data
-
-  return null
+  return rows[0]
 }
 
 async function buscarAlunoPorCpf(cpf) {
   const cleanCpf = sanitizeCPF(cpf)
 
   const candidates = [
-    ...ALUNO_SEARCH_PATHS.map(path => ({
-      method: "get",
-      path: `${path}/${cleanCpf}`,
-      data: null
-    })),
-    ...ALUNO_SEARCH_PATHS.map(path => ({
-      method: "post",
-      path,
-      data: { cpf: cleanCpf }
-    }))
+    `/aluno/all?cpf=${cleanCpf}&limit=1&offset=0`,
+    `/aluno/all?cpf=${cleanCpf}&status=CURSANDO&limit=1&offset=0`,
+    `/aluno/all?filter=${cleanCpf}&limit=1&offset=0`,
+    `/aluno/all?filter=${cleanCpf}&status=CURSANDO&limit=1&offset=0`,
+    `/aluno/all?filter=${cleanCpf}&status=INATIVO&limit=1&offset=0`,
+    `/aluno/all?filter=${cleanCpf}&status=FORMADO&limit=1&offset=0`
   ]
 
-  for (const candidate of candidates) {
+  for (const path of candidates) {
     try {
-      const resp = await apiRequest(candidate.method, candidate.path, candidate.data)
-      const aluno = extractAlunoFromResponse(resp?.data)
+      const resp = await apiRequest("get", path)
+      const aluno = extractAlunoFromRows(resp?.data, cleanCpf)
       if (aluno?.id) return aluno
     } catch (_error) {
-      // tenta próximo
+      // tenta próxima variação
     }
   }
 
@@ -264,48 +279,46 @@ async function buscarAlunoPorCpf(cpf) {
 
 function buildAlunoPayload(input) {
   const cpf = sanitizeCPF(input.cpf)
-  const telefone = sanitizePhone(input.telefoneCelular)
+  const telefoneCelular = sanitizePhoneBR(input.telefoneCelular)
+  const dataNascimento = toISODateFromBR(input.dataNascimento)
+  const email = String(input.email || "").trim().toLowerCase()
 
   return {
-    nome: input.nomeAluno,
-    nomeAluno: input.nomeAluno,
     cpf,
-    telefone: telefone,
-    telefoneCelular: telefone,
-    celular: telefone,
-    dataNascimento: toISODateFromBR(input.dataNascimento),
-    nascimento: toISODateFromBR(input.dataNascimento),
+    telefoneCelular,
+    telefoneFixo: "",
+    nomeAluno: input.nomeAluno,
+    dataNascimento,
+    email,
+    "e-mail": email,
     genero: input.genero,
-    sexo: input.genero,
-    cep: sanitizeCPF(input.cep).slice(0, 8),
+    cep: sanitizeCEP(input.cep),
     logradouro: input.logradouro,
-    endereco: input.logradouro,
     enderecoComplemento: input.enderecoComplemento || "",
-    complemento: input.enderecoComplemento || "",
     bairro: input.bairro,
-    cidade: input.local,
     local: input.local,
     uf: input.uf,
-    numero: String(input.numero || "")
+    numero: String(input.numero || ""),
+    alunoResponsavelFinanceiro: true
   }
 }
 
 async function criarAluno(input) {
   const payload = buildAlunoPayload(input)
+  const resp = await apiRequest("post", "/aluno/new", payload)
 
-  for (const path of ALUNO_CREATE_PATHS) {
-    try {
-      const resp = await apiRequest("post", path, payload)
-      const aluno = extractAlunoFromResponse(resp?.data)
-      if (aluno?.id) return aluno
-    } catch (_error) {
-      // tenta próximo
-    }
+  const aluno =
+    resp?.data?.id
+      ? resp.data
+      : resp?.data?.aluno?.id
+        ? resp.data.aluno
+        : null
+
+  if (!aluno?.id) {
+    throw new Error("A PagSchool não retornou o aluno criado corretamente.")
   }
 
-  throw new Error(
-    "Não consegui localizar nem criar o aluno no PagSchool. Ajuste os endpoints de aluno em src/services/pagschool.js."
-  )
+  return aluno
 }
 
 function buildContractPayload(input, alunoId) {
@@ -372,6 +385,7 @@ function pickBestParcela(contract, preferredParcelaId = null) {
 
 function extractLinhaDigitavel(parcela) {
   const emissao = parseEmissaoJson(parcela?.emissaoSicrediJson)
+
   return (
     emissao?.linhaDigitavel ||
     parcela?.numeroBoleto ||
@@ -381,6 +395,7 @@ function extractLinhaDigitavel(parcela) {
 
 function extractNossoNumero(parcela) {
   const emissao = parseEmissaoJson(parcela?.emissaoSicrediJson)
+
   return String(
     parcela?.nossoNumero ||
     emissao?.nossoNumero ||
@@ -410,6 +425,7 @@ async function baixarPdfParcela(parcelaId, nossoNumero) {
 
 function buildSecondViaResult(aluno, contract, parcela) {
   const nossoNumero = extractNossoNumero(parcela)
+
   return {
     aluno,
     contract,
@@ -426,6 +442,7 @@ async function garantirBoletoDaParcela(parcela) {
 
   if (!nossoNumero) {
     const generated = await gerarBoletoParcela(parcela.id)
+
     working = {
       ...working,
       ...generated
@@ -464,6 +481,7 @@ async function obterSegundaViaPorCpf(cpf) {
   }
 
   const contratos = await buscarContratosDoAluno(aluno.id)
+
   if (!contratos.length) {
     return {
       aluno,
@@ -503,7 +521,17 @@ async function criarMatriculaComCarne(input) {
 
     const contrato = await criarContrato(input, aluno.id)
 
-    const secondVia = await obterSegundaViaPorCpf(input.cpf)
+    let secondVia = null
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      secondVia = await obterSegundaViaPorCpf(input.cpf)
+
+      if (secondVia?.parcela?.id && secondVia?.nossoNumero) {
+        break
+      }
+
+      await sleep(1500)
+    }
 
     return {
       aluno,
