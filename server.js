@@ -1,3 +1,3 @@
- require("dotenv").config()
+require("dotenv").config()
 
-require("./src/server")
+require("./src/server.js")
