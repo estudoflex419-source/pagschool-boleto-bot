@@ -179,6 +179,7 @@ async function getPagSchoolToken(forceRefresh = false) {
   for (const attempt of attempts) {
     try {
       console.log("[PAGSCHOOL AUTH TRY]", attempt.docPath, buildPagSchoolUrls(attempt.docPath))
+
       const resp = await pagSchoolRequestNoAuth({
         method: "post",
         docPath: attempt.docPath,
@@ -508,10 +509,9 @@ async function criarContratoCarne({ alunoId, nomeCurso, cpf, dueDay }) {
     nomeCurso,
     duracaoCurso: 12,
     valorParcela: 80,
-    Parcelas: 12,
     quantidadeParcelas: 12,
     diaProximoVencimento: Number(dueDay),
-    primeiroVencimentoParcela: buildFirstDueDate(dueDay),
+    vencimentoPrimeiraParcela: buildFirstDueDate(dueDay),
     descontoAdimplencia: 0,
     aluno_id: alunoId,
     numeroParcelaInicial: 1
@@ -532,9 +532,7 @@ async function buscarContratosPorAluno(alunoId) {
     docPath: `/api/contrato/by-aluno/${alunoId}`
   })
 
-  const contratos = extractContratosFromResponse(resp.data)
-
-  return contratos
+  return extractContratosFromResponse(resp.data)
 }
 
 async function gerarCarneBoletos(contratoId) {
@@ -607,7 +605,7 @@ async function obterSegundaViaPorCpf(cpf) {
   }
 
   let nossoNumero = parcela.nossoNumero || ""
-  let linhaDigitavel = parcela.numeroBoleto || ""
+  const linhaDigitavel = parcela.numeroBoleto || ""
 
   if (!nossoNumero) {
     const gerado = await gerarBoletoDaParcela(parcela.id)
