@@ -2,7 +2,7 @@ const courses = require("./courses")
 const { normalize } = require("../utils/text")
 
 const MATERIAL_VALUES = {
-  boleto: "R$ 960,00 em 12x de R$ 80,00",
+  carne: "R$ 960,00 em 12x de R$ 80,00",
   cartao: "R$ 780,00 em 12x de R$ 65,00",
   pix: "R$ 550,00 à vista"
 }
@@ -11,9 +11,9 @@ function findCourse(text) {
   const t = normalize(text || "")
 
   for (const course of courses) {
-    const names = [course.name, ...(course.aliases || [])]
+    const aliases = [course.name, ...(course.aliases || [])]
 
-    for (const alias of names) {
+    for (const alias of aliases) {
       if (t.includes(normalize(alias))) {
         return course
       }
@@ -24,39 +24,33 @@ function findCourse(text) {
 }
 
 function isGreeting(text) {
-  const t = normalize(text || "")
-  return /^(oi|ola|olá|bom dia|boa tarde|boa noite|opa|e ai|e aí)\b/.test(t)
+  return /^(oi|ola|olá|bom dia|boa tarde|boa noite|opa|e ai|e aí)\b/.test(normalize(text))
 }
 
 function isExistingStudentIntent(text) {
-  const t = normalize(text || "")
-  return /(ja sou aluno|já sou aluno|sou aluno|segunda via|2 via|2a via|boleto|mensalidade)/.test(t)
+  return /(ja sou aluno|já sou aluno|sou aluno|segunda via|2 via|2a via|boleto|mensalidade|parcela)/.test(normalize(text))
 }
 
 function isNewEnrollmentIntent(text) {
-  const t = normalize(text || "")
-  return /(nova matricula|nova matrícula|matricula|matrícula|quero estudar|quero me matricular|quero fazer|tenho interesse|inscricao|inscrição)/.test(t)
+  return /(nova matricula|nova matrícula|matricula|matrícula|quero estudar|quero me matricular|quero fazer|tenho interesse|inscricao|inscrição)/.test(normalize(text))
 }
 
 function isCourseListIntent(text) {
-  const t = normalize(text || "")
-  return /(curso|cursos|quais cursos|lista de cursos|catalogo|catálogo|opcoes|opções)/.test(t)
+  return /(curso|cursos|quais cursos|lista de cursos|catalogo|catálogo|opcoes|opções)/.test(normalize(text))
 }
 
 function isPriceQuestion(text) {
-  const t = normalize(text || "")
-  return /(valor|preco|preço|quanto|gratuito|gratis|grátis|pago|pagamento|material didatico|material didático)/.test(t)
+  return /(valor|preco|preço|quanto|gratuito|gratis|grátis|pago|pagamento|material didatico|material didático|carne|carnê|cartao|cartão|pix)/.test(normalize(text))
 }
 
 function isAffirmative(text) {
-  const t = normalize(text || "")
-  return /^(sim|quero|quero sim|gostei|gostaria|posso|bora|vamos|ok|claro|tenho interesse)\b/.test(t)
+  return /^(sim|quero|quero sim|gostei|gostaria|posso|bora|vamos|ok|claro|tenho interesse)\b/.test(normalize(text))
 }
 
 function detectPaymentMethod(text) {
   const t = normalize(text || "")
 
-  if (/boleto/.test(t)) return "Boleto"
+  if (/(carne|carnê)/.test(t)) return "Carnê"
   if (/(cartao|cartão|credito|crédito)/.test(t)) return "Cartão"
   if (/(pix|a vista|à vista|avista)/.test(t)) return "PIX"
 
@@ -64,44 +58,40 @@ function detectPaymentMethod(text) {
 }
 
 function detectCloseMoment(text) {
-  const t = normalize(text || "")
-  return /(acho que vou fazer|gostei|parece bom|quero esse|vou fazer|curti|legal gostei|acho que vou entrar|quero sim|bora|vamos fazer)/.test(t)
+  return /(acho que vou fazer|gostei|parece bom|quero esse|vou fazer|curti|legal gostei|acho que vou entrar|quero sim|bora|vamos fazer)/.test(normalize(text))
 }
 
 function getObjectionReply(text, courseName) {
   const t = normalize(text || "")
-  const courseLabel = courseName ? ` em ${courseName}` : ""
+  const suffix = courseName ? ` em ${courseName}` : ""
 
   if (/(caro|achei caro|muito caro)/.test(t)) {
     return `Entendo você 😊
 
-Como o curso é gratuito, existe apenas o investimento do material didático${courseLabel}.
-E para facilitar, temos opção parcelada também.
+Como o curso é gratuito, existe apenas o investimento do material didático${suffix}.
 
-Qual forma ficaria mais leve para você: boleto, cartão ou PIX?`
+Se você quiser, eu te mostro a forma que costuma ficar mais leve.`
   }
 
   if (/(vou pensar|depois eu vejo|qualquer coisa eu volto|vou ver)/.test(t)) {
     return `Sem problema 😊
 
 Me diz só uma coisa:
-o que te deixou em dúvida nesse momento?
-
-Assim eu consigo te orientar melhor e sem enrolação.`
+o que te deixou em dúvida nesse momento?`
   }
 
   if (/(sem dinheiro|to sem dinheiro|estou sem dinheiro|agora nao|agora não|nao consigo agora|não consigo agora)/.test(t)) {
     return `Eu entendo 😊
 
 Nesses casos, muita gente escolhe a opção que pesa menos no momento.
-Se você quiser, eu te mostro qual forma costuma ficar mais leve.`
+
+Se quiser, eu te mostro qual forma costuma ficar mais leve.`
   }
 
   if (/(tenho medo|nao sei se vou conseguir|não sei se vou conseguir|acho dificil|acho difícil)/.test(t)) {
     return `É normal sentir isso no começo 😊
 
 A proposta é justamente facilitar para quem está começando do zero.
-Você vai ter material, organização e um caminho mais claro durante a formação.
 
 Quer que eu te explique de forma bem simples como funciona?`
   }
@@ -121,49 +111,31 @@ function newEnrollmentIntro() {
   return `Perfeito 😊
 
 Posso te mostrar os cursos e te orientar da melhor forma.
+
 Você já tem algum em mente ou quer ver as opções?`
 }
 
 function showCourses() {
-  const names = courses.map((course) => `• ${course.name}`).join("\n")
-
   return `Temos cursos como:
 
-${names}
+${courses.map((c) => `• ${c.name}`).join("\n")}
 
 Qual deles mais chamou sua atenção?`
 }
 
 function presentCourse(course) {
-  const benefits = (course.benefits || []).map((item) => `• ${item}`).join("\n")
-
   return `Ótima escolha 😊
 
 ${course.name} é ${course.shortDescription}
 
 Ele costuma ser muito interessante para ${course.idealFor}
 
-${benefits ? `${benefits}\n` : ""}
 Me conta:
 você quer aprender para trabalhar na área ou mais para desenvolvimento pessoal?`
 }
 
 function buildValueConnection(convo) {
-  const courseName = convo.course || "esse curso"
-  const goal = String(convo.goal || "").trim()
-  const experience = String(convo.experience || "").trim()
-
-  const part1 = goal
-    ? `Pelo que você me falou, ${courseName} pode te ajudar bastante com ${goal.toLowerCase()}.`
-    : `${courseName} pode te ajudar bastante no seu objetivo.`
-
-  const part2 = experience
-    ? `E mesmo ${experience.toLowerCase()}, ele continua sendo uma opção acessível para quem quer evoluir com mais direção.`
-    : `Ele continua sendo uma opção muito boa para quem quer evoluir com mais segurança.`
-
-  return `${part1}
-
-${part2}
+  return `Pelo que você me falou, ${convo.course} pode te ajudar bastante no seu objetivo.
 
 Se você quiser, eu posso te explicar como funciona o material didático e as formas disponíveis.`
 }
@@ -184,8 +156,8 @@ Durante a formação, você terá acesso a:
 function investmentMessage() {
   return `As formas disponíveis hoje são:
 
-💰 Boleto:
-${MATERIAL_VALUES.boleto}
+🧾 Carnê:
+${MATERIAL_VALUES.carne}
 
 💳 Cartão:
 ${MATERIAL_VALUES.cartao}
@@ -199,7 +171,7 @@ Qual forma fica melhor para você?`
 function askName(courseName, paymentMethod) {
   return `Perfeito 😊
 
-Vou deixar sua matrícula encaminhada${courseName ? ` para ${courseName}` : ""}${paymentMethod ? ` na opção ${paymentMethod}` : ""}.
+Vou deixar sua matrícula encaminhada para ${courseName} na opção ${paymentMethod}.
 
 Me envie seu nome completo, por favor.`
 }
@@ -210,18 +182,76 @@ function askCPF() {
 Se preferir, pode mandar só os 11 números.`
 }
 
+function askBirthDate() {
+  return `Agora me envie sua data de nascimento no formato DD/MM/AAAA.`
+}
+
+function askGender() {
+  return `Perfeito. Agora me informe seu gênero:
+M para masculino
+ou
+F para feminino.`
+}
+
+function askCEP() {
+  return `Agora me envie seu CEP com 8 números.`
+}
+
+function askStreet() {
+  return `Me envie sua rua ou logradouro, por favor.`
+}
+
+function askNumber() {
+  return `Qual é o número do endereço?`
+}
+
+function askComplement() {
+  return `Se tiver complemento, me envie agora.
+
+Se não tiver, pode responder:
+sem complemento.`
+}
+
+function askNeighborhood() {
+  return `Qual é o seu bairro?`
+}
+
+function askCity() {
+  return `Qual é a sua cidade?`
+}
+
+function askState() {
+  return `Me informe a sigla do seu estado, por favor.
+
+Exemplo:
+SP, RJ, MG`
+}
+
+function askDueDay() {
+  return `Para o Carnê, qual dia de vencimento você prefere?
+
+Pode escolher um dia entre 1 e 28.`
+}
+
 function finalEnrollmentMessage(convo) {
   return `Perfeito! 😊
 
-Sua matrícula foi registrada com sucesso para ${convo.course || "o curso escolhido"}.
+Sua matrícula foi registrada com sucesso para ${convo.course}.
 
 Agora nossa equipe pedagógica vai enviar as próximas orientações e acesso pelos canais oficiais.
 
 Seja muito bem-vindo(a)! 🎓✨`
 }
 
+function cardOrPixMessage(convo) {
+  return `Perfeito 😊
+
+Seus dados foram registrados para ${convo.course} na opção ${convo.payment}.
+
+Agora nossa equipe vai seguir com as próximas orientações de pagamento pelos canais oficiais.`
+}
+
 module.exports = {
-  courses,
   findCourse,
   isGreeting,
   isExistingStudentIntent,
@@ -241,5 +271,16 @@ module.exports = {
   investmentMessage,
   askName,
   askCPF,
-  finalEnrollmentMessage
+  askBirthDate,
+  askGender,
+  askCEP,
+  askStreet,
+  askNumber,
+  askComplement,
+  askNeighborhood,
+  askCity,
+  askState,
+  askDueDay,
+  finalEnrollmentMessage,
+  cardOrPixMessage
 }
