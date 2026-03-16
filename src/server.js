@@ -39,7 +39,7 @@ app.get("/health", (_req, res) => {
 })
 
 app.get("/", (_req, res) => {
-  res.send("ESTUDO FLEX BOT V4 ONLINE 🚀")
+  res.send("ESTUDO FLEX BOT V5 ONLINE 🚀")
 })
 
 app.get("/meta/webhook", (req, res) => {
@@ -93,7 +93,7 @@ function buildSecondViaText(result) {
   }
 
   if (!result?.parcela) {
-    return "Localizei seu cadastro, mas não encontrei parcela em aberto para gerar a segunda via agora."
+    return "Localizei seu cadastro, mas ainda não encontrei uma parcela em aberto para gerar a segunda via agora."
   }
 
   const lines = []
@@ -393,6 +393,15 @@ Se você quiser, eu posso te explicar melhor como funciona o curso de ${convo.co
       })
 
       convo.step = "post_sale"
+
+      if (created?.carnePendente || !created?.secondVia?.parcela) {
+        return {
+          text: `${sales.finalEnrollmentMessage(convo)}
+
+Sua matrícula foi criada, mas o carnê ainda está sendo processado pela plataforma.
+Assim que as parcelas estiverem disponíveis, a equipe poderá seguir com o envio.`
+        }
+      }
 
       return {
         text: `${sales.finalEnrollmentMessage(convo)}
