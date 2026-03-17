@@ -420,7 +420,6 @@ function findCourse(text) {
 function getCourseByName(name) {
   const n = normalizeText(name)
   if (!n) return null
-
   return COURSE_CATALOG.find(course => normalizeText(course.name) === n) || null
 }
 
@@ -443,7 +442,9 @@ Hoje você já tem algum curso em mente ou quer que eu te mostre algumas opçõe
 }
 
 function showCourses() {
-  return `Temos cursos como:
+  return `Temos opções em áreas como saúde, administrativo, beleza, tecnologia e atendimento.
+
+Alguns cursos que mais chamam atenção são:
 
 - Administração
 - Agente de Saúde
@@ -564,8 +565,8 @@ function buildValueConnection(convo = {}) {
     goal.includes("curriculo") ||
     goal.includes("currículo") ||
     goal.includes("oportunidade") ||
-    goal.includes("área") ||
-    goal.includes("area")
+    goal.includes("area") ||
+    goal.includes("área")
   ) {
     first = `Pelo que você me contou, ${courseName} pode te ajudar bastante a se preparar melhor para novas oportunidades.`
   }
@@ -595,10 +596,12 @@ function buildValueConnection(convo = {}) {
   )
 
   parts.push(
-    "E a carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática na área."
+    "A carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática na área."
   )
 
-  parts.push("Se fizer sentido para você, eu já posso te mostrar as formas de pagamento.")
+  parts.push(
+    "Se fizer sentido para você, eu já posso te explicar também como funciona a taxa única do material didático, sem compromisso."
+  )
 
   return parts.join("\n\n")
 }
@@ -606,7 +609,7 @@ function buildValueConnection(convo = {}) {
 function materialPitch() {
   return `Perfeito 😊
 
-Os cursos são gratuitos, e existe apenas o investimento do material didático para acompanhar o conteúdo com mais organização.`
+Os cursos são gratuitos, e existe apenas a taxa única do material didático para acompanhar o conteúdo com mais organização.`
 }
 
 function investmentMessage() {
@@ -786,7 +789,8 @@ function isPriceQuestion(text) {
     t.includes("pagamento") ||
     t.includes("forma de pagamento") ||
     t.includes("parcelado") ||
-    t.includes("parcela")
+    t.includes("parcela") ||
+    t.includes("taxa")
   )
 }
 
@@ -852,7 +856,10 @@ function isAffirmative(text) {
     "quero sim",
     "pode continuar",
     "continuar",
-    "vamos nessa"
+    "vamos nessa",
+    "me mostra",
+    "mostrar",
+    "quero ver"
   ].some(item => t.includes(item))
 }
 
@@ -873,7 +880,7 @@ Se você quiser, eu posso te explicar de forma mais direta como ${course} funcio
 
 Muita gente compara antes de decidir.
 
-O mais importante é você entrar em algo que realmente faça sentido para o seu objetivo. Se quiser, eu posso te mostrar primeiro o valor profissional desse curso e como ele pode fortalecer seu currículo.`
+O mais importante é você entrar em algo que realmente faça sentido para o seu objetivo. Se quiser, eu posso te mostrar primeiro o valor profissional desse curso e depois te explico com calma como funciona a taxa única do material didático.`
   }
 
   if (t.includes("nao tenho tempo") || t.includes("não tenho tempo")) {
@@ -899,9 +906,9 @@ Se você quiser, eu posso só te mostrar de forma bem direta como funciona ${cou
   if (t.includes("nao tenho dinheiro") || t.includes("não tenho dinheiro")) {
     return `Eu entendo 😊
 
-Por isso muita gente prefere começar pela opção que fica mais leve no mês.
+Por isso muita gente prefere ver com calma a opção que fica mais leve para começar.
 
-Se quiser, eu posso te explicar com calma as formas de pagamento para você ver o que faz mais sentido no seu caso.`
+Se quiser, eu posso te explicar sem compromisso como funciona a taxa única do material didático.`
   }
 
   return ""
