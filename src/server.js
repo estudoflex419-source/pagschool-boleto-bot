@@ -324,8 +324,8 @@ function findSiteCourseKnowledge(text, currentCourse = "") {
 
 function buildInstitutionalTrustBlock() {
   return [
-    "A Estudo Flex trabalha com cursos EAD, rápidos e com certificado.",
-    "Isso ajuda bastante quem precisa estudar com mais flexibilidade e no próprio ritmo."
+    "A Estudo Flex trabalha com cursos EAD e certificado.",
+    "Você estuda no seu ritmo, com mais flexibilidade no dia a dia."
   ].join("\n")
 }
 
@@ -352,17 +352,22 @@ function formatMoney(value) {
   return n.toFixed(2).replace(".", ",")
 }
 
-function buildCourseSalesSummary(courseName = "", courseInfo = null) {
+function buildCourseSalesSummary(courseName = "", courseInfo = null, compact = false) {
   const flowCourse = sales.findCourse(courseName)
 
   if (courseInfo) {
-    const lines = [`Sobre ${courseInfo.title}: ${courseInfo.summary}.`]
+    const summary = String(courseInfo.summary || "").trim().replace(/\.$/, "")
+    const lines = [
+      summary
+        ? `Sobre ${courseInfo.title}: ${summary}.`
+        : `Sobre ${courseInfo.title}: é uma formação prática com certificado.`
+    ]
 
-    if (courseInfo.learns?.length) {
-      lines.push(`Você aprende temas práticos como ${courseInfo.learns.slice(0, 5).join(", ")}.`)
+    if (!compact && courseInfo.learns?.length) {
+      lines.push(`Você vai aprender na prática temas como ${courseInfo.learns.slice(0, 3).join(", ")}.`)
     }
 
-    if (courseInfo.market) {
+    if (!compact && courseInfo.market) {
       lines.push(`Isso ajuda quem quer buscar oportunidade em ${courseInfo.market}.`)
     }
 
@@ -370,45 +375,36 @@ function buildCourseSalesSummary(courseName = "", courseInfo = null) {
   }
 
   if (flowCourse) {
-    return [
-      `Sobre ${flowCourse.name}: ${flowCourse.shortDescription}`,
-      `Ele é ideal para ${flowCourse.idealFor}`
-    ].join("\n")
+    const lines = [`Sobre ${flowCourse.name}: ${flowCourse.shortDescription}`]
+
+    if (!compact) {
+      lines.push(`Ele é ideal para ${flowCourse.idealFor}`)
+    }
+
+    return lines.join("\n")
   }
 
-  return [
-    "Os cursos da Estudo Flex são EAD, com certificado e foco prático para estudar no próprio ritmo.",
-    "Isso fortalece o currículo e aumenta a segurança para buscar novas oportunidades."
-  ].join("\n")
+  if (compact) {
+    return "É uma formação EAD com certificado, focada em conteúdo prático."
+  }
+
+  return "Os cursos da Estudo Flex são EAD, com certificado e foco prático para estudar no próprio ritmo."
 }
 
-function buildPriceAnswerMessage(courseName = "", courseInfo = null) {
+function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {}) {
+  const { compactCourseExplanation = true } = options
   const courseLabel = courseName || courseInfo?.title || ""
   const plan = getPaymentPlan(courseName)
-  const courseSummary = buildCourseSalesSummary(courseName, courseInfo)
-  const courseReference = courseLabel ? `o curso de ${courseLabel}` : "o curso"
-  const finalCta = courseLabel
-    ? "Se quiser, eu já te ajudo a seguir na opção mais leve para começar."
-    : "Se você me disser qual curso quer, eu já te mostro o encaixe ideal para começar."
+  const courseSummary = buildCourseSalesSummary(courseName, courseInfo, compactCourseExplanation)
+  const freeLine = courseLabel
+    ? `${courseLabel} é 100% gratuito, sem mensalidade.`
+    : "Os cursos são 100% gratuitos, sem mensalidade."
 
-  return `Claro 😊
-
+  return `Ótima pergunta 😊
 ${courseSummary}
-
-Importante: ${courseReference} é totalmente gratuito, sem mensalidade.
-
-Existe apenas uma taxa única do material didático, nestas formas:
-
-1 - *Carnê*
-${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
-
-2 - *Cartão*
-A equipe finaliza a condição com você.
-
-3 - *PIX à vista*
-Pagamento direto para agilizar a liberação.
-
-${finalCta}`
+${freeLine}
+Taxa única do material: Carnê ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)} | Cartão | PIX à vista.
+Se quiser, já me responde: 1 (Carnê), 2 (Cartão) ou 3 (PIX).`
 }
 
 function buildPaymentChoiceMessage(courseName = "") {
@@ -643,7 +639,8 @@ function buildCourseHighlights(courseInfo) {
   const lines = []
 
   if (courseInfo.summary) {
-    lines.push(courseInfo.summary)
+    const summary = String(courseInfo.summary).trim().replace(/\.$/, "")
+    lines.push(`${summary.charAt(0).toUpperCase()}${summary.slice(1)}.`)
   }
 
   if (courseInfo.workload) {
@@ -655,15 +652,14 @@ function buildCourseHighlights(courseInfo) {
   }
 
   if (courseInfo.learns?.length) {
-    lines.push(`No curso você vai passar por temas como ${courseInfo.learns.slice(0, 6).join(", ")}.`)
+    lines.push(`Você aprende na prática temas como ${courseInfo.learns.slice(0, 4).join(", ")}.`)
   }
 
   if (courseInfo.market) {
-    lines.push(`Depois da formação, você pode buscar oportunidades em ${courseInfo.market}.`)
+    lines.push(`Depois da formação, pode buscar oportunidades em ${courseInfo.market}.`)
   }
 
-  lines.push("Além do conteúdo, essa formação fortalece seu currículo e ajuda bastante quem quer se preparar melhor para entrar na área.")
-  lines.push("A carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática e se apresentar melhor no mercado.")
+  lines.push("Também fortalece o currículo e ajuda quem quer se posicionar melhor no mercado.")
 
   return lines.join("\n")
 }
@@ -672,7 +668,7 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const displayName = selectedCourseName || courseInfo?.title || "esse curso"
   const parts = []
 
-  parts.push(`Perfeito 😊 Vou te explicar melhor sobre ${displayName}.`)
+  parts.push(`Perfeito 😊 Vou te explicar de forma rápida sobre ${displayName}.`)
 
   if (courseInfo) {
     parts.push(buildCourseHighlights(courseInfo))
@@ -681,7 +677,7 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   }
 
   parts.push(buildInstitutionalTrustBlock())
-  parts.push("Me conta: o que mais te chamou atenção nesse curso?")
+  parts.push("Se quiser, no próximo passo eu já te explico valores e qual opção costuma ficar mais leve para começar.")
 
   return parts.join("\n\n")
 }
@@ -927,7 +923,11 @@ async function processMessage(phone, text) {
 
       convo.step = "payment_choice"
       convo.paymentTeaserShown = false
-      return { text: buildPriceAnswerMessage(convo.course, selectedCourseInfo) }
+      return {
+        text: buildPriceAnswerMessage(convo.course, selectedCourseInfo, {
+          compactCourseExplanation: true
+        })
+      }
     }
 
     if (convo.course && isCourseDetailsQuestion(text)) {
@@ -983,7 +983,11 @@ async function processMessage(phone, text) {
 
         convo.step = "payment_choice"
         convo.paymentTeaserShown = false
-        return { text: buildPriceAnswerMessage(convo.course, selectedCourseInfo) }
+        return {
+          text: buildPriceAnswerMessage(convo.course, selectedCourseInfo, {
+            compactCourseExplanation: true
+          })
+        }
       }
 
       if (convo.course && isCourseDetailsQuestion(text)) {
