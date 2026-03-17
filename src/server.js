@@ -352,16 +352,63 @@ function formatMoney(value) {
   return n.toFixed(2).replace(".", ",")
 }
 
-function buildPriceAnswerMessage(courseName = "") {
-  const courseLabel = courseName || "o curso"
+function buildCourseSalesSummary(courseName = "", courseInfo = null) {
+  const flowCourse = sales.findCourse(courseName)
+
+  if (courseInfo) {
+    const lines = [`Sobre ${courseInfo.title}: ${courseInfo.summary}.`]
+
+    if (courseInfo.learns?.length) {
+      lines.push(`Você aprende temas práticos como ${courseInfo.learns.slice(0, 5).join(", ")}.`)
+    }
+
+    if (courseInfo.market) {
+      lines.push(`Isso ajuda quem quer buscar oportunidade em ${courseInfo.market}.`)
+    }
+
+    return lines.join("\n")
+  }
+
+  if (flowCourse) {
+    return [
+      `Sobre ${flowCourse.name}: ${flowCourse.shortDescription}`,
+      `Ele é ideal para ${flowCourse.idealFor}`
+    ].join("\n")
+  }
+
+  return [
+    "Os cursos da Estudo Flex são EAD, com certificado e foco prático para estudar no próprio ritmo.",
+    "Isso fortalece o currículo e aumenta a segurança para buscar novas oportunidades."
+  ].join("\n")
+}
+
+function buildPriceAnswerMessage(courseName = "", courseInfo = null) {
+  const courseLabel = courseName || courseInfo?.title || ""
+  const plan = getPaymentPlan(courseName)
+  const courseSummary = buildCourseSalesSummary(courseName, courseInfo)
+  const courseReference = courseLabel ? `o curso de ${courseLabel}` : "o curso"
+  const finalCta = courseLabel
+    ? "Se quiser, eu já te ajudo a seguir na opção mais leve para começar."
+    : "Se você me disser qual curso quer, eu já te mostro o encaixe ideal para começar."
 
   return `Claro 😊
 
-O ${courseLabel} é totalmente gratuito.
+${courseSummary}
 
-Existe apenas uma taxa única do material didático, que pode ser paga à vista ou parcelada.
+Importante: ${courseReference} é totalmente gratuito, sem mensalidade.
 
-Se quiser, eu posso te mostrar certinho como ficam os valores e qual opção costuma ser mais leve para começar.`
+Existe apenas uma taxa única do material didático, nestas formas:
+
+1 - *Carnê*
+${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
+
+2 - *Cartão*
+A equipe finaliza a condição com você.
+
+3 - *PIX à vista*
+Pagamento direto para agilizar a liberação.
+
+${finalCta}`
 }
 
 function buildPaymentChoiceMessage(courseName = "") {
@@ -747,6 +794,7 @@ async function processMessage(phone, text) {
     const detectedCourse = sales.findCourse(text)
     const courseInfoFromText = findSiteCourseKnowledge(text, convo.course)
     const raw = String(text || "").trim().toLowerCase()
+    const isPriceQuestion = sales.isPriceQuestion(text)
 
     if (!convo.step) {
       resetConversation(convo)
@@ -837,6 +885,13 @@ async function processMessage(phone, text) {
       const courseInfo = findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name)
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
+
+      if (isPriceQuestion) {
+        convo.step = "payment_choice"
+        convo.paymentTeaserShown = false
+        return { text: buildPriceAnswerMessage(convo.course, courseInfo) }
+      }
+
       convo.step = "diagnosis_goal"
       convo.paymentTeaserShown = false
       return { text: buildEnhancedCoursePresentation(detectedCourse.name, courseInfo) }
@@ -845,30 +900,34 @@ async function processMessage(phone, text) {
     if (!detectedCourse && courseInfoFromText && convo.step === "course_selection") {
       convo.path = "new_enrollment"
       convo.course = courseInfoFromText.title
+
+      if (isPriceQuestion) {
+        convo.step = "payment_choice"
+        convo.paymentTeaserShown = false
+        return { text: buildPriceAnswerMessage(courseInfoFromText.title, courseInfoFromText) }
+      }
+
       convo.step = "diagnosis_goal"
       convo.paymentTeaserShown = false
       return { text: buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText) }
     }
 
-    if (sales.isPriceQuestion(text) && !convo.course) {
-      return {
-        text: `Claro 😊
-
-Os cursos são totalmente gratuitos.
-
-Existe apenas uma taxa única do material didático, que pode ser paga à vista ou parcelada.
-
-Se você me disser qual curso chamou mais sua atenção, eu te explico melhor como ele funciona e, depois, te mostro certinho como ficam os valores.`
-      }
+    if (isPriceQuestion && !convo.course) {
+      return { text: buildPriceAnswerMessage("", courseInfoFromText) }
     }
 
     if (
       convo.course &&
-      sales.isPriceQuestion(text) &&
+      isPriceQuestion &&
       ["diagnosis_goal", "diagnosis_experience", "offer_transition", "course_selection"].includes(convo.step)
     ) {
-      convo.paymentTeaserShown = true
-      return { text: buildPriceAnswerMessage(convo.course) }
+      const selectedCourseInfo =
+        findSiteCourseKnowledge(convo.course, convo.course) ||
+        findSiteCourseKnowledge(text, convo.course)
+
+      convo.step = "payment_choice"
+      convo.paymentTeaserShown = false
+      return { text: buildPriceAnswerMessage(convo.course, selectedCourseInfo) }
     }
 
     if (convo.course && isCourseDetailsQuestion(text)) {
@@ -917,9 +976,14 @@ Se você me disser qual curso chamou mais sua atenção, eu te explico melhor co
         return { text: buildPaymentChoiceMessage(convo.course) }
       }
 
-      if (sales.isPriceQuestion(text)) {
-        convo.paymentTeaserShown = true
-        return { text: buildPriceAnswerMessage(convo.course) }
+      if (isPriceQuestion) {
+        const selectedCourseInfo =
+          findSiteCourseKnowledge(convo.course, convo.course) ||
+          findSiteCourseKnowledge(text, convo.course)
+
+        convo.step = "payment_choice"
+        convo.paymentTeaserShown = false
+        return { text: buildPriceAnswerMessage(convo.course, selectedCourseInfo) }
       }
 
       if (convo.course && isCourseDetailsQuestion(text)) {
