@@ -28,7 +28,6 @@ module.exports = {
   PAGSCHOOL_EMAIL: readEnv("PAGSCHOOL_EMAIL"),
   PAGSCHOOL_PASSWORD: readEnv("PAGSCHOOL_PASSWORD"),
 
-  // aliases para compatibilidade com código antigo
   PAGSCHOOL_URL:
     readEnv("PAGSCHOOL_BASE_URL", "PAGSCHOOL_ENDPOINT") ||
     "https://sistema.pagschool.com.br/prod/api"
