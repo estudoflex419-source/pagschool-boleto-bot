@@ -48,7 +48,14 @@ const COURSE_SITE_KNOWLEDGE = [
   },
   {
     title: "Farmácia",
-    aliases: ["farmacia", "farmácia", "auxiliar de farmacia", "auxiliar de farmácia", "atendente de farmacia", "atendente de farmácia"],
+    aliases: [
+      "farmacia",
+      "farmácia",
+      "auxiliar de farmacia",
+      "auxiliar de farmácia",
+      "atendente de farmacia",
+      "atendente de farmácia"
+    ],
     workload: "196h",
     salary: "R$ 1.420,00",
     summary:
@@ -66,7 +73,13 @@ const COURSE_SITE_KNOWLEDGE = [
   },
   {
     title: "Administração",
-    aliases: ["administracao", "administração", "assistente administrativo", "auxiliar administrativo", "administrativo"],
+    aliases: [
+      "administracao",
+      "administração",
+      "assistente administrativo",
+      "auxiliar administrativo",
+      "administrativo"
+    ],
     workload: "196h",
     salary: "R$ 1.782,00",
     summary:
@@ -319,6 +332,11 @@ function buildCourseListMessage() {
 ${sales.showCourses()}`
 }
 
+function formatMoney(value) {
+  const n = Number(value || 0)
+  return n.toFixed(2).replace(".", ",")
+}
+
 function buildPriceAnswerMessage(courseName = "") {
   const courseLabel = courseName || "o curso"
   const plan = getPaymentPlan(courseName)
@@ -450,11 +468,6 @@ Pode me enviar o comprovante por aqui mesmo que isso ajuda a equipe a dar andame
 
 Sua solicitação já ficou registrada.
 Se surgir qualquer dúvida, pode me chamar por aqui.`
-}
-
-function formatMoney(value) {
-  const n = Number(value || 0)
-  return n.toFixed(2).replace(".", ",")
 }
 
 function resetConversation(convo) {
@@ -663,7 +676,7 @@ function buildSelectedCourseAnswer(text, courseInfo) {
     t.includes("o que cai") ||
     t.includes("oq cai")
   ) {
-    lines.push(`Você vai estudar temas como ${uniqueItems(courseInfo.learns).slice(0, 8).join(", ")}.`)
+    lines.push(`Você vai estudar temas como ${uniqueItems(courseInfo.learns || []).slice(0, 8).join(", ")}.`)
   }
 
   if (
