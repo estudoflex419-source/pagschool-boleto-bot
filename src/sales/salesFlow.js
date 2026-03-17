@@ -11,217 +11,217 @@ const COURSE_CATALOG = [
     name: "Administração",
     keywords: ["administracao", "administração", "administrativo"],
     summary:
-      "É uma ótima escolha para quem quer aprender rotinas administrativas, organização, atendimento e apoio em empresas de vários segmentos.",
-    pitch:
-      "É um curso muito buscado por quem quer entrar no mercado com uma formação prática e útil no dia a dia de empresas, comércios e escritórios."
+      "É uma ótima opção para quem quer aprender rotina administrativa, organização, atendimento e apoio dentro de empresas.",
+    goalQuestion:
+      "Seu foco hoje é entrar mais rápido no mercado ou fortalecer seu currículo?"
   },
   {
     name: "Agente de Saúde",
     keywords: ["agente de saude", "agente de saúde", "saude", "saúde"],
     summary:
-      "É uma opção excelente para quem quer começar na área da saúde com uma formação acessível, prática e voltada ao cuidado com pessoas e comunidade.",
-    pitch:
-      "Muita gente procura esse curso porque ele ajuda a dar os primeiros passos na área da saúde de forma mais segura e com conteúdo fácil de acompanhar."
+      "É uma excelente escolha para quem quer começar na área da saúde com uma formação prática e fácil de acompanhar.",
+    goalQuestion:
+      "Seu objetivo hoje é começar a trabalhar na área da saúde ou entender melhor esse setor primeiro?"
   },
   {
     name: "Análises Clínicas",
-    keywords: ["analises clinicas", "análises clínicas", "analises", "laboratorio", "laboratório"],
+    keywords: ["analises clinicas", "análises clínicas", "laboratorio", "laboratório"],
     summary:
-      "É indicado para quem gosta da área da saúde e se interessa por rotinas ligadas a laboratório, organização e apoio técnico.",
-    pitch:
-      "É um curso que chama atenção de quem quer uma área mais técnica e organizada dentro da saúde."
+      "É indicado para quem gosta da área da saúde e se interessa por organização, laboratório e apoio técnico.",
+    goalQuestion:
+      "Você pensa mais em aprender para começar na área ou ainda está conhecendo as possibilidades?"
   },
   {
     name: "Auxiliar Veterinário",
     keywords: ["auxiliar veterinario", "auxiliar veterinário", "veterinario", "veterinário", "pet", "animais"],
     summary:
-      "É ideal para quem gosta de animais e quer aprender sobre apoio em atendimentos, cuidados e rotina da área veterinária.",
-    pitch:
-      "É uma opção muito querida por quem quer transformar o amor pelos animais em uma possibilidade real de trabalho."
+      "É ideal para quem gosta de animais e quer aprender uma rotina prática de apoio e cuidados.",
+    goalQuestion:
+      "Seu interesse é trabalhar com animais ou começar aprendendo mais sobre essa área primeiro?"
   },
   {
     name: "Barbeiro",
     keywords: ["barbeiro", "barbearia"],
     summary:
-      "É uma ótima opção para quem quer entrar na área da beleza masculina e aprender prática, atendimento e técnicas de barbearia.",
-    pitch:
-      "É um curso interessante para quem busca uma área prática, com possibilidade de atendimento próprio e crescimento rápido."
+      "É uma ótima opção para quem quer aprender prática, atendimento e rotina da barbearia.",
+    goalQuestion:
+      "Você pensa em trabalhar para alguém, atender por conta própria ou ainda está avaliando?"
   },
   {
     name: "Cabeleireiro",
     keywords: ["cabeleireiro", "cabelo", "salão", "salao"],
     summary:
-      "É indicado para quem gosta da área da beleza e quer aprender técnicas, atendimento e rotina profissional.",
-    pitch:
-      "É uma formação muito procurada por quem quer trabalhar com beleza e conquistar independência profissional."
+      "É indicado para quem gosta da área da beleza e quer aprender prática e atendimento.",
+    goalQuestion:
+      "Seu objetivo é trabalhar na área da beleza ou começar com uma formação para uso profissional mais pra frente?"
   },
   {
     name: "Contabilidade",
-    keywords: ["contabilidade", "contabil", "contábil", "contador"],
+    keywords: ["contabilidade", "contabil", "contábil"],
     summary:
-      "É uma boa escolha para quem gosta de organização, números, rotina administrativa e apoio financeiro.",
-    pitch:
-      "Esse curso costuma chamar atenção de quem quer uma área mais organizada e valorizada dentro das empresas."
+      "É uma boa escolha para quem gosta de organização, números e rotina administrativa.",
+    goalQuestion:
+      "Você se identifica mais com rotina de escritório e organização administrativa?"
   },
   {
     name: "Cuidador de Idosos",
     keywords: ["cuidador de idosos", "idosos", "cuidador"],
     summary:
-      "É ideal para quem tem perfil cuidadoso, humano e quer atuar ajudando pessoas com atenção e responsabilidade.",
-    pitch:
-      "É uma área muito bonita para quem gosta de cuidar de pessoas e quer uma formação com bastante utilidade prática."
+      "É ideal para quem tem perfil humano, cuidadoso e quer uma formação útil para o dia a dia.",
+    goalQuestion:
+      "Seu objetivo é trabalhar com cuidado de pessoas ou conhecer melhor essa área primeiro?"
   },
   {
     name: "Designer Gráfico",
-    keywords: ["designer grafico", "designer gráfico", "design", "arte", "criacao", "criação"],
+    keywords: ["designer grafico", "designer gráfico", "design", "arte"],
     summary:
-      "É indicado para quem gosta de criatividade, identidade visual, divulgação e produção de materiais visuais.",
-    pitch:
-      "É uma área muito interessante para quem gosta de criar, divulgar e trabalhar com imagem e comunicação."
+      "É indicado para quem gosta de criatividade, divulgação e criação visual.",
+    goalQuestion:
+      "Você pensa mais em usar isso para trabalho, renda extra ou desenvolvimento pessoal?"
   },
   {
     name: "Enfermagem",
-    keywords: ["enfermagem", "enfermeiro", "enfermeira"],
+    keywords: ["enfermagem"],
     summary:
-      "É uma ótima opção para quem gosta da área da saúde, do cuidado com pessoas e quer desenvolver conhecimento prático.",
-    pitch:
-      "É um curso que costuma chamar bastante atenção de quem quer crescer na área da saúde e ter uma base forte de aprendizado."
+      "É uma ótima opção para quem gosta da área da saúde e quer desenvolver uma base de aprendizado prático.",
+    goalQuestion:
+      "Seu foco é entrar na área da saúde ou você ainda está decidindo qual caminho seguir?"
   },
   {
     name: "Farmácia",
     keywords: ["farmacia", "farmácia", "atendente de farmacia", "atendente de farmácia"],
     summary:
-      "É uma excelente escolha para quem quer aprender sobre atendimento, organização e rotina ligada à área farmacêutica.",
-    pitch:
-      "É um dos cursos mais procurados por quem quer entrar rápido em uma área conhecida, com conteúdo prático e objetivo."
+      "É uma excelente escolha para quem quer aprender atendimento, organização e rotina da área farmacêutica.",
+    goalQuestion:
+      "Seu objetivo hoje é entrar mais rápido nessa área ou fortalecer seu currículo?"
   },
   {
     name: "Gastronomia",
-    keywords: ["gastronomia", "cozinha", "culinaria", "culinária"],
+    keywords: ["gastronomia", "culinaria", "culinária", "cozinha"],
     summary:
-      "É ideal para quem gosta de cozinha, preparação de alimentos, organização e criatividade na área gastronômica.",
-    pitch:
-      "É uma área muito interessante para quem quer transformar gosto por cozinha em oportunidade real."
+      "É ideal para quem gosta de cozinha, organização e prática na área gastronômica.",
+    goalQuestion:
+      "Você pensa em aprender para trabalhar na área ou também por afinidade pessoal?"
   },
   {
     name: "Gestão e Logística",
-    keywords: ["gestao e logistica", "gestão e logística", "logistica", "logística", "gestao", "gestão"],
+    keywords: ["gestao e logistica", "gestão e logística", "logistica", "logística"],
     summary:
-      "É uma boa escolha para quem gosta de organização, processos, estoque, planejamento e rotina empresarial.",
-    pitch:
-      "É um curso muito útil para quem busca uma formação versátil e aplicável em diferentes empresas."
+      "É uma boa escolha para quem gosta de organização, processos, estoque e rotina empresarial.",
+    goalQuestion:
+      "Seu foco é conseguir uma formação mais versátil para trabalhar em empresa?"
   },
   {
     name: "Inglês",
     keywords: ["ingles", "inglês"],
     summary:
-      "É indicado para quem quer desenvolver comunicação, ampliar oportunidades e fortalecer o currículo.",
-    pitch:
-      "É um curso que agrega muito valor e costuma abrir portas em várias áreas."
+      "É uma ótima opção para quem quer melhorar currículo, ganhar mais confiança e ampliar oportunidades pessoais e profissionais.",
+    goalQuestion:
+      "Seu objetivo hoje é usar o inglês mais para trabalho, viagem ou desenvolvimento pessoal?"
   },
   {
     name: "Informática",
     keywords: ["informatica", "informática", "computador", "office"],
     summary:
-      "É uma ótima opção para quem quer aprender a usar melhor o computador, ferramentas digitais e rotinas muito pedidas no mercado.",
-    pitch:
-      "É uma formação muito útil porque praticamente toda área hoje exige alguma base de informática."
+      "É uma excelente escolha para quem quer aprender ferramentas digitais muito pedidas no mercado.",
+    goalQuestion:
+      "Seu foco é aprender do zero para trabalho ou melhorar o que você já sabe?"
   },
   {
     name: "Marketing Digital",
-    keywords: ["marketing digital", "marketing", "midias sociais", "mídias sociais", "internet"],
+    keywords: ["marketing digital", "marketing", "midias sociais", "mídias sociais"],
     summary:
-      "É ideal para quem gosta de internet, divulgação, redes sociais e estratégias de comunicação.",
-    pitch:
-      "É uma área moderna e muito buscada por quem quer aprender divulgação e presença digital."
+      "É ideal para quem gosta de internet, redes sociais e divulgação.",
+    goalQuestion:
+      "Você quer aprender para trabalhar na área ou usar isso em negócio próprio também?"
   },
   {
     name: "Massoterapia",
     keywords: ["massoterapia", "massagem"],
     summary:
-      "É uma ótima escolha para quem gosta da área de bem-estar, cuidado e técnicas corporais.",
-    pitch:
-      "É uma formação interessante para quem quer atuar em uma área de atendimento e cuidado com pessoas."
+      "É uma ótima escolha para quem gosta da área de bem-estar e atendimento.",
+    goalQuestion:
+      "Seu interesse é trabalhar nessa área ou começar entendendo mais sobre ela?"
   },
   {
     name: "Nutrição",
     keywords: ["nutricao", "nutrição"],
     summary:
       "É indicada para quem gosta da área de saúde, alimentação e qualidade de vida.",
-    pitch:
-      "É uma opção muito interessante para quem quer aprender mais sobre alimentação e bem-estar."
+    goalQuestion:
+      "Você quer aprender para atuação profissional ou por afinidade com o tema?"
   },
   {
     name: "Odontologia",
-    keywords: ["odontologia", "dentista", "saude bucal", "saúde bucal"],
+    keywords: ["odontologia", "saude bucal", "saúde bucal"],
     summary:
-      "É uma boa escolha para quem se identifica com a área de saúde bucal, organização e apoio em atendimentos.",
-    pitch:
-      "É um curso que agrada bastante quem quer entrar em uma área da saúde com rotina prática."
+      "É uma boa escolha para quem se identifica com a área de saúde bucal e apoio em atendimentos.",
+    goalQuestion:
+      "Você está buscando entrada na área da saúde ou ainda está conhecendo possibilidades?"
   },
   {
     name: "Operador de Caixa",
-    keywords: ["operador de caixa", "caixa", "atendimento no caixa"],
+    keywords: ["operador de caixa", "caixa"],
     summary:
-      "É ideal para quem quer aprender atendimento, operação de caixa, organização e rotina de comércio.",
-    pitch:
-      "É uma formação prática para quem quer se preparar melhor para vagas em lojas, mercados e comércios."
+      "É ideal para quem quer aprender atendimento, operação de caixa e rotina de comércio.",
+    goalQuestion:
+      "Seu objetivo é se preparar para vagas em comércio e atendimento?"
   },
   {
     name: "Pedagogia",
-    keywords: ["pedagogia", "educacao", "educação", "escola"],
+    keywords: ["pedagogia", "educacao", "educação"],
     summary:
-      "É uma boa escolha para quem gosta da área educacional, desenvolvimento e apoio ao aprendizado.",
-    pitch:
-      "É uma área muito bonita para quem gosta de ensinar, orientar e participar do crescimento de pessoas."
+      "É uma boa escolha para quem gosta da área educacional e do desenvolvimento de pessoas.",
+    goalQuestion:
+      "Você se vê mais na área de educação ou ainda está avaliando esse caminho?"
   },
   {
     name: "Psicologia",
-    keywords: ["psicologia", "psicologico", "psicológico"],
+    keywords: ["psicologia"],
     summary:
-      "É ideal para quem se interessa por comportamento, desenvolvimento humano e cuidado emocional.",
-    pitch:
-      "É um curso que costuma chamar atenção de quem gosta de entender mais sobre pessoas e relações."
+      "É ideal para quem se interessa por comportamento humano e desenvolvimento pessoal.",
+    goalQuestion:
+      "Seu interesse é profissional ou mais por afinidade com o tema?"
   },
   {
     name: "Recepcionista Hospitalar",
-    keywords: ["recepcionista hospitalar", "recepcao hospitalar", "recepção hospitalar", "hospital"],
+    keywords: ["recepcionista hospitalar", "hospital"],
     summary:
-      "É uma excelente opção para quem quer trabalhar com atendimento e organização dentro da área da saúde.",
-    pitch:
-      "É muito buscado por quem quer entrar na área da saúde por meio de uma função de atendimento e apoio."
+      "É uma excelente opção para quem quer trabalhar com atendimento e organização na área da saúde.",
+    goalQuestion:
+      "Seu objetivo é entrar na área da saúde por uma função de atendimento?"
   },
   {
     name: "Recursos Humanos",
     keywords: ["recursos humanos", "rh"],
     summary:
-      "É uma ótima escolha para quem gosta de organização, pessoas, recrutamento e rotina administrativa.",
-    pitch:
-      "É uma área muito interessante para quem quer atuar com pessoas dentro de empresas."
+      "É uma ótima escolha para quem gosta de organização, pessoas e ambiente empresarial.",
+    goalQuestion:
+      "Você gosta mais da parte de pessoas e rotina administrativa?"
   },
   {
     name: "Radiologia",
     keywords: ["radiologia", "raio x", "raio-x", "imagem"],
     summary:
-      "É indicada para quem gosta da área da saúde e se interessa por exames de imagem e apoio técnico.",
-    pitch:
-      "É um curso que chama atenção de quem quer uma área mais específica dentro da saúde."
+      "É indicada para quem se interessa por exames de imagem e uma área mais técnica dentro da saúde.",
+    goalQuestion:
+      "Você se identifica com uma área mais técnica dentro da saúde?"
   },
   {
     name: "Segurança do Trabalho",
     keywords: ["seguranca do trabalho", "segurança do trabalho"],
     summary:
-      "É uma ótima opção para quem se interessa por prevenção, organização e cuidado com ambientes de trabalho.",
-    pitch:
-      "É uma área importante e muito útil para quem quer trabalhar com orientação e segurança."
+      "É uma ótima opção para quem se interessa por prevenção, organização e orientação.",
+    goalQuestion:
+      "Você busca uma área mais voltada à prevenção e ambiente de trabalho?"
   },
   {
     name: "Socorrista",
     keywords: ["socorrista", "primeiros socorros", "resgate"],
     summary:
-      "É ideal para quem gosta da área de emergência, primeiros socorros e atendimento rápido.",
-    pitch:
-      "É um curso que costuma interessar quem quer uma área dinâmica e ligada ao cuidado com vidas."
+      "É ideal para quem gosta de emergência, primeiros socorros e atendimento rápido.",
+    goalQuestion:
+      "Seu foco é aprender algo prático para atuação ou conhecer melhor essa área primeiro?"
   }
 ]
 
@@ -256,7 +256,7 @@ Me diz como eu posso te ajudar melhor:
 function newEnrollmentIntro() {
   return `Perfeito 😊
 
-Vou te ajudar a encontrar a opção que faz mais sentido para você.
+Vou te ajudar a encontrar a opção que mais combina com o que você busca.
 
 Hoje você já tem algum curso em mente ou quer que eu te mostre algumas opções?`
 }
@@ -304,31 +304,53 @@ Me fala qual curso chamou sua atenção que eu te explico melhor.`
 
   return `Ótima escolha 😊
 
-${course.name} é uma opção muito interessante para quem quer aprender de forma prática e se preparar melhor para uma área com bastante procura.
+${course.name} é uma opção muito interessante para quem quer se preparar melhor e aprender de forma prática.
 
 ${course.summary}
 
-Me conta: o que mais te chamou atenção nesse curso?`
+${course.goalQuestion}`
+}
+
+function askExperience(courseName) {
+  const c = normalizeText(courseName)
+
+  if (c.includes("ingles")) {
+    return `Entendi 😊 E hoje você está começando do zero no inglês ou já tem alguma base?`
+  }
+
+  return `Entendi 😊 E você está começando do zero ou já teve algum contato com essa área?`
 }
 
 function buildValueConnection(convo = {}) {
   const courseName = convo.course || "esse curso"
+  const goal = normalizeText(convo.goal)
+  const experience = normalizeText(convo.experience)
 
-  return `Entendi 😊
+  let bridge = `Pelo que você me contou, ${courseName} faz sentido para o seu momento.`
 
-Pelo que você me contou, ${courseName} faz sentido para o seu momento porque pode te ajudar a se preparar melhor e começar com mais segurança.
+  if (goal.includes("trabalho") || goal.includes("emprego") || goal.includes("curriculo") || goal.includes("currículo")) {
+    bridge = `Pelo que você me contou, ${courseName} pode te ajudar bastante a se preparar melhor para oportunidades de trabalho.`
+  }
 
-Se você quiser, eu já posso te explicar como funciona a matrícula e as formas de pagamento.`
+  if (experience.includes("zero") || experience.includes("nenhuma") || experience.includes("nao") || experience.includes("não")) {
+    bridge += ` E isso é bom porque mesmo quem está começando do zero consegue acompanhar bem o conteúdo.`
+  }
+
+  return `${bridge}
+
+Os cursos são gratuitos, e existe apenas o investimento do material didático.
+
+Se fizer sentido para você, eu já posso te mostrar as formas de pagamento.`
 }
 
 function materialPitch() {
   return `Perfeito 😊
 
-Os cursos são gratuitos, e existe apenas o investimento do material didático para você acompanhar o conteúdo com mais organização.`
+Os cursos são gratuitos, e existe apenas o investimento do material didático para acompanhar o conteúdo de forma mais organizada.`
 }
 
 function investmentMessage() {
-  return `Para seguir, me diga qual forma de pagamento você prefere:
+  return `Agora me diga qual forma de pagamento você prefere:
 
 1 - Carnê
 2 - Cartão
@@ -446,10 +468,8 @@ function isExistingStudentIntent(text) {
     t.includes("já sou aluno") ||
     t.includes("sou aluno") ||
     t.includes("segunda via") ||
-    t.includes("boleto") ||
     t.includes("2 via") ||
-    t.includes("2a via") ||
-    t.includes("segunda via do boleto")
+    t.includes("2a via")
   )
 }
 
@@ -475,8 +495,7 @@ function isCourseListIntent(text) {
     t.includes("ver cursos") ||
     t.includes("lista de cursos") ||
     t.includes("opcoes") ||
-    t.includes("opções") ||
-    t.includes("cursos")
+    t.includes("opções")
   )
 }
 
@@ -488,8 +507,6 @@ function isPriceQuestion(text) {
     t.includes("preço") ||
     t.includes("quanto custa") ||
     t.includes("mensalidade") ||
-    t.includes("quanto e") ||
-    t.includes("quanto é") ||
     t.includes("gratuito")
   )
 }
@@ -504,40 +521,26 @@ function detectCloseMoment(text) {
     "quero esse",
     "vou fazer",
     "curti",
-    "legal gostei",
-    "acho que vou entrar",
     "quero me matricular",
     "vamos fazer",
     "quero continuar",
-    "bora",
-    "pode ser"
+    "pode ser",
+    "bora"
   ].some(item => t.includes(item))
 }
 
 function detectPaymentMethod(text) {
   const t = normalizeText(text)
 
-  if (
-    t === "1" ||
-    t.includes("carne") ||
-    t.includes("carnê") ||
-    t.includes("boleto")
-  ) {
+  if (t === "1" || t.includes("carne") || t.includes("carnê") || t.includes("boleto")) {
     return "Carnê"
   }
 
-  if (
-    t === "2" ||
-    t.includes("cartao") ||
-    t.includes("cartão")
-  ) {
+  if (t === "2" || t.includes("cartao") || t.includes("cartão")) {
     return "Cartão"
   }
 
-  if (
-    t === "3" ||
-    t.includes("pix")
-  ) {
+  if (t === "3" || t.includes("pix")) {
     return "PIX"
   }
 
@@ -554,7 +557,6 @@ function isAffirmative(text) {
     "pode ser",
     "vamos",
     "ok",
-    "okk",
     "fechado",
     "bora",
     "tenho interesse"
@@ -570,15 +572,15 @@ function getObjectionReply(text, courseName) {
 
 Pensar com calma é importante mesmo.
 
-Se quiser, eu posso te explicar de forma bem direta como ${course} funciona para te ajudar a decidir com mais segurança.`
+Se você quiser, eu posso te explicar de forma mais direta como ${course} funciona para te ajudar a decidir com mais segurança.`
   }
 
   if (t.includes("esta caro") || t.includes("está caro") || t.includes("muito caro")) {
     return `Eu entendo 😊
 
-Muita gente também compara antes de decidir.
+Muita gente compara antes de decidir.
 
-O ponto mais importante é que você esteja entrando em algo que realmente faça sentido para o seu objetivo e te ajude a sair do lugar. Se quiser, eu posso te explicar melhor o que você recebe nessa formação.`
+O mais importante é você entrar em algo que realmente faça sentido para o seu objetivo. Se quiser, eu posso te explicar melhor como essa formação pode te ajudar no seu momento.`
   }
 
   if (t.includes("nao tenho tempo") || t.includes("não tenho tempo")) {
@@ -605,6 +607,7 @@ module.exports = {
   newEnrollmentIntro,
   showCourses,
   presentCourse,
+  askExperience,
   buildValueConnection,
   materialPitch,
   investmentMessage,
