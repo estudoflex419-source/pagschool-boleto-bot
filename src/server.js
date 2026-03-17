@@ -241,7 +241,7 @@ app.get("/health", (_req, res) => {
 })
 
 app.get("/", (_req, res) => {
-  res.send("ESTUDO FLEX BOT V10 ONLINE 🚀")
+  res.send("ESTUDO FLEX BOT V11 ONLINE 🚀")
 })
 
 app.get("/meta/webhook", (req, res) => {
@@ -293,6 +293,21 @@ function isPaymentGuidanceQuestion(text) {
   )
 }
 
+function wantsPaymentDetails(text) {
+  const t = normalizeLoose(text)
+
+  return (
+    sales.isAffirmative(text) ||
+    t.includes("mostrar") ||
+    t.includes("mostra") ||
+    t.includes("me mostra") ||
+    t.includes("quero ver") ||
+    t.includes("pode mostrar") ||
+    t.includes("sim pode") ||
+    t.includes("me explica melhor")
+  )
+}
+
 function findSiteCourseKnowledge(text, currentCourse = "") {
   const haystack = normalizeLoose(`${currentCourse} ${text}`)
 
@@ -339,27 +354,14 @@ function formatMoney(value) {
 
 function buildPriceAnswerMessage(courseName = "") {
   const courseLabel = courseName || "o curso"
-  const plan = getPaymentPlan(courseName)
 
   return `Claro 😊
 
-O ${courseLabel} é gratuito.
-Você não paga pelo curso em si, paga apenas o material didático para acompanhar melhor a formação.
+O ${courseLabel} é totalmente gratuito.
 
-Hoje funciona assim:
+Existe apenas uma taxa única do material didático, que pode ser paga à vista ou parcelada.
 
-1 - Carnê
-${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
-
-2 - Cartão
-A equipe passa a melhor condição disponível no momento
-
-3 - PIX à vista
-Pagamento direto, com confirmação mais rápida
-
-Muita gente escolhe o carnê porque fica mais leve para começar sem pesar.
-
-Se você quiser, eu já te explico qual opção costuma fazer mais sentido para o seu caso.`
+Se quiser, eu posso te mostrar certinho como ficam os valores e qual opção costuma ser mais leve para começar.`
 }
 
 function buildPaymentChoiceMessage(courseName = "") {
@@ -368,10 +370,10 @@ function buildPaymentChoiceMessage(courseName = "") {
 
   return `Perfeito 😊
 
-Para seguir com ${courseLabel}, hoje temos estas formas de pagamento:
+No ${courseLabel}, a taxa única do material didático pode ser feita destas formas:
 
 1 - *Carnê*
-São ${plan.installments} parcelas de R$ ${formatMoney(plan.installmentValue)}.
+${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
 Você ainda pode escolher o melhor dia de vencimento entre 1 e 28.
 
 2 - *Cartão*
@@ -379,8 +381,6 @@ Se preferir, seguimos no cartão e a equipe finaliza a condição com você.
 
 3 - *PIX à vista*
 Pagamento direto e, após a confirmação, seguimos com a liberação.
-
-O curso é gratuito, então esse valor é referente ao material didático.
 
 Pode me responder com:
 1 para Carnê
@@ -478,6 +478,7 @@ function resetConversation(convo) {
     goal: "",
     experience: "",
     payment: "",
+    paymentTeaserShown: false,
     name: "",
     cpf: "",
     birthDate: "",
@@ -760,10 +761,17 @@ async function processMessage(phone, text) {
       return { text: buildMenuMessage() }
     }
 
+    if (convo.paymentTeaserShown && wantsPaymentDetails(text)) {
+      convo.paymentTeaserShown = false
+      convo.step = "payment_choice"
+      return { text: buildPaymentChoiceMessage(convo.course) }
+    }
+
     if (convo.step === "menu") {
       if (raw === "1") {
         convo.path = "existing_student"
         convo.step = "existing_student_cpf"
+        convo.paymentTeaserShown = false
         return {
           text: "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
         }
@@ -772,6 +780,7 @@ async function processMessage(phone, text) {
       if (raw === "2" || raw === "3") {
         convo.path = "new_enrollment"
         convo.step = "course_selection"
+        convo.paymentTeaserShown = false
         return { text: buildCourseListMessage() }
       }
     }
@@ -783,6 +792,7 @@ async function processMessage(phone, text) {
     if (sales.isExistingStudentIntent(text)) {
       convo.path = "existing_student"
       convo.step = "existing_student_cpf"
+      convo.paymentTeaserShown = false
 
       return {
         text: "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
@@ -797,6 +807,7 @@ async function processMessage(phone, text) {
       convo.cpf = text
       const secondVia = await obterSegundaViaPorCpf(text)
       convo.step = "existing_student_done"
+      convo.paymentTeaserShown = false
 
       return {
         text: buildSecondViaText(secondVia),
@@ -811,12 +822,14 @@ async function processMessage(phone, text) {
     if (sales.isNewEnrollmentIntent(text)) {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
+      convo.paymentTeaserShown = false
       return { text: buildCourseListMessage() }
     }
 
     if (sales.isCourseListIntent(text) && !convo.course) {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
+      convo.paymentTeaserShown = false
       return { text: buildCourseListMessage() }
     }
 
@@ -825,6 +838,7 @@ async function processMessage(phone, text) {
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
       convo.step = "diagnosis_goal"
+      convo.paymentTeaserShown = false
       return { text: buildEnhancedCoursePresentation(detectedCourse.name, courseInfo) }
     }
 
@@ -832,6 +846,7 @@ async function processMessage(phone, text) {
       convo.path = "new_enrollment"
       convo.course = courseInfoFromText.title
       convo.step = "diagnosis_goal"
+      convo.paymentTeaserShown = false
       return { text: buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText) }
     }
 
@@ -839,12 +854,11 @@ async function processMessage(phone, text) {
       return {
         text: `Claro 😊
 
-Os cursos são gratuitos.
-Você paga apenas o material didático.
+Os cursos são totalmente gratuitos.
 
-Hoje temos opções como carnê, cartão e PIX à vista.
+Existe apenas uma taxa única do material didático, que pode ser paga à vista ou parcelada.
 
-Se você me disser qual curso chamou mais sua atenção, eu te explico melhor como ele funciona, o que você vai aprender e qual forma de pagamento pode ficar melhor para você.`
+Se você me disser qual curso chamou mais sua atenção, eu te explico melhor como ele funciona e, depois, te mostro certinho como ficam os valores.`
       }
     }
 
@@ -853,6 +867,7 @@ Se você me disser qual curso chamou mais sua atenção, eu te explico melhor co
       sales.isPriceQuestion(text) &&
       ["diagnosis_goal", "diagnosis_experience", "offer_transition", "course_selection"].includes(convo.step)
     ) {
+      convo.paymentTeaserShown = true
       return { text: buildPriceAnswerMessage(convo.course) }
     }
 
@@ -873,6 +888,7 @@ Se você me disser qual curso chamou mais sua atenção, eu te explico melhor co
       if (courseInfoFromText) {
         convo.course = courseInfoFromText.title
         convo.step = "diagnosis_goal"
+        convo.paymentTeaserShown = false
         return { text: buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText) }
       }
 
@@ -897,10 +913,12 @@ Se você me disser qual curso chamou mais sua atenção, eu te explico melhor co
         sales.detectCloseMoment(text)
       ) {
         convo.step = "payment_choice"
+        convo.paymentTeaserShown = false
         return { text: buildPaymentChoiceMessage(convo.course) }
       }
 
       if (sales.isPriceQuestion(text)) {
+        convo.paymentTeaserShown = true
         return { text: buildPriceAnswerMessage(convo.course) }
       }
 
@@ -933,6 +951,7 @@ Se você me disser qual curso chamou mais sua atenção, eu te explico melhor co
         raw.includes("boleto")
       ) {
         convo.payment = "Carnê"
+        convo.paymentTeaserShown = false
         convo.phone = extractPhoneFromWhatsApp(phone) || ""
         convo.step = "collecting_name"
         return {
@@ -950,6 +969,7 @@ Me envie seu nome completo, por favor.`
         raw.includes("cartão")
       ) {
         convo.payment = "Cartão"
+        convo.paymentTeaserShown = false
         convo.phone = extractPhoneFromWhatsApp(phone) || ""
         convo.step = "collecting_name"
         return {
@@ -965,6 +985,7 @@ Me envie seu nome completo, por favor.`
         raw.includes("pix")
       ) {
         convo.payment = "PIX"
+        convo.paymentTeaserShown = false
         convo.phone = extractPhoneFromWhatsApp(phone) || ""
         convo.step = "collecting_name"
         return {
@@ -1138,6 +1159,7 @@ Me envie seu nome completo, por favor.`
       convo.contratoId = created?.contrato?.id || null
       convo.parcelaId = created?.secondVia?.parcela?.id || null
       convo.nossoNumero = created?.secondVia?.nossoNumero || ""
+      convo.paymentTeaserShown = false
 
       if (created?.error) {
         return {
