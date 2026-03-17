@@ -781,6 +781,7 @@ function isPriceQuestion(text) {
     t.includes("preco") ||
     t.includes("preço") ||
     t.includes("quanto custa") ||
+    t.includes("tem mensalidade") ||
     t.includes("mensalidade") ||
     t.includes("gratuito") ||
     t.includes("e pago") ||
