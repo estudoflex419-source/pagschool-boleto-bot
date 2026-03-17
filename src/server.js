@@ -29,146 +29,167 @@ const {
 
 const COURSE_SITE_KNOWLEDGE = [
   {
-    title: "Auxiliar de Farmácia",
-    aliases: ["auxiliar de farmacia", "farmacia", "farmácia"],
+    title: "Agente de Saúde",
+    aliases: ["agente de saude", "agente de saúde", "saude", "saúde"],
+    workload: "196h",
+    salary: "R$ 1.435,00",
+    summary:
+      "é uma formação voltada para promoção da saúde, orientação comunitária, prevenção de doenças e apoio a ações de saúde pública",
+    learns: [
+      "sus e atenção à saúde",
+      "promoção da saúde",
+      "prevenção de doenças",
+      "orientação comunitária",
+      "vigilância em saúde",
+      "acompanhamento de grupos prioritários"
+    ],
+    market:
+      "ações comunitárias, visitas domiciliares, orientação em saúde, prevenção e apoio a programas de saúde pública"
+  },
+  {
+    title: "Farmácia",
+    aliases: ["farmacia", "farmácia", "auxiliar de farmacia", "auxiliar de farmácia", "atendente de farmacia", "atendente de farmácia"],
     workload: "196h",
     salary: "R$ 1.420,00",
     summary:
-      "É uma formação voltada para rotina de farmácias, drogarias e apoio ao atendimento, com base em medicamentos, biossegurança e noções de saúde.",
+      "é uma formação voltada para rotina de farmácias, drogarias, apoio ao atendimento e organização da área farmacêutica",
     learns: [
       "biossegurança",
       "microbiologia",
       "anatomia humana",
       "legislação farmacêutica",
       "bioética em saúde",
-      "fármacos e uso de medicamentos"
+      "fármacos e medicamentos"
     ],
     market:
-      "farmácias, drogarias, atendimento ao público, apoio ao setor de medicamentos e rotinas ligadas à área da saúde"
+      "farmácias, drogarias, apoio ao atendimento e rotinas ligadas a medicamentos"
+  },
+  {
+    title: "Administração",
+    aliases: ["administracao", "administração", "assistente administrativo", "auxiliar administrativo", "administrativo"],
+    workload: "196h",
+    salary: "R$ 1.782,00",
+    summary:
+      "é uma formação forte para quem quer aprender organização, atendimento, documentos e rotina administrativa",
+    learns: [
+      "relacionamento interpessoal",
+      "gestão de pessoas",
+      "planejamento",
+      "rotina administrativa",
+      "informática",
+      "pacote office"
+    ],
+    market:
+      "escritórios, empresas, recepção, setor administrativo, financeiro, logística e apoio operacional"
+  },
+  {
+    title: "Recursos Humanos",
+    aliases: ["recursos humanos", "rh"],
+    workload: "196h",
+    salary: "R$ 1.549,00",
+    summary:
+      "é uma formação voltada para quem quer trabalhar com pessoas, recrutamento, benefícios e rotina empresarial",
+    learns: [
+      "recrutamento e seleção",
+      "treinamento",
+      "benefícios",
+      "gestão de pessoas",
+      "cargos e salários",
+      "rotina empresarial"
+    ],
+    market:
+      "setor de RH, recrutamento, treinamento, benefícios e apoio administrativo"
+  },
+  {
+    title: "Segurança do Trabalho",
+    aliases: ["seguranca do trabalho", "segurança do trabalho"],
+    workload: "196h",
+    salary: "R$ 1.568,00",
+    summary:
+      "é indicado para quem quer aprender prevenção, controle de riscos e segurança no ambiente profissional",
+    learns: [
+      "segurança do trabalho",
+      "legislação",
+      "saúde ocupacional",
+      "meio ambiente",
+      "prevenção e combate a incêndio",
+      "ergonomia"
+    ],
+    market:
+      "indústrias, empresas, obras, prevenção, inspeção e apoio em segurança ocupacional"
   },
   {
     title: "Socorrista",
-    aliases: ["socorrista", "auxiliar de socorrista", "primeiros socorros"],
+    aliases: ["socorrista", "primeiros socorros", "resgate"],
     workload: "196h",
-    salary: "sob consulta",
+    salary: "R$ 1.492,00",
     summary:
-      "Prepara para atendimento de urgência e emergência, com foco em análise da situação, primeiros socorros e tomada de decisão.",
+      "é uma formação para quem quer aprender atendimento de urgência, primeiros socorros e resposta rápida",
     learns: [
       "avaliação primária e secundária",
       "abc da vida",
       "reanimação cardiopulmonar",
       "hemorragias",
       "queimaduras",
-      "imobilização de fraturas",
-      "afogamento e emergências clínicas"
+      "fraturas",
+      "afogamento"
     ],
     market:
-      "apoio em primeiros socorros, atendimento inicial, eventos, equipes de apoio e ambientes que exigem resposta rápida em emergência"
+      "apoio em primeiros socorros, atendimento inicial, eventos e ambientes que exigem resposta rápida"
   },
   {
-    title: "Assistente Administrativo",
-    aliases: [
-      "assistente administrativo",
-      "auxiliar administrativo",
-      "administracao",
-      "administração"
-    ],
+    title: "Recepcionista Hospitalar",
+    aliases: ["recepcionista hospitalar", "hospital"],
     workload: "196h",
-    salary: "R$ 1.782,00",
+    salary: "R$ 1.324,00",
     summary:
-      "É uma formação forte para quem quer entrar na área administrativa e aprender organização, documentos, atendimento e rotinas de escritório.",
+      "é uma opção interessante para quem quer entrar na área da saúde trabalhando com atendimento e organização",
     learns: [
-      "relacionamento interpessoal no trabalho",
-      "gestão de pessoas",
-      "planejamento estratégico",
-      "recursos humanos",
-      "informática",
-      "pacote office",
-      "internet e organização administrativa"
+      "acolhimento",
+      "atendimento ao público",
+      "rotina hospitalar",
+      "organização",
+      "comunicação",
+      "postura profissional"
     ],
     market:
-      "escritórios, empresas, recepção, setor administrativo, financeiro, logística, compras e apoio operacional"
-  },
-  {
-    title: "Agente de Saúde",
-    aliases: ["agente de saude", "agente de saúde"],
-    workload: "196h",
-    salary: "R$ 1.435,00",
-    summary:
-      "Forma profissionais para promoção da saúde, orientação comunitária, prevenção de doenças e atuação junto às diretrizes do SUS.",
-    learns: [
-      "sus e modelos de atenção à saúde",
-      "vigilância em saúde",
-      "prevenção e controle de doenças",
-      "promoção da saúde",
-      "endemias",
-      "pesquisa larvária",
-      "ética e cidadania"
-    ],
-    market:
-      "ações comunitárias, prevenção, orientação em saúde, visitas domiciliares e apoio a programas de saúde pública"
-  },
-  {
-    title: "Recursos Humanos",
-    aliases: ["rh", "recursos humanos"],
-    workload: "196h",
-    salary: "R$ 1.549,00",
-    summary:
-      "É uma formação voltada para recrutamento, seleção, folha, benefícios, comunicação interna e gestão de pessoas.",
-    learns: [
-      "recrutamento e seleção",
-      "treinamento e desenvolvimento",
-      "folha de pagamento",
-      "benefícios",
-      "cargos e salários",
-      "direito do trabalho",
-      "gestão de desempenho"
-    ],
-    market:
-      "setor de RH, departamento pessoal, recrutamento, treinamento, benefícios e apoio administrativo"
-  },
-  {
-    title: "Segurança do Trabalho",
-    aliases: [
-      "seguranca do trabalho",
-      "segurança do trabalho",
-      "auxiliar seguranca do trabalho",
-      "auxiliar segurança do trabalho"
-    ],
-    workload: "196h",
-    salary: "R$ 1.568,00",
-    summary:
-      "É indicado para quem quer aprender prevenção de acidentes, riscos ocupacionais, ergonomia e proteção no ambiente profissional.",
-    learns: [
-      "legislação",
-      "saúde ocupacional",
-      "meio ambiente",
-      "prevenção e combate a incêndio",
-      "controle de riscos",
-      "ergonomia",
-      "higiene ocupacional"
-    ],
-    market:
-      "indústrias, empresas, obras, prevenção, inspeção, apoio em segurança e saúde ocupacional"
+      "hospitais, clínicas, recepção, atendimento e organização de entrada de pacientes"
   },
   {
     title: "Informática",
-    aliases: ["informatica", "informática"],
+    aliases: ["informatica", "informática", "computador", "office"],
     workload: "96h",
-    salary: "sob consulta",
+    salary: "",
     summary:
-      "É um curso para quem quer base prática em computador, internet, Office, manutenção, lógica e noções importantes da área digital.",
+      "é uma formação muito útil para quem quer aprender ferramentas digitais que hoje são pedidas em várias áreas",
     learns: [
-      "hardware e software",
-      "redes de computadores",
-      "lógica de programação",
-      "banco de dados",
-      "word, excel e powerpoint",
-      "internet e correio eletrônico",
-      "segurança da informação"
+      "computador",
+      "internet",
+      "word",
+      "excel",
+      "powerpoint",
+      "organização digital"
     ],
     market:
-      "rotinas administrativas, suporte básico, informática geral, atividades digitais e preparo para cursos mais avançados"
+      "rotinas administrativas, atividades digitais, suporte básico e produtividade"
+  },
+  {
+    title: "Marketing Digital",
+    aliases: ["marketing digital", "marketing", "midias sociais", "mídias sociais"],
+    workload: "96h",
+    salary: "",
+    summary:
+      "é uma opção interessante para quem quer aprender divulgação, redes sociais e presença digital",
+    learns: [
+      "divulgação",
+      "produção de conteúdo",
+      "redes sociais",
+      "presença digital",
+      "comunicação",
+      "estratégia online"
+    ],
+    market:
+      "redes sociais, divulgação, produção de conteúdo e presença digital"
   },
   {
     title: "Operador de Caixa",
@@ -176,130 +197,24 @@ const COURSE_SITE_KNOWLEDGE = [
     workload: "96h",
     salary: "R$ 1.513,00",
     summary:
-      "É uma formação prática para atendimento, operação de caixa, recebimento, troco, fechamento e rotina de ponto de venda.",
+      "é uma formação prática para quem quer aprender atendimento, operação de caixa e rotina de comércio",
     learns: [
+      "atendimento",
       "abertura de caixa",
-      "fechamento do caixa",
-      "atendimento ao cliente",
+      "fechamento",
+      "troco",
       "postura profissional",
-      "conferência de notas falsas",
-      "cartão de crédito e débito",
-      "sistema pdv"
+      "rotina de loja"
     ],
     market:
-      "supermercados, lojas, farmácias, comércio em geral e atendimento ao público"
-  },
-  {
-    title: "Odontologia e Saúde Bucal",
-    aliases: ["odontologia", "auxiliar de odontologia", "saude bucal", "saúde bucal"],
-    workload: "196h",
-    salary: "R$ 1.380,00",
-    summary:
-      "Apresenta uma base ampla sobre saúde bucal, anatomia, radiografia, materiais e rotina ligada ao atendimento odontológico.",
-    learns: [
-      "anatomia aplicada à odontologia",
-      "biologia dos tecidos bucais",
-      "diagnóstico por imagem",
-      "técnica radiográfica",
-      "materiais dentários",
-      "farmacologia geral",
-      "ética e bioética"
-    ],
-    market:
-      "clínicas, consultórios, apoio em saúde bucal e ambientes ligados à odontologia"
-  },
-  {
-    title: "Marketing Digital",
-    aliases: ["marketing digital", "marketing"],
-    workload: "96h",
-    salary: "sob consulta",
-    summary:
-      "É voltado para quem quer aprender estratégias online, conteúdo, redes sociais, SEO e campanhas digitais.",
-    learns: [
-      "seo",
-      "mídias sociais",
-      "produção de conteúdo",
-      "email marketing",
-      "engajamento de audiência",
-      "presença digital",
-      "estratégia online"
-    ],
-    market:
-      "negócios digitais, redes sociais, suporte de marketing, produção de conteúdo e divulgação online"
-  },
-  {
-    title: "Agente Aeroportuário",
-    aliases: ["agente aeroportuario", "agente aeroportuário", "aeroportuario", "aeroportuário"],
-    workload: "96h",
-    salary: "R$ 1.664,05",
-    summary:
-      "É uma opção interessante para quem busca preparação para atendimento, rotinas e suporte em ambiente aeroportuário.",
-    learns: [
-      "rotina operacional",
-      "atendimento ao público",
-      "procedimentos do setor",
-      "organização profissional",
-      "suporte ao passageiro",
-      "comunicação"
-    ],
-    market:
-      "ambientes aeroportuários, atendimento, apoio operacional e áreas ligadas ao fluxo de passageiros"
-  },
-  {
-    title: "Jovem Aprendiz",
-    aliases: ["jovem aprendiz"],
-    workload: "96h",
-    salary: "R$ 1.189,00",
-    summary:
-      "Ajuda quem quer começar no mercado com uma base administrativa e de rotina profissional.",
-    learns: [
-      "rotina de trabalho",
-      "postura profissional",
-      "organização administrativa",
-      "desenvolvimento inicial",
-      "comunicação",
-      "responsabilidade profissional"
-    ],
-    market:
-      "primeiro emprego, rotinas administrativas e desenvolvimento inicial no mercado de trabalho"
-  },
-  {
-    title: "Massoterapeuta",
-    aliases: ["massoterapeuta", "massoterapia"],
-    workload: "96h",
-    salary: "R$ 1.552,00",
-    summary:
-      "É uma formação para quem quer atuar com técnicas de massagem voltadas ao bem-estar, cuidado corporal e atendimento.",
-    learns: [
-      "técnicas de massagem",
-      "bem-estar",
-      "alívio muscular",
-      "circulação sanguínea",
-      "atendimento ao cliente",
-      "cuidados corporais"
-    ],
-    market:
-      "spas, salões, hotéis, clínicas de estética, clubes e atendimento autônomo"
-  },
-  {
-    title: "Guarda-Vidas",
-    aliases: ["guarda vidas", "guarda-vidas", "salvamento aquático"],
-    workload: "96h",
-    salary: "sob consulta",
-    summary:
-      "É focado em salvamento aquático, observação, sinais vitais, prevenção e resposta em acidentes no meio líquido.",
-    learns: [
-      "técnicas de resgate",
-      "salvamento aquático",
-      "sinais vitais",
-      "ressuscitação",
-      "prevenção de afogamentos",
-      "equipamentos de busca e salvamento"
-    ],
-    market:
-      "ambientes aquáticos, prevenção, salvamento e apoio em primeiros socorros"
+      "lojas, supermercados, farmácias e comércio em geral"
   }
 ]
+
+const DEFAULT_PAYMENT_PLAN = {
+  installments: 12,
+  installmentValue: 80
+}
 
 const app = express()
 
@@ -345,12 +260,30 @@ function uniqueItems(items = []) {
   return [...new Set(items.filter(Boolean))]
 }
 
+function getPaymentPlan(_courseName = "") {
+  return DEFAULT_PAYMENT_PLAN
+}
+
+function isPaymentGuidanceQuestion(text) {
+  const t = normalizeLoose(text)
+
+  return (
+    t.includes("qual melhor forma") ||
+    t.includes("qual a melhor forma") ||
+    t.includes("qual compensa mais") ||
+    t.includes("o que compensa mais") ||
+    t.includes("qual voce indica") ||
+    t.includes("qual você indica") ||
+    t.includes("me explica o pagamento") ||
+    t.includes("explica o pagamento") ||
+    t.includes("como funciona o pagamento")
+  )
+}
+
 function findSiteCourseKnowledge(text, currentCourse = "") {
   const haystack = normalizeLoose(`${currentCourse} ${text}`)
 
-  if (!haystack) {
-    return null
-  }
+  if (!haystack) return null
 
   for (const course of COURSE_SITE_KNOWLEDGE) {
     if (course.aliases.some(alias => haystack.includes(normalizeLoose(alias)))) {
@@ -364,7 +297,7 @@ function findSiteCourseKnowledge(text, currentCourse = "") {
 function buildInstitutionalTrustBlock() {
   return [
     "A Estudo Flex trabalha com cursos EAD, rápidos e com certificado.",
-    "Isso ajuda quem quer estudar com mais flexibilidade e já buscar aplicação prática no mercado."
+    "Isso ajuda bastante quem precisa estudar com mais flexibilidade e no próprio ritmo."
   ].join("\n")
 }
 
@@ -381,35 +314,75 @@ Pode me responder só com o número.`
 }
 
 function buildCourseListMessage() {
-  const categories = [
-    "Portuária e Industrial",
-    "Máquinas",
-    "Moda e Beleza",
-    "Saúde",
-    "Tecnologia",
-    "Outros cursos"
-  ]
-
   return `Perfeito 😊
 
-Hoje temos opções em áreas como:
-${categories.map(item => `- ${item}`).join("\n")}
-
-${sales.showCourses()}
-
-Se você quiser, pode me dizer o nome do curso que te interessou e eu te explico o que você vai aprender, carga horária, média salarial e onde pode atuar.`
+${sales.showCourses()}`
 }
 
-function buildPaymentChoiceMessage() {
-  return `Perfeito 😊
+function buildPriceAnswerMessage(courseName = "") {
+  const courseLabel = courseName || "o curso"
+  const plan = getPaymentPlan(courseName)
 
-Agora me diga qual forma de pagamento você prefere:
+  return `Claro 😊
+
+O ${courseLabel} é gratuito.
+Você não paga pelo curso em si, paga apenas o material didático para acompanhar melhor a formação.
+
+Hoje funciona assim:
 
 1 - Carnê
-2 - Cartão
-3 - PIX
+${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
 
-Pode me responder só com o número da opção.`
+2 - Cartão
+A equipe passa a melhor condição disponível no momento
+
+3 - PIX à vista
+Pagamento direto, com confirmação mais rápida
+
+Muita gente escolhe o carnê porque fica mais leve para começar sem pesar.
+
+Se você quiser, eu já te explico qual opção costuma fazer mais sentido para o seu caso.`
+}
+
+function buildPaymentChoiceMessage(courseName = "") {
+  const courseLabel = courseName || "o curso"
+  const plan = getPaymentPlan(courseName)
+
+  return `Perfeito 😊
+
+Para seguir com ${courseLabel}, hoje temos estas formas de pagamento:
+
+1 - *Carnê*
+São ${plan.installments} parcelas de R$ ${formatMoney(plan.installmentValue)}.
+Você ainda pode escolher o melhor dia de vencimento entre 1 e 28.
+
+2 - *Cartão*
+Se preferir, seguimos no cartão e a equipe finaliza a condição com você.
+
+3 - *PIX à vista*
+Pagamento direto e, após a confirmação, seguimos com a liberação.
+
+O curso é gratuito, então esse valor é referente ao material didático.
+
+Pode me responder com:
+1 para Carnê
+2 para Cartão
+3 para PIX`
+}
+
+function buildPaymentHelpMessage(courseName = "") {
+  const courseLabel = courseName || "o curso"
+  const plan = getPaymentPlan(courseName)
+
+  return `Claro 😊
+
+Para ${courseLabel}, normalmente funciona assim:
+
+- *Carnê*: costuma ser a opção que muita gente escolhe porque fica mais leve para começar, em ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
+- *Cartão*: bom para quem prefere alinhar a condição diretamente com a equipe
+- *PIX à vista*: costuma ser a opção mais direta, porque a confirmação é mais rápida
+
+Se você quer começar sem pesar tanto no mês, o carnê geralmente acaba sendo a opção mais confortável.`
 }
 
 function buildPixMessage() {
@@ -431,7 +404,7 @@ function buildCardMessage(course) {
 
 Seus dados foram registrados para ${course || "o curso"} na opção cartão.
 
-Agora nossa equipe vai seguir com as próximas orientações de pagamento pelos canais oficiais.`
+Agora nossa equipe vai seguir com as próximas orientações para finalizar a melhor condição de pagamento com você pelos canais oficiais.`
 }
 
 function buildPostSaleReply(text, convo) {
@@ -598,14 +571,13 @@ function isCourseDetailsQuestion(text) {
     "estagio",
     "estágio",
     "carta de estagio",
-    "carta de estágio"
+    "carta de estágio",
+    "como funciona"
   ].some(term => t.includes(term))
 }
 
 function buildCourseHighlights(courseInfo) {
-  if (!courseInfo) {
-    return ""
-  }
+  if (!courseInfo) return ""
 
   const lines = []
 
@@ -617,7 +589,7 @@ function buildCourseHighlights(courseInfo) {
     lines.push(`Carga horária: ${courseInfo.workload}.`)
   }
 
-  if (courseInfo.salary && courseInfo.salary !== "sob consulta") {
+  if (courseInfo.salary) {
     lines.push(`Média salarial informada no site: ${courseInfo.salary}.`)
   }
 
@@ -630,6 +602,7 @@ function buildCourseHighlights(courseInfo) {
   }
 
   lines.push("Além do conteúdo, essa formação fortalece seu currículo e ajuda bastante quem quer se preparar melhor para entrar na área.")
+  lines.push("A carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática e se apresentar melhor no mercado.")
 
   return lines.join("\n")
 }
@@ -665,7 +638,7 @@ function buildSelectedCourseAnswer(text, courseInfo) {
     t.includes("duracao") ||
     t.includes("duração")
   ) {
-    lines.push(`A carga horária informada no site é de ${courseInfo.workload}.`)
+    lines.push(`A carga horária informada é de ${courseInfo.workload}.`)
   }
 
   if (
@@ -674,10 +647,10 @@ function buildSelectedCourseAnswer(text, courseInfo) {
     t.includes("salario") ||
     t.includes("salário")
   ) {
-    if (courseInfo.salary && courseInfo.salary !== "sob consulta") {
-      lines.push(`A média salarial informada no site para esse curso é ${courseInfo.salary}.`)
+    if (courseInfo.salary) {
+      lines.push(`A média salarial informada para esse curso é ${courseInfo.salary}.`)
     } else {
-      lines.push("No momento, eu não tenho uma média salarial pública confirmada para esse curso, mas posso te explicar o que você aprende e onde pode atuar.")
+      lines.push("No momento eu não tenho uma média salarial pública confirmada para esse curso, mas posso te explicar melhor o que você aprende e onde pode atuar.")
     }
   }
 
@@ -704,11 +677,15 @@ function buildSelectedCourseAnswer(text, courseInfo) {
   }
 
   if (t.includes("certificado")) {
-    lines.push("Esse tipo de formação entra muito bem para fortalecimento de currículo e comprovação de capacitação.")
+    lines.push("Essa formação ajuda bastante no fortalecimento do currículo e na comprovação de capacitação.")
   }
 
   if (t.includes("estagio") || t.includes("estágio")) {
-    lines.push("Ele também ajuda bastante na preparação para processos seletivos, fortalecimento do currículo e busca por oportunidade prática na área.")
+    lines.push("A carta de estágio pode ajudar na busca por oportunidade prática na área, e o local do estágio fica por conta do aluno.")
+  }
+
+  if (t.includes("como funciona")) {
+    lines.push("A plataforma fica disponível 24 horas por dia, o aluno pode estudar no próprio ritmo e as aulas podem ter vídeos, textos, perguntas, atividades e avaliações.")
   }
 
   if (lines.length === 1) {
@@ -718,19 +695,6 @@ function buildSelectedCourseAnswer(text, courseInfo) {
   lines.push("Se quiser, eu também posso te mostrar como esse curso combina com o seu objetivo profissional.")
 
   return lines.join("\n\n")
-}
-
-function buildPriceHoldReply(courseInfo, courseName) {
-  const displayName = courseName || courseInfo?.title || "esse curso"
-  const intro = ["Claro 😊 Eu também te passo isso."]
-
-  if (courseInfo) {
-    intro.push(`Antes, só para você ter segurança na escolha: ${displayName} tem ${courseInfo.workload}${courseInfo.salary && courseInfo.salary !== "sob consulta" ? ` e no site aparece com média salarial de ${courseInfo.salary}` : ""}.`)
-    intro.push(`Você vai aprender temas como ${courseInfo.learns.slice(0, 6).join(", ")} e pode buscar oportunidades em ${courseInfo.market}.`)
-  }
-
-  intro.push("Se fizer sentido para você, eu já te mostro as formas de pagamento na sequência.")
-  return intro.join("\n\n")
 }
 
 async function fallbackAI(text, convo, action = "") {
@@ -792,13 +756,7 @@ async function processMessage(phone, text) {
         }
       }
 
-      if (raw === "2") {
-        convo.path = "new_enrollment"
-        convo.step = "course_selection"
-        return { text: buildCourseListMessage() }
-      }
-
-      if (raw === "3") {
+      if (raw === "2" || raw === "3") {
         convo.path = "new_enrollment"
         convo.step = "course_selection"
         return { text: buildCourseListMessage() }
@@ -866,19 +824,14 @@ async function processMessage(phone, text) {
 
     if (sales.isPriceQuestion(text) && !convo.course) {
       return {
-        text: `Os cursos são gratuitos 😊
+        text: `Claro 😊
 
-Existe apenas o investimento do material didático.
+Os cursos são gratuitos.
+Você paga apenas o material didático.
 
-Antes de falar de pagamento, me diz qual curso mais chamou sua atenção que eu te explico melhor o que você aprende, a carga horária e onde pode atuar.`
-      }
-    }
+Hoje temos opções como carnê, cartão e PIX à vista.
 
-    if (convo.course && isCourseDetailsQuestion(text)) {
-      const courseInfo = findSiteCourseKnowledge(text, convo.course)
-
-      if (courseInfo) {
-        return { text: buildSelectedCourseAnswer(text, courseInfo) }
+Se você me disser qual curso chamou mais sua atenção, eu te explico melhor como ele funciona, o que você vai aprender e qual forma de pagamento pode ficar melhor para você.`
       }
     }
 
@@ -887,8 +840,15 @@ Antes de falar de pagamento, me diz qual curso mais chamou sua atenção que eu 
       sales.isPriceQuestion(text) &&
       ["diagnosis_goal", "diagnosis_experience", "offer_transition", "course_selection"].includes(convo.step)
     ) {
+      return { text: buildPriceAnswerMessage(convo.course) }
+    }
+
+    if (convo.course && isCourseDetailsQuestion(text)) {
       const courseInfo = findSiteCourseKnowledge(text, convo.course)
-      return { text: buildPriceHoldReply(courseInfo, convo.course) }
+
+      if (courseInfo) {
+        return { text: buildSelectedCourseAnswer(text, courseInfo) }
+      }
     }
 
     const objectionReply = sales.getObjectionReply(text, convo.course)
@@ -924,12 +884,11 @@ Antes de falar de pagamento, me diz qual curso mais chamou sua atenção que eu 
         sales.detectCloseMoment(text)
       ) {
         convo.step = "payment_choice"
-        return { text: buildPaymentChoiceMessage() }
+        return { text: buildPaymentChoiceMessage(convo.course) }
       }
 
       if (sales.isPriceQuestion(text)) {
-        const courseInfo = findSiteCourseKnowledge(text, convo.course)
-        return { text: buildPriceHoldReply(courseInfo, convo.course) }
+        return { text: buildPriceAnswerMessage(convo.course) }
       }
 
       if (convo.course && isCourseDetailsQuestion(text)) {
@@ -945,11 +904,15 @@ Antes de falar de pagamento, me diz qual curso mais chamou sua atenção que eu 
       }
 
       return {
-        text: `Se fizer sentido para você, eu já posso te mostrar as formas de pagamento 😊`
+        text: "Se fizer sentido para você, eu já posso te mostrar as formas de pagamento 😊"
       }
     }
 
     if (convo.step === "payment_choice") {
+      if (isPaymentGuidanceQuestion(text)) {
+        return { text: buildPaymentHelpMessage(convo.course) }
+      }
+
       if (
         raw === "1" ||
         raw.includes("carne") ||
@@ -959,7 +922,13 @@ Antes de falar de pagamento, me diz qual curso mais chamou sua atenção que eu 
         convo.payment = "Carnê"
         convo.phone = extractPhoneFromWhatsApp(phone) || ""
         convo.step = "collecting_name"
-        return { text: `Perfeito 😊 Vamos seguir com o carnê.\n\nMe envie seu nome completo, por favor.` }
+        return {
+          text: `Perfeito 😊 Vamos seguir com o carnê.
+
+Essa costuma ser a opção que muita gente escolhe porque fica mais leve para começar.
+
+Me envie seu nome completo, por favor.`
+        }
       }
 
       if (
@@ -970,7 +939,11 @@ Antes de falar de pagamento, me diz qual curso mais chamou sua atenção que eu 
         convo.payment = "Cartão"
         convo.phone = extractPhoneFromWhatsApp(phone) || ""
         convo.step = "collecting_name"
-        return { text: `Perfeito 😊 Vamos seguir na opção cartão.\n\nMe envie seu nome completo, por favor.` }
+        return {
+          text: `Perfeito 😊 Vamos seguir na opção cartão.
+
+Me envie seu nome completo, por favor.`
+        }
       }
 
       if (
@@ -981,10 +954,14 @@ Antes de falar de pagamento, me diz qual curso mais chamou sua atenção que eu 
         convo.payment = "PIX"
         convo.phone = extractPhoneFromWhatsApp(phone) || ""
         convo.step = "collecting_name"
-        return { text: `Perfeito 😊 Vamos seguir na opção PIX à vista.\n\nMe envie seu nome completo, por favor.` }
+        return {
+          text: `Perfeito 😊 Vamos seguir na opção PIX à vista.
+
+Me envie seu nome completo, por favor.`
+        }
       }
 
-      return { text: buildPaymentChoiceMessage() }
+      return { text: buildPaymentChoiceMessage(convo.course) }
     }
 
     if (convo.step === "collecting_name") {
@@ -1151,18 +1128,27 @@ Antes de falar de pagamento, me diz qual curso mais chamou sua atenção que eu 
 
       if (created?.error) {
         return {
-          text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do carnê.\n\nMotivo: ${created.error}\n\nSe quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do boleto.`
+          text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do carnê.
+
+Motivo: ${created.error}
+
+Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do boleto.`
         }
       }
 
       if (created?.carnePendente || !created?.secondVia?.parcela) {
         return {
-          text: `Perfeito 😊\n\nSua matrícula foi criada, mas o carnê ainda está sendo processado pela plataforma.\nAssim que as parcelas estiverem disponíveis, a equipe poderá seguir com o envio.`
+          text: `Perfeito 😊
+
+Sua matrícula foi criada, mas o carnê ainda está sendo processado pela plataforma.
+Assim que as parcelas estiverem disponíveis, a equipe poderá seguir com o envio.`
         }
       }
 
       return {
-        text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.\n\n${buildSecondViaText(created.secondVia)}`,
+        text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.
+
+${buildSecondViaText(created.secondVia)}`,
         documentUrl: created.secondVia?.pdfUrl || "",
         filename: created.secondVia?.nossoNumero
           ? `carne-${created.secondVia.nossoNumero}.pdf`
