@@ -1,20 +1,35 @@
+function readEnv(...keys) {
+  for (const key of keys) {
+    const value = process.env[key]
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim()
+    }
+  }
+  return ""
+}
+
 module.exports = {
-  PORT: process.env.PORT || 3000,
+  PORT: Number(readEnv("PORT")) || 3000,
 
-  PUBLIC_BASE_URL: String(process.env.PUBLIC_BASE_URL || "").replace(/\/$/, ""),
+  PUBLIC_BASE_URL: readEnv("PUBLIC_BASE_URL").replace(/\/$/, ""),
 
-  META_GRAPH_VERSION: process.env.META_GRAPH_VERSION || "v22.0",
-  META_TOKEN: process.env.META_ACCESS_TOKEN || process.env.META_TOKEN || "",
-  META_PHONE_ID: process.env.META_PHONE_NUMBER_ID || process.env.META_PHONE_ID || "",
-  META_VERIFY_TOKEN: process.env.META_VERIFY_TOKEN || "",
+  META_GRAPH_VERSION: readEnv("META_GRAPH_VERSION") || "v22.0",
+  META_TOKEN: readEnv("META_ACCESS_TOKEN", "META_TOKEN"),
+  META_PHONE_ID: readEnv("META_PHONE_NUMBER_ID", "META_PHONE_ID"),
+  META_VERIFY_TOKEN: readEnv("META_VERIFY_TOKEN"),
 
-  OPENAI_KEY: process.env.OPENAI_API_KEY || "",
-  OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  OPENAI_KEY: readEnv("OPENAI_API_KEY"),
+  OPENAI_MODEL: readEnv("OPENAI_MODEL") || "gpt-4.1-mini",
 
   PAGSCHOOL_BASE_URL:
-    process.env.PAGSCHOOL_BASE_URL ||
-    process.env.PAGSCHOOL_ENDPOINT ||
-    "",
-  PAGSCHOOL_EMAIL: process.env.PAGSCHOOL_EMAIL || "",
-  PAGSCHOOL_PASSWORD: process.env.PAGSCHOOL_PASSWORD || ""
+    readEnv("PAGSCHOOL_BASE_URL", "PAGSCHOOL_ENDPOINT") ||
+    "https://sistema.pagschool.com.br/prod/api",
+
+  PAGSCHOOL_EMAIL: readEnv("PAGSCHOOL_EMAIL"),
+  PAGSCHOOL_PASSWORD: readEnv("PAGSCHOOL_PASSWORD"),
+
+  // aliases para compatibilidade com código antigo
+  PAGSCHOOL_URL:
+    readEnv("PAGSCHOOL_BASE_URL", "PAGSCHOOL_ENDPOINT") ||
+    "https://sistema.pagschool.com.br/prod/api"
 }
