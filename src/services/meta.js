@@ -5,10 +5,26 @@ const {
   META_GRAPH_VERSION
 } = require("../config")
 
+const MAX_TEXT_LENGTH = 4096
+const MAX_CAPTION_LENGTH = 1024
+const MAX_FILENAME_LENGTH = 240
+
+function compact(value) {
+  return String(value || "").trim()
+}
+
 function normalizePhone(value) {
-  const digits = String(value || "").replace(/\D/g, "")
+  let digits = String(value || "").replace(/\D/g, "")
 
   if (!digits) return ""
+
+  if (digits.startsWith("00")) {
+    digits = digits.slice(2)
+  }
+
+  if (digits.startsWith("0") && !digits.startsWith("055")) {
+    digits = digits.replace(/^0+/, "")
+  }
 
   if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
     return digits
@@ -24,7 +40,7 @@ function normalizePhone(value) {
 function ensureValidPhone(phone) {
   const normalized = normalizePhone(phone)
 
-  if (!normalized || normalized.length < 12) {
+  if (!normalized || normalized.length < 12 || normalized.length > 13) {
     throw new Error(`Telefone inválido para envio na Meta: ${phone}`)
   }
 
@@ -32,13 +48,66 @@ function ensureValidPhone(phone) {
 }
 
 function ensureValidUrl(url) {
-  const value = String(url || "").trim()
+  const value = compact(url)
 
   if (!/^https?:\/\//i.test(value)) {
     throw new Error(`URL de documento inválida: ${value}`)
   }
 
   return value
+}
+
+function sanitizeText(text) {
+  return String(text || "")
+    .replace(/\r/g, "")
+    .replace(/\u0000/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
+function splitTextIntoChunks(text, maxLength = MAX_TEXT_LENGTH) {
+  const clean = sanitizeText(text)
+
+  if (!clean) return []
+
+  if (clean.length <= maxLength) {
+    return [clean]
+  }
+
+  const chunks = []
+  let remaining = clean
+
+  while (remaining.length > maxLength) {
+    let slice = remaining.slice(0, maxLength)
+    let breakIndex = Math.max(
+      slice.lastIndexOf("\n\n"),
+      slice.lastIndexOf("\n"),
+      slice.lastIndexOf(". "),
+      slice.lastIndexOf("! "),
+      slice.lastIndexOf("? "),
+      slice.lastIndexOf("; "),
+      slice.lastIndexOf(", "),
+      slice.lastIndexOf(" ")
+    )
+
+    if (breakIndex < Math.floor(maxLength * 0.45)) {
+      breakIndex = maxLength
+    }
+
+    const part = remaining.slice(0, breakIndex).trim()
+    if (part) {
+      chunks.push(part)
+    }
+
+    remaining = remaining.slice(breakIndex).trim()
+  }
+
+  if (remaining) {
+    chunks.push(remaining)
+  }
+
+  return chunks
 }
 
 function buildMetaUrl() {
@@ -60,6 +129,14 @@ function buildHeaders() {
   }
 }
 
+function safeLogData(value) {
+  try {
+    return JSON.stringify(value)
+  } catch (_error) {
+    return String(value || "")
+  }
+}
+
 async function postToMeta(payload, label) {
   const url = buildMetaUrl()
 
@@ -70,44 +147,86 @@ async function postToMeta(payload, label) {
   })
 
   console.log(`[${label} STATUS]`, resp.status)
-  console.log(`[${label} DATA]`, JSON.stringify(resp.data))
+  console.log(`[${label} DATA]`, safeLogData(resp.data))
 
   if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(`${label} falhou (${resp.status}): ${JSON.stringify(resp.data)}`)
+    throw new Error(`${label} falhou (${resp.status}): ${safeLogData(resp.data)}`)
   }
 
   return resp.data
 }
 
-async function sendText(phone, text) {
-  const payload = {
+function buildTextPayload(phone, text) {
+  return {
     messaging_product: "whatsapp",
     to: ensureValidPhone(phone),
     type: "text",
     text: {
       preview_url: false,
-      body: String(text || "").slice(0, 4096)
+      body: sanitizeText(text)
     }
   }
+}
 
-  return postToMeta(payload, "META_TEXT")
+async function sendText(phone, text) {
+  const chunks = splitTextIntoChunks(text)
+
+  if (!chunks.length) {
+    return null
+  }
+
+  const results = []
+
+  for (let i = 0; i < chunks.length; i += 1) {
+    const payload = buildTextPayload(phone, chunks[i])
+    const label = chunks.length > 1 ? `META_TEXT_${i + 1}` : "META_TEXT"
+    const result = await postToMeta(payload, label)
+    results.push(result)
+  }
+
+  return results[results.length - 1] || null
 }
 
 async function sendDocument(phone, documentUrl, filename, caption) {
+  const safePhone = ensureValidPhone(phone)
   const safeUrl = ensureValidUrl(documentUrl)
+  const safeFilename = compact(filename || "carne.pdf").slice(0, MAX_FILENAME_LENGTH) || "carne.pdf"
+  const safeCaption = sanitizeText(caption || "Segue o PDF.").slice(0, MAX_CAPTION_LENGTH)
 
   const payload = {
     messaging_product: "whatsapp",
-    to: ensureValidPhone(phone),
+    to: safePhone,
     type: "document",
     document: {
       link: safeUrl,
-      filename: String(filename || "carne.pdf").slice(0, 240),
-      caption: String(caption || "Segue o PDF.").slice(0, 1024)
+      filename: safeFilename
     }
   }
 
-  return postToMeta(payload, "META_DOCUMENT")
+  if (safeCaption) {
+    payload.document.caption = safeCaption
+  }
+
+  try {
+    return await postToMeta(payload, "META_DOCUMENT")
+  } catch (error) {
+    console.error("Erro ao enviar documento na Meta:", error?.message || error)
+
+    const fallbackText = [
+      safeCaption || "Perfeito 😊",
+      "Não consegui anexar o PDF diretamente no WhatsApp agora.",
+      `Segue o link para abrir o documento: ${safeUrl}`
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+
+    await sendText(safePhone, fallbackText)
+    return {
+      ok: false,
+      fallback: true,
+      documentUrl: safeUrl
+    }
+  }
 }
 
 module.exports = {
