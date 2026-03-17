@@ -6,6 +6,10 @@ function normalizeText(value) {
     .trim()
 }
 
+function uniqueItems(items = []) {
+  return [...new Set(items.filter(Boolean))]
+}
+
 const COURSE_CATALOG = [
   {
     name: "Administração",
@@ -13,7 +17,16 @@ const COURSE_CATALOG = [
     summary:
       "é uma ótima escolha para quem quer aprender organização, atendimento, rotina de escritório e apoio em empresas",
     fit:
-      "costuma agradar bastante quem quer uma formação útil e versátil, porque serve para vários tipos de empresa"
+      "costuma agradar bastante quem quer uma formação útil e versátil, porque serve para vários tipos de empresa",
+    market:
+      "escritórios, empresas, recepção, apoio operacional e rotinas administrativas",
+    learns: [
+      "organização administrativa",
+      "atendimento",
+      "rotina de escritório",
+      "documentos",
+      "comunicação profissional"
+    ]
   },
   {
     name: "Agente de Saúde",
@@ -21,7 +34,19 @@ const COURSE_CATALOG = [
     summary:
       "é uma opção muito interessante para quem quer entrar na área da saúde com uma formação prática e acessível",
     fit:
-      "muita gente procura esse curso porque ele ajuda a dar os primeiros passos na área com mais segurança"
+      "muita gente procura esse curso porque ele ajuda a dar os primeiros passos na área com mais segurança",
+    workload: "196h",
+    salary: "R$ 1.435,00",
+    market:
+      "ações comunitárias, visitas domiciliares, orientação em saúde, prevenção e apoio a programas de saúde pública",
+    learns: [
+      "sus e atenção à saúde",
+      "promoção da saúde",
+      "prevenção de doenças",
+      "orientação comunitária",
+      "vigilância em saúde",
+      "acompanhamento de grupos prioritários"
+    ]
   },
   {
     name: "Análises Clínicas",
@@ -29,7 +54,9 @@ const COURSE_CATALOG = [
     summary:
       "é indicado para quem gosta da área da saúde e se interessa por rotinas ligadas a laboratório e organização",
     fit:
-      "é um curso que costuma chamar atenção de quem gosta de uma área mais técnica e cuidadosa"
+      "é um curso que costuma chamar atenção de quem gosta de uma área mais técnica e cuidadosa",
+    market:
+      "rotinas laboratoriais, apoio técnico, organização de materiais e processos da área"
   },
   {
     name: "Auxiliar Veterinário",
@@ -37,7 +64,9 @@ const COURSE_CATALOG = [
     summary:
       "é ideal para quem gosta de animais e quer aprender uma rotina prática de apoio e cuidados",
     fit:
-      "é uma opção muito querida por quem quer transformar o amor pelos animais em oportunidade"
+      "é uma opção muito querida por quem quer transformar o amor pelos animais em oportunidade",
+    market:
+      "clínicas, pet shops, apoio em cuidados e rotinas ligadas ao atendimento animal"
   },
   {
     name: "Barbeiro",
@@ -45,7 +74,9 @@ const COURSE_CATALOG = [
     summary:
       "é uma ótima opção para quem quer aprender prática, atendimento e rotina da área da beleza masculina",
     fit:
-      "costuma interessar bastante quem busca uma área prática e com possibilidade de atendimento próprio"
+      "costuma interessar bastante quem busca uma área prática e com possibilidade de atendimento próprio",
+    market:
+      "barbearias, atendimento próprio, salões e prestação de serviço"
   },
   {
     name: "Cabeleireiro",
@@ -53,7 +84,9 @@ const COURSE_CATALOG = [
     summary:
       "é indicado para quem gosta da área da beleza e quer aprender prática, cuidado e atendimento",
     fit:
-      "é uma formação que chama atenção de quem quer trabalhar com beleza e crescer com o próprio talento"
+      "é uma formação que chama atenção de quem quer trabalhar com beleza e crescer com o próprio talento",
+    market:
+      "salões, atendimento próprio, beleza e serviços personalizados"
   },
   {
     name: "Contabilidade",
@@ -61,7 +94,9 @@ const COURSE_CATALOG = [
     summary:
       "é uma boa escolha para quem gosta de organização, números e rotina administrativa",
     fit:
-      "é interessante para quem quer uma área mais organizada e valorizada dentro das empresas"
+      "é interessante para quem quer uma área mais organizada e valorizada dentro das empresas",
+    market:
+      "escritórios, setor financeiro, apoio contábil e rotina empresarial"
   },
   {
     name: "Cuidador de Idosos",
@@ -69,7 +104,9 @@ const COURSE_CATALOG = [
     summary:
       "é ideal para quem tem perfil humano, cuidadoso e quer uma formação com bastante utilidade prática",
     fit:
-      "é uma área muito bonita para quem gosta de cuidar de pessoas com responsabilidade"
+      "é uma área muito bonita para quem gosta de cuidar de pessoas com responsabilidade",
+    market:
+      "cuidados domiciliares, apoio a idosos, rotina de acompanhamento e bem-estar"
   },
   {
     name: "Designer Gráfico",
@@ -77,7 +114,9 @@ const COURSE_CATALOG = [
     summary:
       "é indicado para quem gosta de criatividade, comunicação visual e divulgação",
     fit:
-      "costuma agradar quem quer aprender algo criativo e útil para várias áreas"
+      "costuma agradar quem quer aprender algo criativo e útil para várias áreas",
+    market:
+      "divulgação, criação visual, redes sociais e comunicação"
   },
   {
     name: "Enfermagem",
@@ -85,15 +124,29 @@ const COURSE_CATALOG = [
     summary:
       "é uma ótima opção para quem gosta da área da saúde e quer construir uma base de aprendizado prática",
     fit:
-      "é um curso muito buscado por quem quer crescer na área da saúde com mais preparo"
+      "é um curso muito buscado por quem quer crescer na área da saúde com mais preparo",
+    market:
+      "apoio em rotinas de saúde, atendimento e organização da área"
   },
   {
     name: "Farmácia",
-    keywords: ["farmacia", "farmácia", "atendente de farmacia", "atendente de farmácia"],
+    keywords: ["farmacia", "farmácia", "atendente de farmacia", "atendente de farmácia", "auxiliar de farmacia", "auxiliar de farmácia"],
     summary:
       "é uma excelente escolha para quem quer aprender atendimento, organização e rotina da área farmacêutica",
     fit:
-      "é um dos cursos mais procurados por quem quer entrar rápido em uma área conhecida e prática"
+      "é um dos cursos mais procurados por quem quer entrar rápido em uma área conhecida e prática",
+    workload: "196h",
+    salary: "R$ 1.420,00",
+    market:
+      "farmácias, drogarias, apoio ao atendimento e rotinas ligadas a medicamentos",
+    learns: [
+      "biossegurança",
+      "microbiologia",
+      "anatomia humana",
+      "legislação farmacêutica",
+      "bioética em saúde",
+      "fármacos e medicamentos"
+    ]
   },
   {
     name: "Gastronomia",
@@ -101,7 +154,9 @@ const COURSE_CATALOG = [
     summary:
       "é ideal para quem gosta de cozinha, prática, organização e criatividade",
     fit:
-      "é uma área muito interessante para quem quer transformar afinidade com cozinha em oportunidade"
+      "é uma área muito interessante para quem quer transformar afinidade com cozinha em oportunidade",
+    market:
+      "cozinhas, produção, alimentação e serviços gastronômicos"
   },
   {
     name: "Gestão e Logística",
@@ -109,7 +164,9 @@ const COURSE_CATALOG = [
     summary:
       "é uma boa escolha para quem gosta de organização, processos, estoque e planejamento",
     fit:
-      "é um curso bem útil para quem quer uma formação versátil e aplicável em várias empresas"
+      "é um curso bem útil para quem quer uma formação versátil e aplicável em várias empresas",
+    market:
+      "estoque, armazenagem, distribuição, compras e organização operacional"
   },
   {
     name: "Inglês",
@@ -117,7 +174,9 @@ const COURSE_CATALOG = [
     summary:
       "é uma ótima opção para quem quer fortalecer o currículo, ganhar confiança e ampliar oportunidades",
     fit:
-      "é um curso que agrega muito valor porque ajuda tanto no lado profissional quanto pessoal"
+      "é um curso que agrega muito valor porque ajuda tanto no lado profissional quanto pessoal",
+    market:
+      "currículo, comunicação, atendimento e diferenciação profissional"
   },
   {
     name: "Informática",
@@ -125,7 +184,17 @@ const COURSE_CATALOG = [
     summary:
       "é uma excelente escolha para quem quer aprender ferramentas digitais muito pedidas no mercado",
     fit:
-      "é uma formação muito útil porque praticamente toda área hoje exige alguma base de informática"
+      "é uma formação muito útil porque praticamente toda área hoje exige alguma base de informática",
+    market:
+      "rotinas administrativas, atividades digitais, suporte básico e produtividade",
+    learns: [
+      "computador",
+      "internet",
+      "word",
+      "excel",
+      "powerpoint",
+      "organização digital"
+    ]
   },
   {
     name: "Marketing Digital",
@@ -133,7 +202,9 @@ const COURSE_CATALOG = [
     summary:
       "é ideal para quem gosta de internet, redes sociais, divulgação e comunicação",
     fit:
-      "é uma área moderna e muito buscada por quem quer aprender algo com bastante aplicação prática"
+      "é uma área moderna e muito buscada por quem quer aprender algo com bastante aplicação prática",
+    market:
+      "redes sociais, divulgação, produção de conteúdo e presença digital"
   },
   {
     name: "Massoterapia",
@@ -141,7 +212,9 @@ const COURSE_CATALOG = [
     summary:
       "é uma ótima escolha para quem gosta da área de bem-estar, cuidado e atendimento",
     fit:
-      "costuma agradar quem busca uma área mais ligada ao contato humano e cuidado"
+      "costuma agradar quem busca uma área mais ligada ao contato humano e cuidado",
+    market:
+      "bem-estar, atendimento, estética e serviços personalizados"
   },
   {
     name: "Nutrição",
@@ -149,7 +222,9 @@ const COURSE_CATALOG = [
     summary:
       "é indicada para quem gosta da área de saúde, alimentação e qualidade de vida",
     fit:
-      "é interessante para quem tem afinidade com bem-estar e cuidado com as pessoas"
+      "é interessante para quem tem afinidade com bem-estar e cuidado com as pessoas",
+    market:
+      "apoio em alimentação, bem-estar, qualidade de vida e rotina da área"
   },
   {
     name: "Odontologia",
@@ -157,7 +232,9 @@ const COURSE_CATALOG = [
     summary:
       "é uma boa escolha para quem se identifica com a área de saúde bucal e apoio em atendimentos",
     fit:
-      "é um curso que agrada quem quer uma área prática dentro da saúde"
+      "é um curso que agrada quem quer uma área prática dentro da saúde",
+    market:
+      "clínicas, consultórios e apoio em saúde bucal"
   },
   {
     name: "Operador de Caixa",
@@ -165,7 +242,17 @@ const COURSE_CATALOG = [
     summary:
       "é ideal para quem quer aprender atendimento, operação de caixa e rotina de comércio",
     fit:
-      "é uma formação prática para quem quer se preparar melhor para vagas em lojas e comércios"
+      "é uma formação prática para quem quer se preparar melhor para vagas em lojas e comércios",
+    market:
+      "lojas, supermercados, farmácias e comércio em geral",
+    learns: [
+      "atendimento",
+      "abertura de caixa",
+      "fechamento",
+      "troco",
+      "postura profissional",
+      "rotina de loja"
+    ]
   },
   {
     name: "Pedagogia",
@@ -173,7 +260,9 @@ const COURSE_CATALOG = [
     summary:
       "é uma boa escolha para quem gosta da área educacional e desenvolvimento de pessoas",
     fit:
-      "é uma área muito bonita para quem tem afinidade com aprendizado e orientação"
+      "é uma área muito bonita para quem tem afinidade com aprendizado e orientação",
+    market:
+      "apoio educacional, rotina escolar e desenvolvimento humano"
   },
   {
     name: "Psicologia",
@@ -181,7 +270,9 @@ const COURSE_CATALOG = [
     summary:
       "é ideal para quem se interessa por comportamento humano e desenvolvimento pessoal",
     fit:
-      "costuma chamar atenção de quem gosta de entender melhor pessoas e relações"
+      "costuma chamar atenção de quem gosta de entender melhor pessoas e relações",
+    market:
+      "apoio em desenvolvimento humano, escuta e compreensão de comportamento"
   },
   {
     name: "Recepcionista Hospitalar",
@@ -189,7 +280,19 @@ const COURSE_CATALOG = [
     summary:
       "é uma excelente opção para quem quer trabalhar com atendimento e organização dentro da saúde",
     fit:
-      "é muito procurado por quem quer entrar na área da saúde por uma função de atendimento"
+      "é muito procurado por quem quer entrar na área da saúde por uma função de atendimento",
+    workload: "196h",
+    salary: "R$ 1.324,00",
+    market:
+      "hospitais, clínicas, recepção, atendimento e organização de entrada de pacientes",
+    learns: [
+      "acolhimento",
+      "atendimento ao público",
+      "organização",
+      "rotina hospitalar",
+      "comunicação",
+      "postura profissional"
+    ]
   },
   {
     name: "Recursos Humanos",
@@ -197,7 +300,19 @@ const COURSE_CATALOG = [
     summary:
       "é uma ótima escolha para quem gosta de pessoas, organização e ambiente empresarial",
     fit:
-      "é uma área bem interessante para quem quer trabalhar com pessoas dentro de empresas"
+      "é uma área bem interessante para quem quer trabalhar com pessoas dentro de empresas",
+    workload: "196h",
+    salary: "R$ 1.549,00",
+    market:
+      "setor de RH, recrutamento, treinamento, benefícios e apoio administrativo",
+    learns: [
+      "recrutamento e seleção",
+      "treinamento",
+      "benefícios",
+      "gestão de pessoas",
+      "conflitos",
+      "rotina empresarial"
+    ]
   },
   {
     name: "Radiologia",
@@ -205,7 +320,9 @@ const COURSE_CATALOG = [
     summary:
       "é indicada para quem se interessa por exames de imagem e uma área mais técnica na saúde",
     fit:
-      "costuma agradar quem quer uma área específica e mais técnica dentro da saúde"
+      "costuma agradar quem quer uma área específica e mais técnica dentro da saúde",
+    market:
+      "imagem, apoio técnico e rotinas ligadas à área"
   },
   {
     name: "Segurança do Trabalho",
@@ -213,7 +330,21 @@ const COURSE_CATALOG = [
     summary:
       "é uma ótima opção para quem se interessa por prevenção, organização e orientação",
     fit:
-      "é uma área importante para quem gosta de cuidado, responsabilidade e ambiente profissional"
+      "é uma área importante para quem gosta de cuidado, responsabilidade e ambiente profissional",
+    workload: "196h",
+    salary: "R$ 1.568,00",
+    market:
+      "indústrias, empresas, obras, prevenção, inspeção e apoio em segurança ocupacional",
+    learns: [
+      "segurança do trabalho",
+      "legislação",
+      "saúde ocupacional",
+      "meio ambiente",
+      "prevenção e combate a incêndio",
+      "controle de riscos",
+      "ergonomia",
+      "higiene ocupacional"
+    ]
   },
   {
     name: "Socorrista",
@@ -221,7 +352,20 @@ const COURSE_CATALOG = [
     summary:
       "é ideal para quem gosta de emergência, primeiros socorros e atendimento rápido",
     fit:
-      "costuma chamar atenção de quem quer uma área dinâmica e ligada ao cuidado com vidas"
+      "costuma chamar atenção de quem quer uma área dinâmica e ligada ao cuidado com vidas",
+    workload: "196h",
+    salary: "R$ 1.492,00",
+    market:
+      "apoio em primeiros socorros, atendimento inicial, eventos e ambientes que exigem resposta rápida",
+    learns: [
+      "avaliação primária e secundária",
+      "abc da vida",
+      "reanimação cardiopulmonar",
+      "hemorragias",
+      "queimaduras",
+      "fraturas",
+      "afogamento"
+    ]
   }
 ]
 
@@ -240,6 +384,13 @@ function findCourse(text) {
   }
 
   return null
+}
+
+function getCourseByName(name) {
+  const n = normalizeText(name)
+  if (!n) return null
+
+  return COURSE_CATALOG.find(course => normalizeText(course.name) === n) || null
 }
 
 function menu() {
@@ -291,7 +442,35 @@ function showCourses() {
 - Segurança do Trabalho
 - Socorrista
 
-Qual deles mais chamou sua atenção?`
+Se você quiser, pode me dizer o nome do curso que eu te explico melhor o que aprende, a carga horária, onde pode atuar e outros benefícios.`
+}
+
+function buildCourseLearnBlock(course) {
+  if (!course?.learns?.length) return ""
+
+  return `No curso você vai passar por temas como ${uniqueItems(course.learns)
+    .slice(0, 8)
+    .join(", ")}.`
+}
+
+function buildCourseMarketBlock(course) {
+  if (!course?.market) return ""
+
+  return `Depois da formação, você pode buscar oportunidade em ${course.market}.`
+}
+
+function buildCourseExtraBlock(course) {
+  const pieces = []
+
+  if (course?.workload) {
+    pieces.push(`Carga horária: ${course.workload}.`)
+  }
+
+  if (course?.salary) {
+    pieces.push(`Média salarial informada no site: ${course.salary}.`)
+  }
+
+  return pieces.join("\n")
 }
 
 function presentCourse(course) {
@@ -301,13 +480,36 @@ function presentCourse(course) {
 Me fala qual curso chamou sua atenção que eu te explico melhor.`
   }
 
-  return `Ótima escolha 😊
+  const parts = []
 
-${course.name} ${course.summary}.
+  parts.push(`Ótima escolha 😊`)
+  parts.push(`${course.name} ${course.summary}.`)
+  parts.push(`${course.fit}.`)
 
-${course.fit}.
+  const extra = buildCourseExtraBlock(course)
+  if (extra) {
+    parts.push(extra)
+  }
 
-Me conta: o que mais te interessou nesse curso?`
+  const learns = buildCourseLearnBlock(course)
+  if (learns) {
+    parts.push(learns)
+  }
+
+  const market = buildCourseMarketBlock(course)
+  if (market) {
+    parts.push(market)
+  }
+
+  parts.push(
+    "Além do conteúdo, é uma formação que ajuda a fortalecer o currículo e pode ser um diferencial para quem quer buscar oportunidade na área."
+  )
+  parts.push(
+    "E quando a pessoa quer ganhar mais experiência prática, a carta de estágio pode entrar como um diferencial interessante no processo."
+  )
+  parts.push("Me conta: o que mais te interessou nesse curso?")
+
+  return parts.join("\n\n")
 }
 
 function askExperience(courseName) {
@@ -321,6 +523,7 @@ function askExperience(courseName) {
 }
 
 function buildValueConnection(convo = {}) {
+  const selectedCourse = getCourseByName(convo.course) || {}
   const courseName = convo.course || "esse curso"
   const goal = normalizeText(convo.goal)
   const experience = normalizeText(convo.experience)
@@ -340,17 +543,36 @@ function buildValueConnection(convo = {}) {
   if (
     experience.includes("zero") ||
     experience.includes("nenhuma") ||
+    experience.includes("nunca") ||
     experience.includes("nao") ||
     experience.includes("não")
   ) {
     first += ` E isso é bom porque mesmo quem está começando do zero consegue acompanhar bem.`
   }
 
-  return `${first}
+  const parts = [first]
 
-Os cursos são gratuitos, e existe apenas o investimento do material didático.
+  if (selectedCourse.learns?.length) {
+    parts.push(
+      `Você vai ter contato com temas como ${selectedCourse.learns.slice(0, 6).join(", ")}.`
+    )
+  }
 
-Se fizer sentido para você, eu já posso te mostrar as formas de pagamento.`
+  if (selectedCourse.market) {
+    parts.push(`Isso ajuda porque abre visão de atuação em ${selectedCourse.market}.`)
+  }
+
+  parts.push(
+    "Além disso, é uma formação que ajuda a fortalecer o currículo, melhorar a apresentação profissional e dar mais segurança na hora de buscar oportunidade."
+  )
+
+  parts.push(
+    "E a carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática e se apresentar melhor para a área."
+  )
+
+  parts.push("Se fizer sentido para você, eu já posso te mostrar as formas de pagamento.")
+
+  return parts.join("\n\n")
 }
 
 function materialPitch() {
@@ -537,7 +759,13 @@ function detectCloseMoment(text) {
     "pode ser",
     "bora",
     "vamos seguir",
-    "quero entrar"
+    "quero entrar",
+    "quero sim",
+    "vamos nessa",
+    "fechar",
+    "quero fechar",
+    "ja quero",
+    "já quero"
   ].some(item => t.includes(item))
 }
 
@@ -573,7 +801,11 @@ function isAffirmative(text) {
     "bora",
     "tenho interesse",
     "quero continuar",
-    "vamos seguir"
+    "vamos seguir",
+    "quero sim",
+    "pode continuar",
+    "continuar",
+    "vamos nessa"
   ].some(item => t.includes(item))
 }
 
@@ -586,7 +818,7 @@ function getObjectionReply(text, courseName) {
 
 Pensar com calma é importante mesmo.
 
-Se você quiser, eu posso te explicar de forma mais direta como ${course} funciona para te ajudar a decidir com mais segurança.`
+Se você quiser, eu posso te explicar de forma mais direta como ${course} funciona, o que você aprende e onde ele pode te ajudar, para você decidir com mais segurança.`
   }
 
   if (t.includes("esta caro") || t.includes("está caro") || t.includes("muito caro")) {
@@ -594,7 +826,7 @@ Se você quiser, eu posso te explicar de forma mais direta como ${course} funcio
 
 Muita gente compara antes de decidir.
 
-O mais importante é você entrar em algo que realmente faça sentido para o seu objetivo. Se quiser, eu posso te explicar melhor como essa formação pode te ajudar no seu momento.`
+O mais importante é você entrar em algo que realmente faça sentido para o seu objetivo. Se quiser, eu posso te mostrar primeiro o valor profissional desse curso e como ele pode fortalecer seu currículo.`
   }
 
   if (t.includes("nao tenho tempo") || t.includes("não tenho tempo")) {
@@ -608,13 +840,13 @@ Por isso o ideal é justamente escolher algo que dê para encaixar na rotina e i
   if (t.includes("nao sei se e pra mim") || t.includes("não sei se é pra mim")) {
     return `É super normal ter essa dúvida 😊
 
-Se você quiser, eu posso te ajudar a entender se ${course} combina mesmo com o que você busca hoje.`
+Se você quiser, eu posso te ajudar a entender se ${course} combina mesmo com o que você busca hoje e o que você aprenderia na prática.`
   }
 
   if (t.includes("depois eu vejo") || t.includes("depois eu vejo isso")) {
     return `Sem problema 😊
 
-Se você quiser, eu posso só te mostrar da forma mais direta como funciona, e aí você decide com calma.`
+Se você quiser, eu posso só te mostrar de forma bem direta como funciona ${course}, o que você aprende e onde ele pode te ajudar. Aí você decide com calma.`
   }
 
   return ""
