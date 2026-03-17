@@ -13,32 +13,39 @@ function uniqueItems(items = []) {
 const COURSE_CATALOG = [
   {
     name: "Administração",
-    keywords: ["administracao", "administração", "administrativo"],
+    keywords: [
+      "administracao",
+      "administração",
+      "assistente administrativo",
+      "auxiliar administrativo",
+      "administrativo"
+    ],
     summary:
-      "é uma ótima escolha para quem quer aprender organização, atendimento, rotina de escritório e apoio em empresas",
+      "é uma ótima escolha para quem quer aprender organização, atendimento, documentos e rotina administrativa",
     fit:
       "costuma agradar bastante quem quer uma formação útil e versátil, porque serve para vários tipos de empresa",
     market:
-      "escritórios, empresas, recepção, apoio operacional e rotinas administrativas",
+      "escritórios, empresas, recepção, setor administrativo, financeiro, logística e apoio operacional",
     learns: [
       "organização administrativa",
       "atendimento",
-      "rotina de escritório",
       "documentos",
-      "comunicação profissional"
+      "rotina de escritório",
+      "comunicação profissional",
+      "informática"
     ]
   },
   {
     name: "Agente de Saúde",
-    keywords: ["agente de saude", "agente de saúde", "saude", "saúde"],
+    keywords: ["agente de saude", "agente de saúde"],
     summary:
       "é uma opção muito interessante para quem quer entrar na área da saúde com uma formação prática e acessível",
     fit:
       "muita gente procura esse curso porque ele ajuda a dar os primeiros passos na área com mais segurança",
-    workload: "196h",
-    salary: "R$ 1.435,00",
     market:
       "ações comunitárias, visitas domiciliares, orientação em saúde, prevenção e apoio a programas de saúde pública",
+    workload: "196h",
+    salary: "R$ 1.435,00",
     learns: [
       "sus e atenção à saúde",
       "promoção da saúde",
@@ -60,7 +67,14 @@ const COURSE_CATALOG = [
   },
   {
     name: "Auxiliar Veterinário",
-    keywords: ["auxiliar veterinario", "auxiliar veterinário", "veterinario", "veterinário", "pet", "animais"],
+    keywords: [
+      "auxiliar veterinario",
+      "auxiliar veterinário",
+      "veterinario",
+      "veterinário",
+      "pet",
+      "animais"
+    ],
     summary:
       "é ideal para quem gosta de animais e quer aprender uma rotina prática de apoio e cuidados",
     fit:
@@ -130,15 +144,22 @@ const COURSE_CATALOG = [
   },
   {
     name: "Farmácia",
-    keywords: ["farmacia", "farmácia", "atendente de farmacia", "atendente de farmácia", "auxiliar de farmacia", "auxiliar de farmácia"],
+    keywords: [
+      "farmacia",
+      "farmácia",
+      "atendente de farmacia",
+      "atendente de farmácia",
+      "auxiliar de farmacia",
+      "auxiliar de farmácia"
+    ],
     summary:
       "é uma excelente escolha para quem quer aprender atendimento, organização e rotina da área farmacêutica",
     fit:
       "é um dos cursos mais procurados por quem quer entrar rápido em uma área conhecida e prática",
-    workload: "196h",
-    salary: "R$ 1.420,00",
     market:
       "farmácias, drogarias, apoio ao atendimento e rotinas ligadas a medicamentos",
+    workload: "196h",
+    salary: "R$ 1.420,00",
     learns: [
       "biossegurança",
       "microbiologia",
@@ -187,6 +208,7 @@ const COURSE_CATALOG = [
       "é uma formação muito útil porque praticamente toda área hoje exige alguma base de informática",
     market:
       "rotinas administrativas, atividades digitais, suporte básico e produtividade",
+    workload: "96h",
     learns: [
       "computador",
       "internet",
@@ -204,7 +226,16 @@ const COURSE_CATALOG = [
     fit:
       "é uma área moderna e muito buscada por quem quer aprender algo com bastante aplicação prática",
     market:
-      "redes sociais, divulgação, produção de conteúdo e presença digital"
+      "redes sociais, divulgação, produção de conteúdo e presença digital",
+    workload: "96h",
+    learns: [
+      "divulgação",
+      "produção de conteúdo",
+      "redes sociais",
+      "presença digital",
+      "comunicação",
+      "estratégia online"
+    ]
   },
   {
     name: "Massoterapia",
@@ -245,6 +276,8 @@ const COURSE_CATALOG = [
       "é uma formação prática para quem quer se preparar melhor para vagas em lojas e comércios",
     market:
       "lojas, supermercados, farmácias e comércio em geral",
+    workload: "96h",
+    salary: "R$ 1.513,00",
     learns: [
       "atendimento",
       "abertura de caixa",
@@ -281,15 +314,15 @@ const COURSE_CATALOG = [
       "é uma excelente opção para quem quer trabalhar com atendimento e organização dentro da saúde",
     fit:
       "é muito procurado por quem quer entrar na área da saúde por uma função de atendimento",
-    workload: "196h",
-    salary: "R$ 1.324,00",
     market:
       "hospitais, clínicas, recepção, atendimento e organização de entrada de pacientes",
+    workload: "196h",
+    salary: "R$ 1.324,00",
     learns: [
       "acolhimento",
       "atendimento ao público",
-      "organização",
       "rotina hospitalar",
+      "organização",
       "comunicação",
       "postura profissional"
     ]
@@ -301,16 +334,16 @@ const COURSE_CATALOG = [
       "é uma ótima escolha para quem gosta de pessoas, organização e ambiente empresarial",
     fit:
       "é uma área bem interessante para quem quer trabalhar com pessoas dentro de empresas",
-    workload: "196h",
-    salary: "R$ 1.549,00",
     market:
       "setor de RH, recrutamento, treinamento, benefícios e apoio administrativo",
+    workload: "196h",
+    salary: "R$ 1.549,00",
     learns: [
       "recrutamento e seleção",
       "treinamento",
       "benefícios",
       "gestão de pessoas",
-      "conflitos",
+      "cargos e salários",
       "rotina empresarial"
     ]
   },
@@ -331,19 +364,17 @@ const COURSE_CATALOG = [
       "é uma ótima opção para quem se interessa por prevenção, organização e orientação",
     fit:
       "é uma área importante para quem gosta de cuidado, responsabilidade e ambiente profissional",
-    workload: "196h",
-    salary: "R$ 1.568,00",
     market:
       "indústrias, empresas, obras, prevenção, inspeção e apoio em segurança ocupacional",
+    workload: "196h",
+    salary: "R$ 1.568,00",
     learns: [
       "segurança do trabalho",
       "legislação",
       "saúde ocupacional",
       "meio ambiente",
       "prevenção e combate a incêndio",
-      "controle de riscos",
-      "ergonomia",
-      "higiene ocupacional"
+      "ergonomia"
     ]
   },
   {
@@ -353,10 +384,10 @@ const COURSE_CATALOG = [
       "é ideal para quem gosta de emergência, primeiros socorros e atendimento rápido",
     fit:
       "costuma chamar atenção de quem quer uma área dinâmica e ligada ao cuidado com vidas",
-    workload: "196h",
-    salary: "R$ 1.492,00",
     market:
       "apoio em primeiros socorros, atendimento inicial, eventos e ambientes que exigem resposta rápida",
+    workload: "196h",
+    salary: "R$ 1.492,00",
     learns: [
       "avaliação primária e secundária",
       "abc da vida",
@@ -442,20 +473,16 @@ function showCourses() {
 - Segurança do Trabalho
 - Socorrista
 
-Se você quiser, pode me dizer o nome do curso que eu te explico melhor o que aprende, a carga horária, onde pode atuar e outros benefícios.`
+Se você quiser, pode me dizer o nome do curso que eu te explico melhor o que aprende, a carga horária, onde pode atuar e os benefícios da formação.`
 }
 
 function buildCourseLearnBlock(course) {
   if (!course?.learns?.length) return ""
-
-  return `No curso você vai passar por temas como ${uniqueItems(course.learns)
-    .slice(0, 8)
-    .join(", ")}.`
+  return `No curso você vai passar por temas como ${uniqueItems(course.learns).slice(0, 8).join(", ")}.`
 }
 
 function buildCourseMarketBlock(course) {
   if (!course?.market) return ""
-
   return `Depois da formação, você pode buscar oportunidade em ${course.market}.`
 }
 
@@ -482,7 +509,7 @@ Me fala qual curso chamou sua atenção que eu te explico melhor.`
 
   const parts = []
 
-  parts.push(`Ótima escolha 😊`)
+  parts.push("Ótima escolha 😊")
   parts.push(`${course.name} ${course.summary}.`)
   parts.push(`${course.fit}.`)
 
@@ -502,10 +529,10 @@ Me fala qual curso chamou sua atenção que eu te explico melhor.`
   }
 
   parts.push(
-    "Além do conteúdo, é uma formação que ajuda a fortalecer o currículo e pode ser um diferencial para quem quer buscar oportunidade na área."
+    "Além do conteúdo, é uma formação que ajuda a fortalecer o currículo e pode fazer diferença para quem quer buscar oportunidade na área."
   )
   parts.push(
-    "E quando a pessoa quer ganhar mais experiência prática, a carta de estágio pode entrar como um diferencial interessante no processo."
+    "A carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática e se apresentar melhor no mercado."
   )
   parts.push("Me conta: o que mais te interessou nesse curso?")
 
@@ -516,10 +543,10 @@ function askExperience(courseName) {
   const c = normalizeText(courseName)
 
   if (c.includes("ingles")) {
-    return `Entendi 😊 E hoje você está começando do zero no inglês ou já tem alguma base?`
+    return "Entendi 😊 E hoje você está começando do zero no inglês ou já tem alguma base?"
   }
 
-  return `Entendi 😊 E você está começando do zero ou já teve algum contato com essa área?`
+  return "Entendi 😊 E você está começando do zero ou já teve algum contato com essa área?"
 }
 
 function buildValueConnection(convo = {}) {
@@ -535,7 +562,10 @@ function buildValueConnection(convo = {}) {
     goal.includes("emprego") ||
     goal.includes("renda") ||
     goal.includes("curriculo") ||
-    goal.includes("currículo")
+    goal.includes("currículo") ||
+    goal.includes("oportunidade") ||
+    goal.includes("área") ||
+    goal.includes("area")
   ) {
     first = `Pelo que você me contou, ${courseName} pode te ajudar bastante a se preparar melhor para novas oportunidades.`
   }
@@ -547,15 +577,13 @@ function buildValueConnection(convo = {}) {
     experience.includes("nao") ||
     experience.includes("não")
   ) {
-    first += ` E isso é bom porque mesmo quem está começando do zero consegue acompanhar bem.`
+    first += " E isso é bom porque mesmo quem está começando do zero consegue acompanhar bem."
   }
 
   const parts = [first]
 
   if (selectedCourse.learns?.length) {
-    parts.push(
-      `Você vai ter contato com temas como ${selectedCourse.learns.slice(0, 6).join(", ")}.`
-    )
+    parts.push(`Você vai ter contato com temas como ${selectedCourse.learns.slice(0, 6).join(", ")}.`)
   }
 
   if (selectedCourse.market) {
@@ -563,11 +591,11 @@ function buildValueConnection(convo = {}) {
   }
 
   parts.push(
-    "Além disso, é uma formação que ajuda a fortalecer o currículo, melhorar a apresentação profissional e dar mais segurança na hora de buscar oportunidade."
+    "Além disso, é uma formação que ajuda a fortalecer o currículo, melhorar sua apresentação profissional e dar mais segurança na hora de buscar oportunidade."
   )
 
   parts.push(
-    "E a carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática e se apresentar melhor para a área."
+    "E a carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática na área."
   )
 
   parts.push("Se fizer sentido para você, eu já posso te mostrar as formas de pagamento.")
@@ -598,19 +626,19 @@ Me envie seu nome completo, por favor.`
 }
 
 function askCPF() {
-  return `Agora me envie seu CPF, por favor.`
+  return "Agora me envie seu CPF, por favor."
 }
 
 function askBirthDate() {
-  return `Perfeito 😊 Agora me envie sua data de nascimento no formato DD/MM/AAAA.`
+  return "Perfeito 😊 Agora me envie sua data de nascimento no formato DD/MM/AAAA."
 }
 
 function askGender() {
-  return `Me responda com M para masculino ou F para feminino.`
+  return "Me responda com M para masculino ou F para feminino."
 }
 
 function askCEP() {
-  return `Agora me envie seu CEP, por favor.`
+  return "Agora me envie seu CEP, por favor."
 }
 
 function askStreet() {
@@ -620,7 +648,7 @@ Exemplo: Rua, Avenida, Alameda.`
 }
 
 function askNumber() {
-  return `Agora me envie o número do endereço, por favor.`
+  return "Agora me envie o número do endereço, por favor."
 }
 
 function askComplement() {
@@ -630,11 +658,11 @@ Se não tiver, pode responder: sem complemento.`
 }
 
 function askNeighborhood() {
-  return `Qual é o seu bairro?`
+  return "Qual é o seu bairro?"
 }
 
 function askCity() {
-  return `Qual é a sua cidade?`
+  return "Qual é a sua cidade?"
 }
 
 function askState() {
@@ -680,6 +708,7 @@ Sua matrícula foi encaminhada com sucesso para ${convo.course || "o curso"}.`
 
 function isGreeting(text) {
   const t = normalizeText(text)
+
   return [
     "oi",
     "ola",
@@ -695,18 +724,22 @@ function isGreeting(text) {
 
 function isExistingStudentIntent(text) {
   const t = normalizeText(text)
+
   return (
     t.includes("ja sou aluno") ||
     t.includes("já sou aluno") ||
     t.includes("sou aluno") ||
     t.includes("segunda via") ||
     t.includes("2 via") ||
-    t.includes("2a via")
+    t.includes("2a via") ||
+    t.includes("boleto atrasado") ||
+    t.includes("copia do boleto")
   )
 }
 
 function isNewEnrollmentIntent(text) {
   const t = normalizeText(text)
+
   return (
     t.includes("nova matricula") ||
     t.includes("nova matrícula") ||
@@ -714,12 +747,16 @@ function isNewEnrollmentIntent(text) {
     t.includes("fazer matricula") ||
     t.includes("fazer matrícula") ||
     t.includes("quero estudar") ||
-    t.includes("quero fazer um curso")
+    t.includes("quero fazer um curso") ||
+    t.includes("quero me inscrever") ||
+    t.includes("fazer inscricao") ||
+    t.includes("fazer inscrição")
   )
 }
 
 function isCourseListIntent(text) {
   const t = normalizeText(text)
+
   return (
     t.includes("quais cursos") ||
     t.includes("quais sao os cursos") ||
@@ -727,19 +764,29 @@ function isCourseListIntent(text) {
     t.includes("ver cursos") ||
     t.includes("lista de cursos") ||
     t.includes("opcoes") ||
-    t.includes("opções")
+    t.includes("opções") ||
+    t.includes("me mostra os cursos") ||
+    t.includes("quero conhecer os cursos")
   )
 }
 
 function isPriceQuestion(text) {
   const t = normalizeText(text)
+
   return (
     t.includes("valor") ||
     t.includes("preco") ||
     t.includes("preço") ||
     t.includes("quanto custa") ||
     t.includes("mensalidade") ||
-    t.includes("gratuito")
+    t.includes("gratuito") ||
+    t.includes("e pago") ||
+    t.includes("é pago") ||
+    t.includes("pago") ||
+    t.includes("pagamento") ||
+    t.includes("forma de pagamento") ||
+    t.includes("parcelado") ||
+    t.includes("parcela")
   )
 }
 
@@ -762,10 +809,10 @@ function detectCloseMoment(text) {
     "quero entrar",
     "quero sim",
     "vamos nessa",
-    "fechar",
     "quero fechar",
     "ja quero",
-    "já quero"
+    "já quero",
+    "quero começar"
   ].some(item => t.includes(item))
 }
 
@@ -847,6 +894,14 @@ Se você quiser, eu posso te ajudar a entender se ${course} combina mesmo com o 
     return `Sem problema 😊
 
 Se você quiser, eu posso só te mostrar de forma bem direta como funciona ${course}, o que você aprende e onde ele pode te ajudar. Aí você decide com calma.`
+  }
+
+  if (t.includes("nao tenho dinheiro") || t.includes("não tenho dinheiro")) {
+    return `Eu entendo 😊
+
+Por isso muita gente prefere começar pela opção que fica mais leve no mês.
+
+Se quiser, eu posso te explicar com calma as formas de pagamento para você ver o que faz mais sentido no seu caso.`
   }
 
   return ""
