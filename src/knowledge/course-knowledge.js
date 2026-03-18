@@ -67,8 +67,11 @@ function candidateKnowledgePaths() {
 
   return [
     envPath,
+    path.resolve(__dirname, "..", "..", "..", "Curso Profissionalizante.txt"),
+    path.resolve(__dirname, "..", "..", "..", "..", "Curso Profissionalizante.txt"),
     path.resolve(process.cwd(), "Curso Profissionalizante.txt"),
     path.resolve(process.cwd(), "..", "Curso Profissionalizante.txt"),
+    path.resolve(process.cwd(), "..", "..", "Curso Profissionalizante.txt"),
     "c:/Users/Estudo Flex 2026/Documents/Curso Profissionalizante.txt"
   ].filter(Boolean)
 }
