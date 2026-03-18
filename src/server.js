@@ -36,6 +36,12 @@ const {
 
 const COURSE_SITE_KNOWLEDGE = getCourseCatalog().map(toServerCourseInfo)
 
+if (!COURSE_SITE_KNOWLEDGE.length) {
+  console.warn("Base de cursos não carregada do documento. Usando fallback interno de cursos.")
+} else {
+  console.log(`Base de cursos carregada do documento: ${COURSE_SITE_KNOWLEDGE.length} cursos.`)
+}
+
 const DEFAULT_PAYMENT_PLAN = {
   installments: 12,
   installmentValue: 80
@@ -85,6 +91,36 @@ function uniqueItems(items = []) {
   return [...new Set(items.filter(Boolean))]
 }
 
+function getDurationByWorkloadHours(hours) {
+  if (hours === 96) return "6 meses"
+  if (hours === 180) return "8 meses"
+  if (hours === 196) return "12 meses"
+  return ""
+}
+
+function buildFallbackCourseInfoByName(courseName = "") {
+  const flowCourse = sales.findCourse(courseName)
+  if (!flowCourse) return null
+
+  const workload = String(flowCourse.workload || "").trim()
+  const workloadHoursMatch = workload.match(/(\d{2,3})/)
+  const workloadHours = workloadHoursMatch ? Number(workloadHoursMatch[1]) : 0
+  const duration = String(flowCourse.duration || "").trim() || getDurationByWorkloadHours(workloadHours)
+
+  return {
+    title: flowCourse.name || courseName,
+    aliases: flowCourse.keywords || [],
+    workload: workload || "",
+    duration,
+    salary: String(flowCourse.salary || "").trim(),
+    summary: String(flowCourse.summary || "").trim(),
+    description: "",
+    learns: Array.isArray(flowCourse.learns) ? flowCourse.learns : [],
+    market: String(flowCourse.market || "").trim(),
+    differentials: ""
+  }
+}
+
 function getPaymentPlan(_courseName = "") {
   return DEFAULT_PAYMENT_PLAN
 }
@@ -129,6 +165,9 @@ function findSiteCourseKnowledge(text, currentCourse = "") {
 
   const byCombined = toServerCourseInfo(findCourseInText(`${currentCourse} ${text}`))
   if (byCombined) return byCombined
+
+  const byCurrentFallback = buildFallbackCourseInfoByName(currentCourse)
+  if (byCurrentFallback) return byCurrentFallback
 
   return null
 }
@@ -447,6 +486,12 @@ function isCourseDetailsQuestion(text) {
     "carga horaria",
     "carga horária",
     "quantas horas",
+    "quanto tempo",
+    "tempo de curso",
+    "quanto tempo de curso",
+    "quantos meses",
+    "dura quanto",
+    "dura qnto",
     "duracao",
     "duração",
     "media salarial",
@@ -524,13 +569,14 @@ function buildCourseHighlights(courseInfo) {
 }
 
 function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
-  const displayName = selectedCourseName || courseInfo?.title || "esse curso"
+  const normalizedCourseInfo = courseInfo || buildFallbackCourseInfoByName(selectedCourseName)
+  const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
   const parts = []
 
   parts.push(`Perfeito 😊 Vou te explicar de forma rápida sobre ${displayName}.`)
 
-  if (courseInfo) {
-    parts.push(buildCourseHighlights(courseInfo))
+  if (normalizedCourseInfo) {
+    parts.push(buildCourseHighlights(normalizedCourseInfo))
   } else {
     parts.push("Esse curso é uma boa opção para quem quer aprender de forma prática, entender a rotina da área e se preparar melhor para oportunidades no mercado.")
   }
@@ -551,6 +597,10 @@ function buildSelectedCourseAnswer(text, courseInfo) {
     t.includes("carga horaria") ||
     t.includes("carga horária") ||
     t.includes("quantas horas") ||
+    t.includes("quanto tempo") ||
+    t.includes("tempo de curso") ||
+    t.includes("quantos meses") ||
+    t.includes("dura quanto") ||
     t.includes("duracao") ||
     t.includes("duração")
   ) {
@@ -764,9 +814,17 @@ async function processMessage(phone, text) {
     }
 
     if (detectedCourse) {
-      const courseInfo = findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name)
+      const courseInfo =
+        findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name) ||
+        buildFallbackCourseInfoByName(detectedCourse.name)
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
+
+      if (isCourseDetailsQuestion(text) && courseInfo) {
+        convo.step = "diagnosis_goal"
+        convo.paymentTeaserShown = false
+        return { text: buildSelectedCourseAnswer(text, courseInfo) }
+      }
 
       if (isPriceQuestion) {
         convo.step = "payment_choice"
@@ -782,6 +840,12 @@ async function processMessage(phone, text) {
     if (!detectedCourse && courseInfoFromText && convo.step === "course_selection") {
       convo.path = "new_enrollment"
       convo.course = courseInfoFromText.title
+
+      if (isCourseDetailsQuestion(text)) {
+        convo.step = "diagnosis_goal"
+        convo.paymentTeaserShown = false
+        return { text: buildSelectedCourseAnswer(text, courseInfoFromText) }
+      }
 
       if (isPriceQuestion) {
         convo.step = "payment_choice"
@@ -817,7 +881,9 @@ async function processMessage(phone, text) {
     }
 
     if (convo.course && isCourseDetailsQuestion(text)) {
-      const courseInfo = findSiteCourseKnowledge(text, convo.course)
+      const courseInfo =
+        findSiteCourseKnowledge(text, convo.course) ||
+        buildFallbackCourseInfoByName(convo.course)
 
       if (courseInfo) {
         return { text: buildSelectedCourseAnswer(text, courseInfo) }
