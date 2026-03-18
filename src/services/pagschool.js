@@ -345,9 +345,33 @@ function extractRows(data) {
 
 function parseToken(data) {
   if (!data) return ""
-  if (typeof data === "string") return data
 
-  return (
+  if (typeof data === "string") {
+    const raw = data.trim()
+
+    if (!raw) return ""
+
+    const lower = raw.toLowerCase()
+
+    if (
+      lower === "unauthorized" ||
+      lower === "forbidden" ||
+      lower === "null" ||
+      lower === "undefined" ||
+      raw.startsWith("<!DOCTYPE html") ||
+      raw.startsWith("<html")
+    ) {
+      return ""
+    }
+
+    if (raw.split(".").length === 3) {
+      return raw
+    }
+
+    return ""
+  }
+
+  const token =
     data.token ||
     data.accessToken ||
     data.access_token ||
@@ -357,7 +381,13 @@ function parseToken(data) {
     data?.data?.access_token ||
     data?.data?.jwt ||
     ""
-  )
+
+  if (typeof token !== "string") return ""
+
+  const clean = token.trim()
+  if (!clean) return ""
+
+  return clean
 }
 
 function getAuthModes() {
@@ -467,6 +497,15 @@ async function authenticate(forceRefresh = false) {
         debugLog("Autenticado com sucesso.")
         return token
       }
+
+      debugLog("Resposta de autenticação sem token válido:", {
+        url: candidate.url,
+        status: resp.status,
+        data:
+          typeof resp.data === "string"
+            ? resp.data.slice(0, 300)
+            : resp.data
+      })
     } catch (error) {
       debugLog("Falha de autenticação:", error?.message || error)
     }
