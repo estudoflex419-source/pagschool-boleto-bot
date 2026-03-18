@@ -22,6 +22,14 @@ const DEFAULT_DESCONTO_ADIMPLENCIA = Number(process.env.DEFAULT_DESCONTO_ADIMPLE
 const DEFAULT_TIMEOUT = Number(process.env.PAGSCHOOL_TIMEOUT || 30000)
 const DEBUG = String(process.env.PAGSCHOOL_DEBUG || "").trim() === "1"
 
+const PAGSCHOOL_AUTH_SCHEME = String(process.env.PAGSCHOOL_AUTH_SCHEME || "auto")
+  .trim()
+  .toLowerCase()
+
+const PAGSCHOOL_CODIGO_ESCOLA = String(
+  process.env.PAGSCHOOL_CODIGO_ESCOLA || process.env.CODIGO_ESCOLA || ""
+).trim()
+
 let tokenCache = {
   token: "",
   expiresAt: 0
@@ -114,7 +122,7 @@ function addMonthsKeepingDay(baseDate, monthsToAdd, preferredDay) {
   const baseYear = Number(yearStr)
   const baseMonth = Number(monthStr)
 
-  const totalMonths = (baseYear * 12 + (baseMonth - 1)) + monthsToAdd
+  const totalMonths = baseYear * 12 + (baseMonth - 1) + monthsToAdd
   const year = Math.floor(totalMonths / 12)
   const month = (totalMonths % 12) + 1
   const lastDay = getLastDayOfMonth(year, month)
@@ -309,7 +317,17 @@ function getCoursePlan(nomeCurso) {
 
 function getErrorDetail(data) {
   if (!data) return ""
+
+  if (Buffer.isBuffer(data)) {
+    return data.toString("utf8")
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data).toString("utf8")
+  }
+
   if (typeof data === "string") return data
+
   try {
     return JSON.stringify(data)
   } catch (_error) {
@@ -342,6 +360,32 @@ function parseToken(data) {
   )
 }
 
+function getAuthModes() {
+  if (PAGSCHOOL_AUTH_SCHEME && PAGSCHOOL_AUTH_SCHEME !== "auto") {
+    return [PAGSCHOOL_AUTH_SCHEME]
+  }
+
+  return ["jwt", "bearer", "raw"]
+}
+
+function buildAuthHeaders(token, mode, responseType = "json") {
+  const headers = {}
+
+  if (mode === "jwt") {
+    headers.Authorization = `JWT ${token}`
+  } else if (mode === "bearer") {
+    headers.Authorization = `Bearer ${token}`
+  } else {
+    headers.Authorization = token
+  }
+
+  if (responseType === "json") {
+    headers["Content-Type"] = "application/json"
+  }
+
+  return headers
+}
+
 async function rawRequest(method, url, config = {}) {
   const resp = await axios({
     method,
@@ -368,15 +412,27 @@ async function authenticate(forceRefresh = false) {
   const candidates = [
     {
       url: `${BASE_URL}/authenticate`,
-      data: { email: PAGSCHOOL_EMAIL, senha: PAGSCHOOL_PASSWORD }
+      data: {
+        email: PAGSCHOOL_EMAIL,
+        senha: PAGSCHOOL_PASSWORD,
+        ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
+      }
     },
     {
       url: `${BASE_URL}/auth/authenticate`,
-      data: { email: PAGSCHOOL_EMAIL, senha: PAGSCHOOL_PASSWORD }
+      data: {
+        email: PAGSCHOOL_EMAIL,
+        senha: PAGSCHOOL_PASSWORD,
+        ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
+      }
     },
     {
       url: `${BASE_URL}/authenticate`,
-      data: { username: PAGSCHOOL_EMAIL, password: PAGSCHOOL_PASSWORD }
+      data: {
+        username: PAGSCHOOL_EMAIL,
+        password: PAGSCHOOL_PASSWORD,
+        ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
+      }
     }
   ]
 
@@ -389,6 +445,15 @@ async function authenticate(forceRefresh = false) {
         headers: {
           "Content-Type": "application/json"
         }
+      })
+
+      debugLog("Resposta autenticação:", {
+        url: candidate.url,
+        status: resp.status,
+        data:
+          typeof resp.data === "string"
+            ? resp.data.slice(0, 500)
+            : resp.data
       })
 
       const token = parseToken(resp?.data)
@@ -410,37 +475,57 @@ async function authenticate(forceRefresh = false) {
   throw new Error("Não foi possível autenticar na PagSchool.")
 }
 
-async function apiRequest(method, path, data, responseType = "json", attempt = 0) {
-  const token = await authenticate(attempt > 0)
+async function apiRequest(method, path, data, responseType = "json") {
   const url = `${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`
+  let lastErrorMessage = ""
 
-  const headers = {
-    Authorization: `JWT ${token}`
-  }
+  for (let refreshAttempt = 0; refreshAttempt < 2; refreshAttempt += 1) {
+    const token = await authenticate(refreshAttempt > 0)
 
-  if (responseType === "json") {
-    headers["Content-Type"] = "application/json"
-  }
+    for (const authMode of getAuthModes()) {
+      const headers = buildAuthHeaders(token, authMode, responseType)
 
-  const resp = await rawRequest(method, url, {
-    data,
-    responseType,
-    headers
-  })
+      debugLog("Requisição PagSchool:", {
+        method: method.toUpperCase(),
+        url,
+        authMode,
+        hasToken: Boolean(token)
+      })
 
-  if ((resp.status === 401 || resp.status === 403) && attempt < 1) {
-    debugLog("Token expirado ou inválido. Tentando renovar.")
+      const resp = await rawRequest(method, url, {
+        data,
+        responseType,
+        headers
+      })
+
+      debugLog("Resposta PagSchool:", {
+        method: method.toUpperCase(),
+        url,
+        authMode,
+        status: resp.status,
+        data:
+          typeof resp.data === "string"
+            ? resp.data.slice(0, 500)
+            : getErrorDetail(resp.data).slice(0, 500)
+      })
+
+      if (resp.status >= 200 && resp.status < 300) {
+        return resp
+      }
+
+      lastErrorMessage = `PagSchool ${resp.status} em ${method.toUpperCase()} ${url} [auth=${authMode}]: ${getErrorDetail(resp.data)}`
+
+      if (resp.status === 401 || resp.status === 403) {
+        continue
+      }
+
+      throw new Error(lastErrorMessage)
+    }
+
     tokenCache = { token: "", expiresAt: 0 }
-    return apiRequest(method, path, data, responseType, attempt + 1)
   }
 
-  if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(
-      `PagSchool ${resp.status} em ${method.toUpperCase()} ${url}: ${getErrorDetail(resp.data)}`
-    )
-  }
-
-  return resp
+  throw new Error(lastErrorMessage || `Falha ao acessar a PagSchool em ${method.toUpperCase()} ${url}`)
 }
 
 function extractAlunoFromRows(data, wantedCpf = "") {
@@ -458,6 +543,7 @@ function extractAlunoFromRows(data, wantedCpf = "") {
 
 async function buscarAlunoPorCpf(cpf) {
   const cleanCpf = sanitizeCPF(cpf)
+  let lastAuthError = ""
 
   const candidates = [
     `/aluno/all?cpf=${cleanCpf}&limit=1&offset=0`,
@@ -474,8 +560,17 @@ async function buscarAlunoPorCpf(cpf) {
       const aluno = extractAlunoFromRows(resp?.data, cleanCpf)
       if (aluno?.id) return aluno
     } catch (error) {
-      debugLog("Buscar aluno falhou em", path, error?.message || error)
+      const message = String(error?.message || error)
+      debugLog("Buscar aluno falhou em", path, message)
+
+      if (message.includes("PagSchool 401") || message.includes("PagSchool 403")) {
+        lastAuthError = message
+      }
     }
+  }
+
+  if (lastAuthError) {
+    throw new Error(lastAuthError)
   }
 
   return null
@@ -487,7 +582,7 @@ function buildAlunoPayload(input) {
   const dataNascimento = toISODateFromBR(input.dataNascimento)
   const email = String(input.email || "").trim().toLowerCase()
 
-  return {
+  const payload = {
     cpf,
     telefoneCelular,
     telefoneFixo: "",
@@ -505,6 +600,13 @@ function buildAlunoPayload(input) {
     numero: String(input.numero || "").trim(),
     alunoResponsavelFinanceiro: true
   }
+
+  if (PAGSCHOOL_CODIGO_ESCOLA) {
+    payload.codigoEscola = PAGSCHOOL_CODIGO_ESCOLA
+    payload.codEscola = PAGSCHOOL_CODIGO_ESCOLA
+  }
+
+  return payload
 }
 
 function extractAlunoFromCreate(data) {
@@ -531,7 +633,7 @@ function buildContractPayload(input, alunoId) {
   const plan = getCoursePlan(input.nomeCurso)
   const dueDay = Math.min(Math.max(Number(input.dueDay || 1), 1), 28)
 
-  return {
+  const payload = {
     numeroContrato: buildNumeroContrato(),
     nomeCurso: plan.nomeCurso,
     duracaoCurso: Number(plan.duracaoCurso || DEFAULT_DURACAO_CURSO),
@@ -549,6 +651,13 @@ function buildContractPayload(input, alunoId) {
     aluno_id: alunoId,
     numeroParcelaInicial: 1
   }
+
+  if (PAGSCHOOL_CODIGO_ESCOLA) {
+    payload.codigoEscola = PAGSCHOOL_CODIGO_ESCOLA
+    payload.codEscola = PAGSCHOOL_CODIGO_ESCOLA
+  }
+
+  return payload
 }
 
 function extractContratoFromCreate(data) {
