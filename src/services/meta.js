@@ -112,7 +112,9 @@ function splitTextIntoChunks(text, maxLength = MAX_TEXT_LENGTH) {
 
 function buildMetaUrl() {
   if (!META_GRAPH_VERSION || !META_PHONE_ID) {
-    throw new Error("META_GRAPH_VERSION ou META_PHONE_ID não configurados.")
+    throw new Error(
+      "Configuração Meta ausente. Defina META_PHONE_ID (ou PHONE_NUMBER_ID) e META_GRAPH_VERSION."
+    )
   }
 
   return `https://graph.facebook.com/${META_GRAPH_VERSION}/${META_PHONE_ID}/messages`
@@ -120,7 +122,7 @@ function buildMetaUrl() {
 
 function buildHeaders() {
   if (!META_TOKEN) {
-    throw new Error("META_TOKEN não configurado.")
+    throw new Error("Configuração Meta ausente. Defina META_TOKEN (ou WHATSAPP_TOKEN).")
   }
 
   return {
