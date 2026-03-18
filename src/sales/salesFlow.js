@@ -10,6 +10,11 @@ function uniqueItems(items = []) {
   return [...new Set(items.filter(Boolean))]
 }
 
+const {
+  getCourseCatalog,
+  findCourseInText
+} = require("../knowledge/course-knowledge")
+
 const COURSE_CATALOG = [
   {
     name: "Administração",
@@ -400,13 +405,42 @@ const COURSE_CATALOG = [
   }
 ]
 
-const COURSE_NAMES = COURSE_CATALOG.map(item => item.name)
+function toFlowCourseFromKnowledge(course) {
+  if (!course) return null
+
+  return {
+    name: course.name,
+    keywords: Array.isArray(course.aliases) ? course.aliases : [],
+    summary:
+      (course.summary || course.description || "é uma formação prática com certificado").replace(/\.$/, ""),
+    fit:
+      "é uma opção interessante para quem busca capacitação profissional com conteúdo aplicado e possibilidade de atuação na área",
+    market: course.market || "",
+    workload: course.workloadLabel || "",
+    duration: course.durationLabel || "",
+    salary: course.salary || "",
+    learns: Array.isArray(course.programItems) ? course.programItems : []
+  }
+}
+
+const KNOWLEDGE_FLOW_CATALOG = getCourseCatalog().map(toFlowCourseFromKnowledge).filter(Boolean)
+const ACTIVE_CATALOG = KNOWLEDGE_FLOW_CATALOG.length ? KNOWLEDGE_FLOW_CATALOG : COURSE_CATALOG
+
+const COURSE_NAMES = ACTIVE_CATALOG.map(item => item.name)
 
 function findCourse(text) {
+  if (KNOWLEDGE_FLOW_CATALOG.length) {
+    const knowledgeCourse = findCourseInText(text)
+    if (knowledgeCourse) {
+      const normalized = normalizeText(knowledgeCourse.name)
+      return ACTIVE_CATALOG.find(course => normalizeText(course.name) === normalized) || null
+    }
+  }
+
   const t = normalizeText(text)
   if (!t) return null
 
-  for (const course of COURSE_CATALOG) {
+  for (const course of ACTIVE_CATALOG) {
     for (const keyword of course.keywords) {
       if (t.includes(normalizeText(keyword))) {
         return course
@@ -420,7 +454,7 @@ function findCourse(text) {
 function getCourseByName(name) {
   const n = normalizeText(name)
   if (!n) return null
-  return COURSE_CATALOG.find(course => normalizeText(course.name) === n) || null
+  return ACTIVE_CATALOG.find(course => normalizeText(course.name) === n) || null
 }
 
 function menu() {
@@ -442,6 +476,14 @@ Hoje você já tem algum curso em mente ou quer que eu te mostre algumas opçõe
 }
 
 function showCourses() {
+  if (ACTIVE_CATALOG.length) {
+    return `Temos ${ACTIVE_CATALOG.length} cursos disponíveis.
+
+- ${ACTIVE_CATALOG.map(course => course.name).join("\n- ")}
+
+Se você quiser, pode me dizer o nome do curso que eu te explico melhor o que aprende, duração, carga horária, mercado de trabalho e diferenciais.`
+  }
+
   return `Temos opções em áreas como saúde, administrativo, beleza, tecnologia e atendimento.
 
 Alguns cursos que mais chamam atenção são:
@@ -494,8 +536,12 @@ function buildCourseExtraBlock(course) {
     pieces.push(`Carga horária: ${course.workload}.`)
   }
 
+  if (course?.duration) {
+    pieces.push(`Duração média: ${course.duration}.`)
+  }
+
   if (course?.salary) {
-    pieces.push(`Média salarial informada no site: ${course.salary}.`)
+    pieces.push(`Média salarial informada no documento: ${course.salary}.`)
   }
 
   return pieces.join("\n")
