@@ -5,7 +5,7 @@ const cors = require("cors")
 const helmet = require("helmet")
 const morgan = require("morgan")
 
-const { PORT, META_VERIFY_TOKEN } = require("./config")
+const { PORT, META_VERIFY_TOKEN, INTERNAL_LEAD_NOTIFY_PHONE: CONFIG_INTERNAL_LEAD_NOTIFY_PHONE } = require("./config")
 const { sendText, sendDocument } = require("./services/meta")
 const { askAI } = require("./services/openai")
 const {
@@ -47,7 +47,7 @@ const DEFAULT_PAYMENT_PLAN = {
   installmentValue: 80
 }
 const DEFAULT_PIX_CASH_VALUE = 550
-const INTERNAL_LEAD_NOTIFY_PHONE = process.env.INTERNAL_LEAD_NOTIFY_PHONE || "13981484410"
+const INTERNAL_LEAD_NOTIFY_PHONE = CONFIG_INTERNAL_LEAD_NOTIFY_PHONE || process.env.INTERNAL_LEAD_NOTIFY_PHONE || "13981484410"
 
 const app = express()
 
@@ -95,7 +95,7 @@ function uniqueItems(items = []) {
 
 function getDurationByWorkloadHours(hours) {
   if (hours === 96) return "6 meses"
-  if (hours === 130) return "8 meses"
+  if (hours === 180) return "8 meses"
   if (hours === 196) return "12 meses"
   return ""
 }
@@ -465,7 +465,7 @@ Se surgir qualquer dúvida, pode me chamar por aqui.`
 function buildInternalLeadNotificationText(convo = {}) {
   const payment = String(convo.payment || "").trim() || "não informado"
   const day =
-    payment === "Carnê"
+    normalize(payment) === "carne"
       ? String(convo.dueDay || convo.deferredPaymentDay || "").trim() || "não informado"
       : "não se aplica"
 
@@ -480,8 +480,6 @@ function buildInternalLeadNotificationText(convo = {}) {
 }
 
 async function notifyInternalLead(convo = {}, sourcePhone = "") {
-  if (convo.internalLeadNotified) return
-
   const name = String(convo.name || "").trim()
   const course = String(convo.course || "").trim()
   const payment = String(convo.payment || "").trim()
@@ -489,9 +487,11 @@ async function notifyInternalLead(convo = {}, sourcePhone = "") {
     String(convo.phone || "").trim() ||
     String(extractPhoneFromWhatsApp(sourcePhone) || "").trim()
   const day = String(convo.dueDay || convo.deferredPaymentDay || "").trim()
+  const notifyKey = [name, course, payment, day, phone].join("|").toLowerCase()
 
   if (!name || !course || !payment || !phone) return
-  if (payment === "Carnê" && !day) return
+  if (normalize(payment) === "carne" && !day) return
+  if (convo.internalLeadNotifyKey && convo.internalLeadNotifyKey === notifyKey) return
 
   try {
     await sendText(INTERNAL_LEAD_NOTIFY_PHONE, buildInternalLeadNotificationText({
@@ -500,6 +500,7 @@ async function notifyInternalLead(convo = {}, sourcePhone = "") {
     }))
     convo.internalLeadNotified = true
     convo.internalLeadNotifiedAt = new Date().toISOString()
+    convo.internalLeadNotifyKey = notifyKey
     convo.phone = phone
   } catch (error) {
     console.error("Falha ao enviar lead interno:", error?.message || error)
@@ -535,7 +536,8 @@ function resetConversation(convo) {
     parcelaId: null,
     nossoNumero: "",
     internalLeadNotified: false,
-    internalLeadNotifiedAt: ""
+    internalLeadNotifiedAt: "",
+    internalLeadNotifyKey: ""
   })
 }
 
