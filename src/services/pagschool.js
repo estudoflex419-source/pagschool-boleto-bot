@@ -602,6 +602,29 @@ async function apiRequestWithFallbackPaths(method, paths = [], data, responseTyp
   throw lastError || new Error(`Nenhuma rota de fallback funcionou para ${method.toUpperCase()}.`)
 }
 
+async function apiRequestWithFallbackMethods(methods = [], paths = [], data, responseType = "json") {
+  const uniqueMethods = [...new Set((methods || []).map(item => String(item || "").toLowerCase()).filter(Boolean))]
+  let lastError = null
+
+  for (const method of uniqueMethods) {
+    const payload = method === "get" || method === "delete" ? undefined : data
+
+    try {
+      return await apiRequestWithFallbackPaths(method, paths, payload, responseType)
+    } catch (error) {
+      lastError = error
+      const message = String(error?.message || error)
+      const canTryOtherMethod = message.includes("PagSchool 404") || message.includes("PagSchool 405")
+
+      if (!canTryOtherMethod) {
+        throw error
+      }
+    }
+  }
+
+  throw lastError || new Error("Nenhuma combinação de método e rota funcionou na PagSchool.")
+}
+
 function extractAlunoFromRows(data, wantedCpf = "") {
   const rows = extractRows(data)
 
@@ -903,11 +926,20 @@ function extractNossoNumero(parcela) {
 }
 
 async function gerarBoletoParcela(parcelaId) {
-  const resp = await apiRequestWithFallbackPaths("post", [
-    `/parcela-contrato/gera-boleto-parcela/${parcelaId}`,
-    `/parcela-contrato/gerar-boleto-parcela/${parcelaId}`,
-    `/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`
-  ], {})
+  const resp = await apiRequestWithFallbackMethods(
+    ["post", "get"],
+    [
+      `/parcela-contrato/gera-boleto-parcela/${parcelaId}`,
+      `/parcela-contrato/gerar-boleto-parcela/${parcelaId}`,
+      `/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`,
+      `/parcelas-contrato/gera-boleto-parcela/${parcelaId}`,
+      `/parcela-contrato/gera-boleto/${parcelaId}`,
+      `/parcela-contrato/gerar-boleto/${parcelaId}`,
+      `/parcelas-contrato/gera-boleto/${parcelaId}`,
+      `/parcelas-contrato/gerar-boleto/${parcelaId}`
+    ],
+    {}
+  )
   return resp.data
 }
 
