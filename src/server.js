@@ -26,203 +26,15 @@ const {
   extractPhoneFromWhatsApp,
   detectDueDay
 } = require("./utils/text")
+const {
+  getCourseCatalog,
+  getCourseByName,
+  findCourseInText,
+  toServerCourseInfo,
+  buildPromptKnowledge
+} = require("./knowledge/course-knowledge")
 
-const COURSE_SITE_KNOWLEDGE = [
-  {
-    title: "Agente de Saúde",
-    aliases: ["agente de saude", "agente de saúde", "saude", "saúde"],
-    workload: "196h",
-    salary: "R$ 1.435,00",
-    summary:
-      "é uma formação voltada para promoção da saúde, orientação comunitária, prevenção de doenças e apoio a ações de saúde pública",
-    learns: [
-      "sus e atenção à saúde",
-      "promoção da saúde",
-      "prevenção de doenças",
-      "orientação comunitária",
-      "vigilância em saúde",
-      "acompanhamento de grupos prioritários"
-    ],
-    market:
-      "ações comunitárias, visitas domiciliares, orientação em saúde, prevenção e apoio a programas de saúde pública"
-  },
-  {
-    title: "Farmácia",
-    aliases: [
-      "farmacia",
-      "farmácia",
-      "auxiliar de farmacia",
-      "auxiliar de farmácia",
-      "atendente de farmacia",
-      "atendente de farmácia"
-    ],
-    workload: "196h",
-    salary: "R$ 1.420,00",
-    summary:
-      "é uma formação voltada para rotina de farmácias, drogarias, apoio ao atendimento e organização da área farmacêutica",
-    learns: [
-      "biossegurança",
-      "microbiologia",
-      "anatomia humana",
-      "legislação farmacêutica",
-      "bioética em saúde",
-      "fármacos e medicamentos"
-    ],
-    market:
-      "farmácias, drogarias, apoio ao atendimento e rotinas ligadas a medicamentos"
-  },
-  {
-    title: "Administração",
-    aliases: [
-      "administracao",
-      "administração",
-      "assistente administrativo",
-      "auxiliar administrativo",
-      "administrativo"
-    ],
-    workload: "196h",
-    salary: "R$ 1.782,00",
-    summary:
-      "é uma formação forte para quem quer aprender organização, atendimento, documentos e rotina administrativa",
-    learns: [
-      "relacionamento interpessoal",
-      "gestão de pessoas",
-      "planejamento",
-      "rotina administrativa",
-      "informática",
-      "pacote office"
-    ],
-    market:
-      "escritórios, empresas, recepção, setor administrativo, financeiro, logística e apoio operacional"
-  },
-  {
-    title: "Recursos Humanos",
-    aliases: ["recursos humanos", "rh"],
-    workload: "196h",
-    salary: "R$ 1.549,00",
-    summary:
-      "é uma formação voltada para quem quer trabalhar com pessoas, recrutamento, benefícios e rotina empresarial",
-    learns: [
-      "recrutamento e seleção",
-      "treinamento",
-      "benefícios",
-      "gestão de pessoas",
-      "cargos e salários",
-      "rotina empresarial"
-    ],
-    market:
-      "setor de RH, recrutamento, treinamento, benefícios e apoio administrativo"
-  },
-  {
-    title: "Segurança do Trabalho",
-    aliases: ["seguranca do trabalho", "segurança do trabalho"],
-    workload: "196h",
-    salary: "R$ 1.568,00",
-    summary:
-      "é indicado para quem quer aprender prevenção, controle de riscos e segurança no ambiente profissional",
-    learns: [
-      "segurança do trabalho",
-      "legislação",
-      "saúde ocupacional",
-      "meio ambiente",
-      "prevenção e combate a incêndio",
-      "ergonomia"
-    ],
-    market:
-      "indústrias, empresas, obras, prevenção, inspeção e apoio em segurança ocupacional"
-  },
-  {
-    title: "Socorrista",
-    aliases: ["socorrista", "primeiros socorros", "resgate"],
-    workload: "196h",
-    salary: "R$ 1.492,00",
-    summary:
-      "é uma formação para quem quer aprender atendimento de urgência, primeiros socorros e resposta rápida",
-    learns: [
-      "avaliação primária e secundária",
-      "abc da vida",
-      "reanimação cardiopulmonar",
-      "hemorragias",
-      "queimaduras",
-      "fraturas",
-      "afogamento"
-    ],
-    market:
-      "apoio em primeiros socorros, atendimento inicial, eventos e ambientes que exigem resposta rápida"
-  },
-  {
-    title: "Recepcionista Hospitalar",
-    aliases: ["recepcionista hospitalar", "hospital"],
-    workload: "196h",
-    salary: "R$ 1.324,00",
-    summary:
-      "é uma opção interessante para quem quer entrar na área da saúde trabalhando com atendimento e organização",
-    learns: [
-      "acolhimento",
-      "atendimento ao público",
-      "rotina hospitalar",
-      "organização",
-      "comunicação",
-      "postura profissional"
-    ],
-    market:
-      "hospitais, clínicas, recepção, atendimento e organização de entrada de pacientes"
-  },
-  {
-    title: "Informática",
-    aliases: ["informatica", "informática", "computador", "office"],
-    workload: "96h",
-    salary: "",
-    summary:
-      "é uma formação muito útil para quem quer aprender ferramentas digitais que hoje são pedidas em várias áreas",
-    learns: [
-      "computador",
-      "internet",
-      "word",
-      "excel",
-      "powerpoint",
-      "organização digital"
-    ],
-    market:
-      "rotinas administrativas, atividades digitais, suporte básico e produtividade"
-  },
-  {
-    title: "Marketing Digital",
-    aliases: ["marketing digital", "marketing", "midias sociais", "mídias sociais"],
-    workload: "96h",
-    salary: "",
-    summary:
-      "é uma opção interessante para quem quer aprender divulgação, redes sociais e presença digital",
-    learns: [
-      "divulgação",
-      "produção de conteúdo",
-      "redes sociais",
-      "presença digital",
-      "comunicação",
-      "estratégia online"
-    ],
-    market:
-      "redes sociais, divulgação, produção de conteúdo e presença digital"
-  },
-  {
-    title: "Operador de Caixa",
-    aliases: ["operador de caixa", "caixa"],
-    workload: "96h",
-    salary: "R$ 1.513,00",
-    summary:
-      "é uma formação prática para quem quer aprender atendimento, operação de caixa e rotina de comércio",
-    learns: [
-      "atendimento",
-      "abertura de caixa",
-      "fechamento",
-      "troco",
-      "postura profissional",
-      "rotina de loja"
-    ],
-    market:
-      "lojas, supermercados, farmácias e comércio em geral"
-  }
-]
+const COURSE_SITE_KNOWLEDGE = getCourseCatalog().map(toServerCourseInfo)
 
 const DEFAULT_PAYMENT_PLAN = {
   installments: 12,
@@ -309,15 +121,14 @@ function wantsPaymentDetails(text) {
 }
 
 function findSiteCourseKnowledge(text, currentCourse = "") {
-  const haystack = normalizeLoose(`${currentCourse} ${text}`)
+  const byText = toServerCourseInfo(findCourseInText(text))
+  if (byText) return byText
 
-  if (!haystack) return null
+  const byCurrent = toServerCourseInfo(getCourseByName(currentCourse))
+  if (byCurrent) return byCurrent
 
-  for (const course of COURSE_SITE_KNOWLEDGE) {
-    if (course.aliases.some(alias => haystack.includes(normalizeLoose(alias)))) {
-      return course
-    }
-  }
+  const byCombined = toServerCourseInfo(findCourseInText(`${currentCourse} ${text}`))
+  if (byCombined) return byCombined
 
   return null
 }
@@ -342,9 +153,22 @@ Pode me responder só com o número.`
 }
 
 function buildCourseListMessage() {
-  return `Perfeito 😊
+  if (!COURSE_SITE_KNOWLEDGE.length) {
+    return `Perfeito 😊
 
 ${sales.showCourses()}`
+  }
+
+  const names = COURSE_SITE_KNOWLEDGE.map(course => course.title)
+
+  return `Perfeito 😊
+
+Temos ${names.length} cursos profissionalizantes disponíveis.
+
+Cursos da instituição:
+- ${names.join("\n- ")}
+
+Se quiser, me fala seu objetivo (por exemplo: emprego rápido, tecnologia, saúde, área administrativa ou renda extra) que eu te indico os cursos ideais para o seu perfil.`
 }
 
 function formatMoney(value) {
@@ -353,22 +177,32 @@ function formatMoney(value) {
 }
 
 function buildCourseSalesSummary(courseName = "", courseInfo = null, compact = false) {
+  const selectedCourse = courseInfo || findSiteCourseKnowledge(courseName, courseName)
   const flowCourse = sales.findCourse(courseName)
 
-  if (courseInfo) {
-    const summary = String(courseInfo.summary || "").trim().replace(/\.$/, "")
+  if (selectedCourse) {
+    const summary = String(selectedCourse.summary || "").trim().replace(/\.$/, "")
     const lines = [
       summary
-        ? `Sobre ${courseInfo.title}: ${summary}.`
-        : `Sobre ${courseInfo.title}: é uma formação prática com certificado.`
+        ? `Sobre ${selectedCourse.title}: ${summary}.`
+        : `Sobre ${selectedCourse.title}: é uma formação prática com certificado.`
     ]
 
-    if (!compact && courseInfo.learns?.length) {
-      lines.push(`Você vai aprender na prática temas como ${courseInfo.learns.slice(0, 3).join(", ")}.`)
+    if (!compact && selectedCourse.workload) {
+      const durationPart = selectedCourse.duration ? ` e a duração média é de ${selectedCourse.duration}` : ""
+      lines.push(`Carga horária: ${selectedCourse.workload}${durationPart}.`)
     }
 
-    if (!compact && courseInfo.market) {
-      lines.push(`Isso ajuda quem quer buscar oportunidade em ${courseInfo.market}.`)
+    if (!compact && selectedCourse.salary) {
+      lines.push(`Média salarial informada no documento: ${selectedCourse.salary}.`)
+    }
+
+    if (!compact && selectedCourse.learns?.length) {
+      lines.push(`Você vai aprender na prática temas como ${selectedCourse.learns.slice(0, 6).join(", ")}.`)
+    }
+
+    if (!compact && selectedCourse.market) {
+      lines.push(`Mercado de trabalho: ${selectedCourse.market}.`)
     }
 
     return lines.join("\n")
@@ -641,22 +475,47 @@ function buildCourseHighlights(courseInfo) {
   if (courseInfo.summary) {
     const summary = String(courseInfo.summary).trim().replace(/\.$/, "")
     lines.push(`${summary.charAt(0).toUpperCase()}${summary.slice(1)}.`)
+  } else if (courseInfo.description) {
+    const firstLine = String(courseInfo.description).split(/\r?\n/).map(item => item.trim()).find(Boolean)
+    if (firstLine) {
+      lines.push(firstLine.replace(/\.$/, "") + ".")
+    }
   }
 
   if (courseInfo.workload) {
-    lines.push(`Carga horária: ${courseInfo.workload}.`)
+    const duration = courseInfo.duration ? ` Duração média: ${courseInfo.duration}.` : ""
+    lines.push(`Carga horária: ${courseInfo.workload}.${duration}`)
+  } else {
+    lines.push("Carga horária: não informada no documento.")
   }
 
   if (courseInfo.salary) {
-    lines.push(`Média salarial informada no site: ${courseInfo.salary}.`)
+    lines.push(`Média salarial informada no documento: ${courseInfo.salary}.`)
+  } else {
+    lines.push("Média salarial: não informada no documento para este curso.")
   }
 
   if (courseInfo.learns?.length) {
-    lines.push(`Você aprende na prática temas como ${courseInfo.learns.slice(0, 4).join(", ")}.`)
+    lines.push(`Conteúdo programático: ${courseInfo.learns.slice(0, 8).join(", ")}.`)
+  } else {
+    lines.push("Conteúdo programático: não detalhado no documento para este curso.")
   }
 
   if (courseInfo.market) {
-    lines.push(`Depois da formação, pode buscar oportunidades em ${courseInfo.market}.`)
+    lines.push(`Mercado de trabalho: ${courseInfo.market}.`)
+  } else {
+    lines.push("Mercado de trabalho: não descrito de forma específica no documento para este curso.")
+  }
+
+  if (courseInfo.differentials) {
+    const differentialLine = String(courseInfo.differentials)
+      .split(/\r?\n/)
+      .map(item => item.trim())
+      .find(Boolean)
+
+    if (differentialLine) {
+      lines.push(`Diferencial: ${differentialLine.replace(/\.$/, "")}.`)
+    }
   }
 
   lines.push("Também fortalece o currículo e ajuda quem quer se posicionar melhor no mercado.")
@@ -695,7 +554,14 @@ function buildSelectedCourseAnswer(text, courseInfo) {
     t.includes("duracao") ||
     t.includes("duração")
   ) {
-    lines.push(`A carga horária informada é de ${courseInfo.workload}.`)
+    if (courseInfo.workload) {
+      lines.push(`A carga horária informada é de ${courseInfo.workload}.`)
+      if (courseInfo.duration) {
+        lines.push(`Para essa carga horária, a duração média é de ${courseInfo.duration}.`)
+      }
+    } else {
+      lines.push("A carga horária não está informada no documento para este curso.")
+    }
   }
 
   if (
@@ -720,7 +586,11 @@ function buildSelectedCourseAnswer(text, courseInfo) {
     t.includes("o que cai") ||
     t.includes("oq cai")
   ) {
-    lines.push(`Você vai estudar temas como ${uniqueItems(courseInfo.learns || []).slice(0, 8).join(", ")}.`)
+    if (courseInfo.learns?.length) {
+      lines.push(`Você vai estudar temas como ${uniqueItems(courseInfo.learns || []).slice(0, 12).join(", ")}.`)
+    } else {
+      lines.push("O conteúdo programático detalhado não está disponível no documento para este curso.")
+    }
   }
 
   if (
@@ -730,7 +600,11 @@ function buildSelectedCourseAnswer(text, courseInfo) {
     t.includes("area de atuacao") ||
     t.includes("área de atuação")
   ) {
-    lines.push(`Depois da formação, você pode buscar oportunidades em ${courseInfo.market}.`)
+    if (courseInfo.market) {
+      lines.push(`Depois da formação, você pode buscar oportunidades em ${courseInfo.market}.`)
+    } else {
+      lines.push("O documento não detalha um mercado de trabalho específico para este curso, mas posso te ajudar com os cursos mais alinhados ao seu objetivo.")
+    }
   }
 
   if (t.includes("certificado")) {
@@ -756,6 +630,11 @@ function buildSelectedCourseAnswer(text, courseInfo) {
 
 async function fallbackAI(text, convo, action = "") {
   const courseInfo = findSiteCourseKnowledge(text, convo.course)
+  const promptKnowledge = buildPromptKnowledge({
+    text,
+    currentCourse: convo.course,
+    maxCourses: 3
+  })
 
   return askAI(text, {
     step: convo.step,
@@ -769,12 +648,16 @@ async function fallbackAI(text, convo, action = "") {
       ? {
           title: courseInfo.title,
           workload: courseInfo.workload,
+          duration: courseInfo.duration,
           salary: courseInfo.salary,
           summary: courseInfo.summary,
+          description: courseInfo.description,
           learns: courseInfo.learns,
-          market: courseInfo.market
+          market: courseInfo.market,
+          differentials: courseInfo.differentials
         }
       : null,
+    knowledgeBase: promptKnowledge,
     responseRules: {
       beHuman: true,
       avoidPaymentBeforeFinal: true,
@@ -787,7 +670,10 @@ async function processMessage(phone, text) {
   try {
     const convo = getConversation(phone)
     const normalizedText = normalize(text || "")
-    const detectedCourse = sales.findCourse(text)
+    const matchedKnowledgeCourse = findCourseInText(text)
+    const detectedCourse = matchedKnowledgeCourse
+      ? { name: matchedKnowledgeCourse.name }
+      : sales.findCourse(text)
     const courseInfoFromText = findSiteCourseKnowledge(text, convo.course)
     const raw = String(text || "").trim().toLowerCase()
     const isPriceQuestion = sales.isPriceQuestion(text)
