@@ -651,23 +651,37 @@ async function finalizeCarneEnrollment(convo, sourcePhone = "") {
 
   convo.dueDay = dueDayNumber
 
-  const created = await criarMatriculaComCarne({
-    cpf: convo.cpf,
-    telefoneCelular: convo.phone || "",
-    nomeAluno: convo.name,
-    dataNascimento: convo.birthDate,
-    email: convo.email,
-    uf: convo.state,
-    genero: convo.gender,
-    cep: convo.cep,
-    logradouro: convo.street,
-    enderecoComplemento: convo.complement,
-    bairro: convo.neighborhood,
-    local: convo.city,
-    numero: convo.number,
-    nomeCurso: convo.course,
-    dueDay: dueDayNumber
-  })
+  let created = null
+
+  try {
+    created = await criarMatriculaComCarne({
+      cpf: convo.cpf,
+      telefoneCelular: convo.phone || "",
+      nomeAluno: convo.name,
+      dataNascimento: convo.birthDate,
+      email: convo.email,
+      uf: convo.state,
+      genero: convo.gender,
+      cep: convo.cep,
+      logradouro: convo.street,
+      enderecoComplemento: convo.complement,
+      bairro: convo.neighborhood,
+      local: convo.city,
+      numero: convo.number,
+      nomeCurso: convo.course,
+      dueDay: dueDayNumber
+    })
+  } catch (error) {
+    await notifyInternalLead(convo, sourcePhone)
+    convo.step = "offer_transition"
+
+    return {
+      text: `Perfeito 😊
+
+Tive uma instabilidade para emitir o boleto automaticamente agora, mas seus dados já ficaram registrados.
+Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
+    }
+  }
 
   convo.step = "post_sale"
   convo.alunoId = created?.aluno?.id || null
@@ -1291,6 +1305,7 @@ ${needsCourse ? "Me envie o nome do curso, por favor." : "Me envie seu nome comp
       convo.dueDay = preferredDay
       convo.payment = "Carnê"
       convo.phone = convo.phone || extractPhoneFromWhatsApp(phone) || ""
+      await notifyInternalLead(convo, phone)
 
       if (!String(convo.course || "").trim()) {
         convo.step = "course_selection"
@@ -1332,6 +1347,7 @@ ${nextData.prompt}`
 
       convo.course = pixCourseInfo.title
       convo.step = "collecting_name"
+      await notifyInternalLead(convo, phone)
 
       return { text: `Perfeito 😊 Curso ${convo.course} selecionado. Agora me envie seu nome completo, por favor.` }
     }
@@ -1343,6 +1359,7 @@ ${nextData.prompt}`
 
       convo.name = String(text).trim()
       convo.step = "collecting_cpf"
+      await notifyInternalLead(convo, phone)
 
       if (convo.payment === "PIX") {
         return { text: "Perfeito 😊 Agora me envie seu CPF com 11 números para eu te passar a chave PIX." }
@@ -1357,6 +1374,7 @@ ${nextData.prompt}`
       }
 
       convo.cpf = text
+      await notifyInternalLead(convo, phone)
 
       if (convo.payment === "PIX") {
         convo.step = "post_sale"
