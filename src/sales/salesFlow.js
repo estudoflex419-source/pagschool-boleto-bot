@@ -10,6 +10,8 @@ function uniqueItems(items = []) {
   return [...new Set(items.filter(Boolean))]
 }
 
+const PIX_CASH_VALUE_LABEL = "R$ 550,00"
+
 const {
   getCourseCatalog,
   findCourseInText
@@ -663,7 +665,7 @@ function investmentMessage() {
 
 1 - Carnê
 2 - Cartão
-3 - PIX`
+3 - PIX à vista (${PIX_CASH_VALUE_LABEL})`
 }
 
 function askName(course, payment) {
@@ -732,6 +734,7 @@ function cardOrPixMessage(convo = {}) {
     return `Perfeito 😊
 
 Seus dados foram registrados na opção PIX à vista.
+Valor do PIX à vista: ${PIX_CASH_VALUE_LABEL}.
 
 Para pagamento, seguem os dados:
 
