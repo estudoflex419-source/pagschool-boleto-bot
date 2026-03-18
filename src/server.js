@@ -46,6 +46,7 @@ const DEFAULT_PAYMENT_PLAN = {
   installments: 12,
   installmentValue: 80
 }
+const DEFAULT_PIX_CASH_VALUE = 550
 
 const app = express()
 
@@ -276,7 +277,7 @@ function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {
   return `Ótima pergunta 😊
 ${courseSummary}
 ${freeLine}
-Taxa única do material: Carnê ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)} | Cartão | PIX à vista.
+Taxa única do material: Carnê ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)} | Cartão | PIX à vista de R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
 Se quiser, já me responde: 1 (Carnê), 2 (Cartão) ou 3 (PIX).`
 }
 
@@ -296,6 +297,7 @@ Você ainda pode escolher o melhor dia de vencimento entre 1 e 28.
 Se preferir, seguimos no cartão e a equipe finaliza a condição com você.
 
 3 - *PIX à vista*
+Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}
 Pagamento direto e, após a confirmação, seguimos com a liberação.
 
 Pode me responder com:
@@ -314,7 +316,7 @@ Para ${courseLabel}, normalmente funciona assim:
 
 - *Carnê*: costuma ser a opção que muita gente escolhe porque fica mais leve para começar, em ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
 - *Cartão*: bom para quem prefere alinhar a condição diretamente com a equipe
-- *PIX à vista*: costuma ser a opção mais direta, porque a confirmação é mais rápida
+- *PIX à vista*: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}, costuma ser a opção mais direta, porque a confirmação é mais rápida
 
 Se você quer começar sem pesar tanto no mês, o carnê geralmente acaba sendo a opção mais confortável.`
 }
@@ -323,6 +325,7 @@ function buildPixMessage() {
   return `Perfeito 😊
 
 Seus dados foram registrados na opção PIX à vista.
+Valor do PIX à vista: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
 
 Para pagamento, seguem os dados:
 
@@ -1007,19 +1010,40 @@ Me envie seu nome completo, por favor.`
         convo.payment = "PIX"
         convo.paymentTeaserShown = false
         convo.phone = extractPhoneFromWhatsApp(phone) || ""
-        convo.step = "collecting_name"
+
+        const needsCourse = !String(convo.course || "").trim()
+        convo.step = needsCourse ? "collecting_pix_course" : "collecting_name"
+
         return {
           text: `Perfeito 😊 Vamos seguir na opção PIX à vista.
+Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
 
-Para finalizar no PIX, eu preciso só de 2 dados:
-- Nome completo
+Para finalizar no PIX, eu preciso só destes dados:
+${needsCourse ? "- Curso\n" : ""}- Nome completo
 - CPF
 
-Me envie seu nome completo, por favor.`
+${needsCourse ? "Me envie o nome do curso, por favor." : "Me envie seu nome completo, por favor."}`
         }
       }
 
       return { text: buildPaymentChoiceMessage(convo.course) }
+    }
+
+    if (convo.step === "collecting_pix_course") {
+      const pixCourseInfo =
+        findSiteCourseKnowledge(text, convo.course) ||
+        buildFallbackCourseInfoByName(text)
+
+      if (!pixCourseInfo?.title) {
+        return {
+          text: "Perfeito 😊 Para seguir no PIX, me informe o nome do curso exatamente como você deseja na matrícula."
+        }
+      }
+
+      convo.course = pixCourseInfo.title
+      convo.step = "collecting_name"
+
+      return { text: `Perfeito 😊 Curso ${convo.course} selecionado. Agora me envie seu nome completo, por favor.` }
     }
 
     if (convo.step === "collecting_name") {
