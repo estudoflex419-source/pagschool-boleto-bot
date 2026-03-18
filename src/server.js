@@ -95,7 +95,7 @@ function uniqueItems(items = []) {
 
 function getDurationByWorkloadHours(hours) {
   if (hours === 96) return "6 meses"
-  if (hours === 180) return "8 meses"
+  if (hours === 130) return "8 meses"
   if (hours === 196) return "12 meses"
   return ""
 }
