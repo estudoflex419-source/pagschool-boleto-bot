@@ -199,6 +199,7 @@ Regras de linguagem:
 Regras comerciais fixas da operação:
 - os cursos são gratuitos
 - o aluno paga apenas o material didático
+- no PIX à vista, o valor é R$ 550,00
 - só fale de pagamento quando o aluno perguntar ou quando houver interesse claro em matrícula
 
 Informações operacionais reais:
@@ -210,6 +211,7 @@ Informações operacionais reais:
 - existe carta de estágio
 - o estágio mínimo é de 60 horas
 - no PIX à vista, use:
+  VALOR R$ 550,00
   CNPJ 22211962/000122
   NOME ALEXANDER PHILADELPHO BEZERRA
 
