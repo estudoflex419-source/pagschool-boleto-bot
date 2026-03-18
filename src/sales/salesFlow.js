@@ -953,12 +953,22 @@ Se você quiser, eu posso te ajudar a entender se ${course} combina mesmo com o 
 Se você quiser, eu posso só te mostrar de forma bem direta como funciona ${course}, o que você aprende e onde ele pode te ajudar. Aí você decide com calma.`
   }
 
-  if (t.includes("nao tenho dinheiro") || t.includes("não tenho dinheiro")) {
-    return `Eu entendo 😊
+  if (
+    t.includes("nao tenho dinheiro") ||
+    t.includes("não tenho dinheiro") ||
+    t.includes("nao tenho esse valor agora") ||
+    t.includes("não tenho esse valor agora") ||
+    t.includes("nao consigo pagar agora") ||
+    t.includes("não consigo pagar agora") ||
+    t.includes("proximo mes") ||
+    t.includes("próximo mês")
+  ) {
+    return `Sem problema 😊
+Podemos sim deixar para o próximo mês.
 
-Por isso muita gente prefere ver com calma a opção que fica mais leve para começar.
+Se ficar melhor para você, eu posso organizar o boleto à vista para a data que você preferir, assim você consegue se planejar com calma.
 
-Se quiser, eu posso te explicar sem compromisso como funciona a taxa única do material didático.`
+Qual dia fica melhor para você: 5, 10, 15, 20 ou outro?`
   }
 
   return ""
