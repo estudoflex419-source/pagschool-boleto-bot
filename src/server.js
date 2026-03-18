@@ -472,6 +472,7 @@ function buildInternalLeadNotificationText(convo = {}) {
   return [
     "Novo atendimento para acompanhamento",
     `Nome: ${String(convo.name || "").trim() || "não informado"}`,
+    `CPF: ${String(convo.cpf || "").trim() || "não informado"}`,
     `Curso: ${String(convo.course || "").trim() || "não informado"}`,
     `Forma de pagamento: ${payment}`,
     `Dia de pagamento: ${day}`,
@@ -479,7 +480,8 @@ function buildInternalLeadNotificationText(convo = {}) {
   ].join("\n")
 }
 
-async function notifyInternalLead(convo = {}, sourcePhone = "") {
+async function notifyInternalLead(convo = {}, sourcePhone = "", options = {}) {
+  const force = Boolean(options?.force)
   const name = String(convo.name || "").trim()
   const course = String(convo.course || "").trim()
   const payment = String(convo.payment || "").trim()
@@ -489,9 +491,8 @@ async function notifyInternalLead(convo = {}, sourcePhone = "") {
   const day = String(convo.dueDay || convo.deferredPaymentDay || "").trim()
   const notifyKey = [name, course, payment, day, phone].join("|").toLowerCase()
 
-  if (!name || !course || !payment || !phone) return
-  if (normalize(payment) === "carne" && !day) return
-  if (convo.internalLeadNotifyKey && convo.internalLeadNotifyKey === notifyKey) return
+  if (!name || !course || !payment || !phone) return false
+  if (!force && convo.internalLeadNotifyKey && convo.internalLeadNotifyKey === notifyKey) return false
 
   try {
     await sendText(INTERNAL_LEAD_NOTIFY_PHONE, buildInternalLeadNotificationText({
@@ -502,8 +503,10 @@ async function notifyInternalLead(convo = {}, sourcePhone = "") {
     convo.internalLeadNotifiedAt = new Date().toISOString()
     convo.internalLeadNotifyKey = notifyKey
     convo.phone = phone
+    return true
   } catch (error) {
     console.error("Falha ao enviar lead interno:", error?.message || error)
+    return false
   }
 }
 
@@ -652,6 +655,7 @@ async function finalizeCarneEnrollment(convo, sourcePhone = "") {
   }
 
   convo.dueDay = dueDayNumber
+  await notifyInternalLead(convo, sourcePhone, { force: true })
 
   let created = null
 
