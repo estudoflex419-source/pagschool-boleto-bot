@@ -9,9 +9,11 @@ function getConversation(phone) {
       goal: "",
       experience: "",
       payment: "",
+      paymentTeaserShown: false,
       name: "",
       cpf: "",
       birthDate: "",
+      email: "",
       gender: "",
       phone: "",
       cep: "",
@@ -21,15 +23,22 @@ function getConversation(phone) {
       neighborhood: "",
       city: "",
       state: "",
+      deferredPaymentDay: "",
       dueDay: "",
       alunoId: null,
       contratoId: null,
       parcelaId: null,
-      nossoNumero: ""
+      nossoNumero: "",
+      internalLeadNotified: false,
+      internalLeadNotifiedAt: "",
+      internalLeadNotifyKey: ""
     })
   }
 
   return conversations.get(phone)
 }
+
+module.exports = { getConversation }
+
 
 module.exports = { getConversation }
