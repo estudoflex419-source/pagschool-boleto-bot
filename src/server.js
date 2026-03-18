@@ -1011,6 +1011,10 @@ Me envie seu nome completo, por favor.`
         return {
           text: `Perfeito 😊 Vamos seguir na opção PIX à vista.
 
+Para finalizar no PIX, eu preciso só de 2 dados:
+- Nome completo
+- CPF
+
 Me envie seu nome completo, por favor.`
         }
       }
@@ -1025,6 +1029,11 @@ Me envie seu nome completo, por favor.`
 
       convo.name = String(text).trim()
       convo.step = "collecting_cpf"
+
+      if (convo.payment === "PIX") {
+        return { text: "Perfeito 😊 Agora me envie seu CPF com 11 números para eu te passar a chave PIX." }
+      }
+
       return { text: sales.askCPF() }
     }
 
@@ -1034,6 +1043,12 @@ Me envie seu nome completo, por favor.`
       }
 
       convo.cpf = text
+
+      if (convo.payment === "PIX") {
+        convo.step = "post_sale"
+        return { text: buildPixMessage() }
+      }
+
       convo.step = "collecting_birth"
       return { text: sales.askBirthDate() }
     }
