@@ -6,7 +6,9 @@ const {
   PAGSCHOOL_BASE_URL,
   PAGSCHOOL_URL,
   PAGSCHOOL_EMAIL,
-  PAGSCHOOL_PASSWORD
+  PAGSCHOOL_PASSWORD,
+  PAGSCHOOL_CODIGO_ESCOLA: CONFIG_CODIGO_ESCOLA,
+  PAGSCHOOL_AUTH_SCHEME: CONFIG_AUTH_SCHEME
 } = require("../config")
 
 const BASE_URL = String(
@@ -22,12 +24,12 @@ const DEFAULT_DESCONTO_ADIMPLENCIA = Number(process.env.DEFAULT_DESCONTO_ADIMPLE
 const DEFAULT_TIMEOUT = Number(process.env.PAGSCHOOL_TIMEOUT || 30000)
 const DEBUG = String(process.env.PAGSCHOOL_DEBUG || "").trim() === "1"
 
-const PAGSCHOOL_AUTH_SCHEME = String(process.env.PAGSCHOOL_AUTH_SCHEME || "auto")
+const PAGSCHOOL_AUTH_SCHEME = String(CONFIG_AUTH_SCHEME || process.env.PAGSCHOOL_AUTH_SCHEME || "jwt")
   .trim()
   .toLowerCase()
 
 const PAGSCHOOL_CODIGO_ESCOLA = String(
-  process.env.PAGSCHOOL_CODIGO_ESCOLA || process.env.CODIGO_ESCOLA || ""
+  CONFIG_CODIGO_ESCOLA || process.env.PAGSCHOOL_CODIGO_ESCOLA || process.env.CODIGO_ESCOLA || ""
 ).trim()
 
 let tokenCache = {
@@ -439,31 +441,40 @@ async function authenticate(forceRefresh = false) {
     throw new Error("PAGSCHOOL_EMAIL ou PAGSCHOOL_PASSWORD não configurados.")
   }
 
-  const candidates = [
+  const baseWithoutApi = BASE_URL.replace(/\/api$/i, "")
+  const endpointCandidates = Array.from(
+    new Set([
+      `${BASE_URL}/authenticate`,
+      `${baseWithoutApi}/api/authenticate`,
+      `${BASE_URL}/auth/authenticate`
+    ])
+  )
+
+  const payloadCandidates = [
     {
-      url: `${BASE_URL}/authenticate`,
-      data: {
-        email: PAGSCHOOL_EMAIL,
-        senha: PAGSCHOOL_PASSWORD,
-        ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
-      }
+      email: PAGSCHOOL_EMAIL,
+      password: PAGSCHOOL_PASSWORD,
+      ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
     },
     {
-      url: `${BASE_URL}/auth/authenticate`,
-      data: {
-        email: PAGSCHOOL_EMAIL,
-        senha: PAGSCHOOL_PASSWORD,
-        ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
-      }
+      email: PAGSCHOOL_EMAIL,
+      senha: PAGSCHOOL_PASSWORD,
+      ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
     },
     {
-      url: `${BASE_URL}/authenticate`,
-      data: {
-        username: PAGSCHOOL_EMAIL,
-        password: PAGSCHOOL_PASSWORD,
-        ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
-      }
+      username: PAGSCHOOL_EMAIL,
+      password: PAGSCHOOL_PASSWORD,
+      ...(PAGSCHOOL_CODIGO_ESCOLA ? { codigoEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
+    },
+    {
+      email: PAGSCHOOL_EMAIL,
+      password: PAGSCHOOL_PASSWORD,
+      ...(PAGSCHOOL_CODIGO_ESCOLA ? { codEscola: PAGSCHOOL_CODIGO_ESCOLA } : {})
     }
+  ]
+
+  const candidates = [
+    ...endpointCandidates.flatMap(url => payloadCandidates.map(data => ({ url, data })))
   ]
 
   for (const candidate of candidates) {
@@ -567,6 +578,30 @@ async function apiRequest(method, path, data, responseType = "json") {
   throw new Error(lastErrorMessage || `Falha ao acessar a PagSchool em ${method.toUpperCase()} ${url}`)
 }
 
+async function apiRequestWithFallbackPaths(method, paths = [], data, responseType = "json") {
+  const uniquePaths = [...new Set((paths || []).filter(Boolean))]
+  let lastError = null
+
+  for (const path of uniquePaths) {
+    try {
+      return await apiRequest(method, path, data, responseType)
+    } catch (error) {
+      lastError = error
+      const message = String(error?.message || error)
+      const isNotFound = message.includes("PagSchool 404")
+      const isMethodNotAllowed = message.includes("PagSchool 405")
+
+      if (isNotFound || isMethodNotAllowed) {
+        continue
+      }
+
+      throw error
+    }
+  }
+
+  throw lastError || new Error(`Nenhuma rota de fallback funcionou para ${method.toUpperCase()}.`)
+}
+
 function extractAlunoFromRows(data, wantedCpf = "") {
   const rows = extractRows(data)
 
@@ -580,18 +615,73 @@ function extractAlunoFromRows(data, wantedCpf = "") {
   return rows[0]
 }
 
-async function buscarAlunoPorCpf(cpf) {
+function buildQueryPath(basePath, params = {}) {
+  const query = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue
+    const clean = String(value).trim()
+    if (!clean) continue
+    query.append(key, clean)
+  }
+
+  const rawQuery = query.toString()
+  return rawQuery ? `${basePath}?${rawQuery}` : basePath
+}
+
+function buildAlunoSearchCandidates(cleanCpf) {
+  const statuses = ["CURSANDO", "FORMADO", "INATIVO"]
+  const basePaths = ["/aluno/v1", "/aluno/all"]
+  const candidates = []
+
+  for (const basePath of basePaths) {
+    for (const status of statuses) {
+      candidates.push(
+        buildQueryPath(basePath, {
+          status,
+          "list-info": "false",
+          limit: 1,
+          offset: 0,
+          filter: cleanCpf
+        })
+      )
+    }
+
+    candidates.push(
+      buildQueryPath(basePath, {
+        "list-info": "false",
+        limit: 1,
+        offset: 0,
+        filter: cleanCpf
+      })
+    )
+
+    candidates.push(
+      buildQueryPath(basePath, {
+        limit: 1,
+        offset: 0,
+        filter: cleanCpf
+      })
+    )
+
+    candidates.push(
+      buildQueryPath(basePath, {
+        cpf: cleanCpf,
+        limit: 1,
+        offset: 0
+      })
+    )
+  }
+
+  return [...new Set(candidates)]
+}
+
+async function buscarAlunoPorCpf(cpf, options = {}) {
+  const strictAuth = Boolean(options?.strictAuth)
   const cleanCpf = sanitizeCPF(cpf)
   let lastAuthError = ""
-
-  const candidates = [
-    `/aluno/all?cpf=${cleanCpf}&limit=1&offset=0`,
-    `/aluno/all?cpf=${cleanCpf}&status=CURSANDO&limit=1&offset=0`,
-    `/aluno/all?filter=${cleanCpf}&limit=1&offset=0`,
-    `/aluno/all?filter=${cleanCpf}&status=CURSANDO&limit=1&offset=0`,
-    `/aluno/all?filter=${cleanCpf}&status=INATIVO&limit=1&offset=0`,
-    `/aluno/all?filter=${cleanCpf}&status=FORMADO&limit=1&offset=0`
-  ]
+  let sawNonAuthError = false
+  const candidates = buildAlunoSearchCandidates(cleanCpf)
 
   for (const path of candidates) {
     try {
@@ -604,11 +694,13 @@ async function buscarAlunoPorCpf(cpf) {
 
       if (message.includes("PagSchool 401") || message.includes("PagSchool 403")) {
         lastAuthError = message
+      } else {
+        sawNonAuthError = true
       }
     }
   }
 
-  if (lastAuthError) {
+  if (strictAuth && lastAuthError && !sawNonAuthError) {
     throw new Error(lastAuthError)
   }
 
@@ -671,22 +763,36 @@ async function criarAluno(input) {
 function buildContractPayload(input, alunoId) {
   const plan = getCoursePlan(input.nomeCurso)
   const dueDay = Math.min(Math.max(Number(input.dueDay || 1), 1), 28)
+  const numeroContrato = String(input.numeroContrato || buildNumeroContrato()).trim()
+  const nomeCurso = String(input.nomeCurso || plan.nomeCurso || "CURSO").trim()
+  const duracaoCurso = Number(input.duracaoCurso || plan.duracaoCurso || DEFAULT_DURACAO_CURSO)
+  const valorParcela = Number(input.valorParcela || plan.valorParcela || DEFAULT_VALOR_PARCELA)
+  const parcelas = Number(input.quantidadeParcelas || input.parcelas || plan.quantidadeParcelas || DEFAULT_QUANTIDADE_PARCELAS)
+  const descontoAdimplenciaRaw =
+    input.descontoAdimplencia !== undefined ? input.descontoAdimplencia : plan.descontoAdimplencia
+  const descontoAdimplenciaValorFixoRaw =
+    input.descontoAdimplenciaValorFixo !== undefined
+      ? input.descontoAdimplenciaValorFixo
+      : plan.descontoAdimplenciaValorFixo
 
   const payload = {
-    numeroContrato: buildNumeroContrato(),
-    nomeCurso: plan.nomeCurso,
-    duracaoCurso: Number(plan.duracaoCurso || DEFAULT_DURACAO_CURSO),
-    valorParcela: Number(plan.valorParcela || DEFAULT_VALOR_PARCELA),
-    parcelas: Number(plan.quantidadeParcelas || DEFAULT_QUANTIDADE_PARCELAS),
-    quantidadeParcelas: Number(plan.quantidadeParcelas || DEFAULT_QUANTIDADE_PARCELAS),
+    numeroContrato,
+    nomeCurso,
+    duracaoCurso,
+    valorParcela,
+    parcelas,
+    quantidadeParcelas: parcelas,
     diaProximoVencimentos: dueDay,
     diaProximoVencimento: dueDay,
     vencimentoPrimeiraParcela: buildFirstDueDate(dueDay),
-    descontoAdimplencia: Number(plan.descontoAdimplencia || 0),
-    descontoAdimplenciaValorFixo:
-      plan.descontoAdimplenciaValorFixo === null || plan.descontoAdimplenciaValorFixo === undefined
+    descontoAdimplencia:
+      descontoAdimplenciaRaw === null || descontoAdimplenciaRaw === undefined
         ? null
-        : Number(plan.descontoAdimplenciaValorFixo),
+        : Number(descontoAdimplenciaRaw),
+    descontoAdimplenciaValorFixo:
+      descontoAdimplenciaValorFixoRaw === null || descontoAdimplenciaValorFixoRaw === undefined
+        ? null
+        : Number(descontoAdimplenciaValorFixoRaw),
     aluno_id: alunoId,
     numeroParcelaInicial: 1
   }
@@ -729,7 +835,10 @@ function sortParcelas(parcelas = []) {
 }
 
 async function buscarContratosDoAluno(alunoId) {
-  const resp = await apiRequest("get", `/contrato-by-aluno/${alunoId}`)
+  const resp = await apiRequestWithFallbackPaths("get", [
+    `/contrato/by-aluno/${alunoId}`,
+    `/contrato-by-aluno/${alunoId}`
+  ])
   const list = extractRows(resp?.data)
   return sortByUpdatedDesc(list)
 }
@@ -794,31 +903,48 @@ function extractNossoNumero(parcela) {
 }
 
 async function gerarBoletoParcela(parcelaId) {
-  const resp = await apiRequest("post", `/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`, {})
+  const resp = await apiRequestWithFallbackPaths("post", [
+    `/parcela-contrato/gera-boleto-parcela/${parcelaId}`,
+    `/parcela-contrato/gerar-boleto-parcela/${parcelaId}`,
+    `/parcelas-contrato/gerar-boleto-parcela/${parcelaId}`
+  ], {})
   return resp.data
 }
 
 async function baixarPdfParcela(parcelaId, nossoNumero) {
-  return apiRequest(
+  return apiRequestWithFallbackPaths(
     "get",
-    `/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
+    [
+      `/parcela-contrato/pdf/${parcelaId}/${nossoNumero}`,
+      `/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
+      `/parcela-contrato/pdf/${nossoNumero}`
+    ],
     undefined,
     "arraybuffer"
   )
 }
 
 async function atualizarParcela(payload) {
-  const resp = await apiRequest("put", "/parcelas-contrato/update", payload)
+  const resp = await apiRequestWithFallbackPaths("put", [
+    "/parcela-contrato/update",
+    "/parcelas-contrato/update"
+  ], payload)
   return resp.data
 }
 
 async function criarParcela(payload) {
-  const resp = await apiRequest("post", "/parcelas-contrato/create", payload)
+  const resp = await apiRequestWithFallbackPaths("post", [
+    "/parcela-contrato/create",
+    "/parcelas-contrato/create"
+  ], payload)
   return resp.data
 }
 
 async function excluirParcela(parcelaId) {
-  const resp = await apiRequest("delete", `/parcelas-contrato/delete/${parcelaId}`)
+  const resp = await apiRequestWithFallbackPaths("delete", [
+    `/parcela-contrato/delete/${parcelaId}`,
+    `/parcelas-contrato/delete/${parcelaId}`
+  ])
   return resp.data
 }
 
@@ -959,7 +1085,7 @@ async function garantirBoletoDaParcela(parcela) {
 }
 
 async function obterSegundaViaPorCpf(cpf) {
-  const aluno = await buscarAlunoPorCpf(cpf)
+  const aluno = await buscarAlunoPorCpf(cpf, { strictAuth: true })
 
   if (!aluno?.id) {
     return {
@@ -1009,10 +1135,32 @@ async function obterSegundaViaPorCpf(cpf) {
 
 async function criarMatriculaComCarne(input) {
   try {
-    let aluno = await buscarAlunoPorCpf(input.cpf)
+    let aluno = null
+
+    try {
+      aluno = await buscarAlunoPorCpf(input.cpf, { strictAuth: false })
+    } catch (lookupError) {
+      debugLog("Falha ao buscar aluno por CPF antes da matrícula:", lookupError?.message || lookupError)
+    }
 
     if (!aluno?.id) {
-      aluno = await criarAluno(input)
+      try {
+        aluno = await criarAluno(input)
+      } catch (createError) {
+        const message = String(createError?.message || createError)
+        const looksLikeDuplicate =
+          /duplicate|duplicado|ja existe|j[aá] cadastrad|cpf/i.test(message)
+
+        if (!looksLikeDuplicate) {
+          throw createError
+        }
+
+        aluno = await buscarAlunoPorCpf(input.cpf, { strictAuth: true })
+      }
+    }
+
+    if (!aluno?.id) {
+      throw new Error("Não foi possível localizar ou criar o aluno na PagSchool.")
     }
 
     const contratoCriado = await criarContrato(input, aluno.id)
