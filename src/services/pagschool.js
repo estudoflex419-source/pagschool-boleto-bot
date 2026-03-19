@@ -204,103 +204,78 @@ const COURSE_PLAN_OVERRIDES = {
   "AUXILIAR ADMINISTRATIVO": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_ADMINISTRACAO || "ADMINISTRACAO")
   },
-
   "AGENTE DE SAUDE": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_AGENTE_SAUDE || "AGENTE DE SAUDE")
   },
-
   "ANALISES CLINICAS": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_ANALISES_CLINICAS || "ANALISES CLINICAS")
   },
-
   "AUXILIAR VETERINARIO": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_AUXILIAR_VETERINARIO || "AUXILIAR VETERINARIO")
   },
-
   BARBEIRO: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_BARBEIRO || "BARBEIRO")
   },
-
   CABELEIREIRO: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_CABELEIREIRO || "CABELEIREIRO")
   },
-
   CONTABILIDADE: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_CONTABILIDADE || "CONTABILIDADE")
   },
-
   "CUIDADOR DE IDOSOS": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_CUIDADOR_IDOSOS || "CUIDADOR DE IDOSOS")
   },
-
   "DESIGNER GRAFICO": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_DESIGNER_GRAFICO || "DESIGNER GRAFICO")
   },
-
   ENFERMAGEM: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_ENFERMAGEM || "ENFERMAGEM")
   },
-
   GASTRONOMIA: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_GASTRONOMIA || "GASTRONOMIA")
   },
-
   "GESTAO E LOGISTICA": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_GESTAO_LOGISTICA || "GESTAO E LOGISTICA")
   },
-
   INGLES: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_INGLES || "INGLES")
   },
-
   INFORMATICA: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_INFORMATICA || "INFORMATICA")
   },
-
   "MARKETING DIGITAL": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_MARKETING_DIGITAL || "MARKETING DIGITAL")
   },
-
   MASSOTERAPIA: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_MASSOTERAPIA || "MASSOTERAPIA")
   },
-
   NUTRICAO: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_NUTRICAO || "NUTRICAO")
   },
-
   ODONTOLOGIA: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_ODONTOLOGIA || "ODONTOLOGIA")
   },
-
   "OPERADOR DE CAIXA": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_OPERADOR_CAIXA || "OPERADOR DE CAIXA")
   },
-
   PEDAGOGIA: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_PEDAGOGIA || "PEDAGOGIA")
   },
-
   PSICOLOGIA: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_PSICOLOGIA || "PSICOLOGIA")
   },
-
   "RECEPCIONISTA HOSPITALAR": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_RECEPCIONISTA_HOSPITALAR || "RECEPCIONISTA HOSPITALAR")
   },
-
   "RECURSOS HUMANOS": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_RH || "RECURSOS HUMANOS")
   },
-
   RADIOLOGIA: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_RADIOLOGIA || "RADIOLOGIA")
   },
-
   "SEGURANCA DO TRABALHO": {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_SEGURANCA_TRABALHO || "SEGURANCA DO TRABALHO")
   },
-
   SOCORRISTA: {
     ...getDefaultPlan(process.env.PAGSCHOOL_CURSO_SOCORRISTA || "SOCORRISTA")
   }
@@ -433,6 +408,27 @@ async function rawRequest(method, url, config = {}) {
   return resp
 }
 
+function responseToBuffer(data) {
+  if (!data) return Buffer.alloc(0)
+  if (Buffer.isBuffer(data)) return data
+  if (data instanceof ArrayBuffer) return Buffer.from(data)
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer)
+  if (typeof data === "string") return Buffer.from(data, "utf8")
+
+  try {
+    return Buffer.from(data)
+  } catch (_error) {
+    return Buffer.alloc(0)
+  }
+}
+
+function isPdfHttpResponse(resp) {
+  const contentType = String(resp?.headers?.["content-type"] || "").toLowerCase()
+  const buffer = responseToBuffer(resp?.data)
+  const startsWithPdf = buffer.slice(0, 4).toString("utf8") === "%PDF"
+  return contentType.includes("application/pdf") || startsWithPdf
+}
+
 async function authenticate(forceRefresh = false) {
   const now = Date.now()
 
@@ -476,9 +472,7 @@ async function authenticate(forceRefresh = false) {
     }
   ]
 
-  const candidates = [
-    ...endpointCandidates.flatMap(url => payloadCandidates.map(data => ({ url, data })))
-  ]
+  const candidates = endpointCandidates.flatMap(url => payloadCandidates.map(data => ({ url, data })))
 
   for (const candidate of candidates) {
     try {
@@ -494,10 +488,7 @@ async function authenticate(forceRefresh = false) {
       debugLog("Resposta autenticação:", {
         url: candidate.url,
         status: resp.status,
-        data:
-          typeof resp.data === "string"
-            ? resp.data.slice(0, 500)
-            : resp.data
+        data: typeof resp.data === "string" ? resp.data.slice(0, 500) : resp.data
       })
 
       const token = parseToken(resp?.data)
@@ -511,15 +502,6 @@ async function authenticate(forceRefresh = false) {
         debugLog("Autenticado com sucesso.")
         return token
       }
-
-      debugLog("Resposta de autenticação sem token válido:", {
-        url: candidate.url,
-        status: resp.status,
-        data:
-          typeof resp.data === "string"
-            ? resp.data.slice(0, 300)
-            : resp.data
-      })
     } catch (error) {
       debugLog("Falha de autenticação:", error?.message || error)
     }
@@ -528,8 +510,8 @@ async function authenticate(forceRefresh = false) {
   throw new Error("Não foi possível autenticar na PagSchool.")
 }
 
-async function apiRequest(method, path, data, responseType = "json") {
-  const url = `${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`
+async function apiRequest(method, pathItem, data, responseType = "json") {
+  const url = `${BASE_URL}${pathItem.startsWith("/") ? pathItem : `/${pathItem}`}`
   let lastErrorMessage = ""
 
   for (let refreshAttempt = 0; refreshAttempt < 2; refreshAttempt += 1) {
@@ -799,8 +781,10 @@ function buildContractPayload(input, alunoId) {
       plan.quantidadeParcelas ||
       DEFAULT_QUANTIDADE_PARCELAS
   )
+
   const descontoAdimplenciaRaw =
     input.descontoAdimplencia !== undefined ? input.descontoAdimplencia : plan.descontoAdimplencia
+
   const descontoAdimplenciaValorFixoRaw =
     input.descontoAdimplenciaValorFixo !== undefined
       ? input.descontoAdimplenciaValorFixo
@@ -1007,29 +991,100 @@ async function gerarBoletoParcela(parcelaId) {
     ],
     {}
   )
+
   return resp.data
 }
 
 async function baixarPdfParcela(parcelaId, nossoNumero) {
-  return apiRequestWithFallbackPaths(
-    "get",
-    [
-      `/parcela-contrato/pdf/${parcelaId}/${nossoNumero}`,
-      `/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
-      `/parcela-contrato/pdf/${nossoNumero}`
-    ],
-    undefined,
-    "arraybuffer"
-  )
+  const paths = [
+    `/parcela-contrato/pdf/${parcelaId}/${nossoNumero}`,
+    `/parcelas-contrato/pdf/${parcelaId}/${nossoNumero}`,
+    `/parcela-contrato/pdf/${nossoNumero}`,
+    `/parcelas-contrato/pdf/${nossoNumero}`,
+
+    `/parcela-contrato/download/${parcelaId}/${nossoNumero}`,
+    `/parcelas-contrato/download/${parcelaId}/${nossoNumero}`,
+    `/parcela-contrato/download/${nossoNumero}`,
+    `/parcelas-contrato/download/${nossoNumero}`,
+
+    `/parcela-contrato/download-boleto/${parcelaId}`,
+    `/parcelas-contrato/download-boleto/${parcelaId}`,
+    `/parcela-contrato/baixar-boleto/${parcelaId}`,
+    `/parcelas-contrato/baixar-boleto/${parcelaId}`,
+
+    `/parcela-contrato/gera-boleto-parcela/${parcelaId}/pdf`,
+    `/parcelas-contrato/gera-boleto-parcela/${parcelaId}/pdf`,
+    `/parcela-contrato/gerar-boleto-parcela/${parcelaId}/pdf`,
+    `/parcelas-contrato/gerar-boleto-parcela/${parcelaId}/pdf`,
+
+    `/parcela-contrato/boleto/${parcelaId}/pdf`,
+    `/parcelas-contrato/boleto/${parcelaId}/pdf`,
+    `/parcela-contrato/imprimir/${parcelaId}`,
+    `/parcelas-contrato/imprimir/${parcelaId}`
+  ]
+
+  const uniquePaths = [...new Set(paths)]
+  const failures = []
+
+  for (let refreshAttempt = 0; refreshAttempt < 2; refreshAttempt += 1) {
+    const token = await authenticate(refreshAttempt > 0)
+
+    for (const authMode of getAuthModes()) {
+      const headers = buildAuthHeaders(token, authMode, "arraybuffer")
+
+      for (const pathItem of uniquePaths) {
+        const url = `${BASE_URL}${pathItem.startsWith("/") ? pathItem : `/${pathItem}`}`
+
+        debugLog("Tentando baixar PDF PagSchool:", {
+          authMode,
+          url
+        })
+
+        const resp = await rawRequest("get", url, {
+          responseType: "arraybuffer",
+          headers
+        })
+
+        const contentType = String(resp?.headers?.["content-type"] || "").toLowerCase()
+        const preview = responseToBuffer(resp?.data).slice(0, 180).toString("utf8")
+
+        debugLog("Resposta download PDF PagSchool:", {
+          authMode,
+          url,
+          status: resp.status,
+          contentType,
+          preview
+        })
+
+        if (resp.status === 401 || resp.status === 403) {
+          continue
+        }
+
+        if (resp.status >= 200 && resp.status < 300 && isPdfHttpResponse(resp)) {
+          return resp
+        }
+
+        failures.push({
+          authMode,
+          url,
+          status: resp.status,
+          contentType,
+          preview
+        })
+      }
+    }
+
+    tokenCache = { token: "", expiresAt: 0 }
+  }
+
+  console.error("[PAGSCHOOL] Nenhuma rota retornou PDF válido:", failures.slice(-10))
+  throw new Error("A PagSchool gerou o boleto, mas não retornou um PDF válido nas rotas testadas.")
 }
 
 async function atualizarParcela(payload) {
   const resp = await apiRequestWithFallbackPaths(
     "put",
-    [
-      "/parcela-contrato/update",
-      "/parcelas-contrato/update"
-    ],
+    ["/parcela-contrato/update", "/parcelas-contrato/update"],
     payload
   )
   return resp.data
@@ -1038,10 +1093,7 @@ async function atualizarParcela(payload) {
 async function criarParcela(payload) {
   const resp = await apiRequestWithFallbackPaths(
     "post",
-    [
-      "/parcela-contrato/create",
-      "/parcelas-contrato/create"
-    ],
+    ["/parcela-contrato/create", "/parcelas-contrato/create"],
     payload
   )
   return resp.data
@@ -1262,9 +1314,7 @@ async function garantirBoletoDaParcela(parcela, context = {}) {
         const updated = await recarregarParcelaDoContrato(alunoId, contratoId, working?.id || parcela?.id)
 
         if (updated?.parcela) {
-          working = {
-            ...updated.parcela
-          }
+          working = { ...updated.parcela }
 
           const updatedNossoNumero = extractNossoNumero(working)
           const updatedPdfUrl = String(
@@ -1317,10 +1367,6 @@ async function garantirBoletoDaParcela(parcela, context = {}) {
 
   throw new Error("A PagSchool ainda não retornou o boleto dessa parcela.")
 }
-
-/* =========================================================
-   HELPERS DO PDF PARA ENVIO NA META
-========================================================= */
 
 function pickFirstFilled(...values) {
   for (const value of values) {
@@ -1439,7 +1485,9 @@ function normalizeDownloadedPdf(pdf, fallbackFilename) {
     normalizePdfBuffer(pdf?.buffer) ||
     normalizePdfBuffer(pdf?.pdfBuffer) ||
     normalizePdfBuffer(pdf?.body) ||
-    normalizePdfBuffer(pdf?.data)
+    normalizePdfBuffer(pdf?.data) ||
+    normalizePdfBuffer(pdf?.data?.buffer) ||
+    responseToBuffer(pdf?.data)
 
   if (!buffer || !buffer.length) {
     return null
@@ -1448,7 +1496,12 @@ function normalizeDownloadedPdf(pdf, fallbackFilename) {
   return {
     buffer,
     filename: pickFirstFilled(pdf?.filename, pdf?.fileName, fallbackFilename),
-    mimeType: pickFirstFilled(pdf?.mimeType, pdf?.contentType, "application/pdf")
+    mimeType: pickFirstFilled(
+      pdf?.mimeType,
+      pdf?.contentType,
+      pdf?.headers?.["content-type"],
+      "application/pdf"
+    )
   }
 }
 
