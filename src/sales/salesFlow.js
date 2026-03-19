@@ -478,47 +478,14 @@ Hoje você já tem algum curso em mente ou quer que eu te mostre algumas opçõe
 }
 
 function showCourses() {
-  if (ACTIVE_CATALOG.length) {
-    return `Temos ${ACTIVE_CATALOG.length} cursos disponíveis.
+  return `Temos cursos em áreas como:
+- saúde
+- administrativo
+- beleza
+- tecnologia
+- atendimento
 
-- ${ACTIVE_CATALOG.map(course => course.name).join("\n- ")}
-
-Se você quiser, pode me dizer o nome do curso que eu te explico melhor o que aprende, duração, carga horária, mercado de trabalho e diferenciais.`
-  }
-
-  return `Temos opções em áreas como saúde, administrativo, beleza, tecnologia e atendimento.
-
-Alguns cursos que mais chamam atenção são:
-
-- Administração
-- Agente de Saúde
-- Análises Clínicas
-- Auxiliar Veterinário
-- Barbeiro
-- Cabeleireiro
-- Contabilidade
-- Cuidador de Idosos
-- Designer Gráfico
-- Enfermagem
-- Farmácia
-- Gastronomia
-- Gestão e Logística
-- Inglês
-- Informática
-- Marketing Digital
-- Massoterapia
-- Nutrição
-- Odontologia
-- Operador de Caixa
-- Pedagogia
-- Psicologia
-- Recepcionista Hospitalar
-- Recursos Humanos
-- Radiologia
-- Segurança do Trabalho
-- Socorrista
-
-Se você quiser, pode me dizer o nome do curso que eu te explico melhor o que aprende, a carga horária, onde pode atuar e os benefícios da formação.`
+Se você quiser, me fala seu objetivo e eu te indico os melhores para o seu perfil.`
 }
 
 function buildCourseLearnBlock(course) {
@@ -592,10 +559,10 @@ function askExperience(courseName) {
   const c = normalizeText(courseName)
 
   if (c.includes("ingles")) {
-    return "Entendi 😊 E hoje você está começando do zero no inglês ou já tem alguma base?"
+    return "Entendi 😊 Você está começando do zero no inglês ou já tem alguma base?"
   }
 
-  return "Entendi 😊 E você está começando do zero ou já teve algum contato com essa área?"
+  return "Entendi 😊 Você está começando do zero ou já teve algum contato com essa área?"
 }
 
 function buildValueConnection(convo = {}) {
@@ -612,9 +579,7 @@ function buildValueConnection(convo = {}) {
     goal.includes("renda") ||
     goal.includes("curriculo") ||
     goal.includes("currículo") ||
-    goal.includes("oportunidade") ||
-    goal.includes("area") ||
-    goal.includes("área")
+    goal.includes("oportunidade")
   ) {
     first = `Pelo que você me contou, ${courseName} pode te ajudar bastante a se preparar melhor para novas oportunidades.`
   }
@@ -626,30 +591,21 @@ function buildValueConnection(convo = {}) {
     experience.includes("nao") ||
     experience.includes("não")
   ) {
-    first += " E isso é bom porque mesmo quem está começando do zero consegue acompanhar bem."
+    first += " E o bom é que mesmo quem está começando do zero consegue acompanhar."
   }
 
   const parts = [first]
 
   if (selectedCourse.learns?.length) {
-    parts.push(`Você vai ter contato com temas como ${selectedCourse.learns.slice(0, 6).join(", ")}.`)
+    parts.push(`No curso você vai aprender temas como ${selectedCourse.learns.slice(0, 4).join(", ")}.`)
   }
 
   if (selectedCourse.market) {
-    parts.push(`Isso ajuda porque abre visão de atuação em ${selectedCourse.market}.`)
+    parts.push(`Isso pode abrir possibilidades em ${selectedCourse.market}.`)
   }
 
-  parts.push(
-    "Além disso, é uma formação que ajuda a fortalecer o currículo, melhorar sua apresentação profissional e dar mais segurança na hora de buscar oportunidade."
-  )
-
-  parts.push(
-    "A carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática na área."
-  )
-
-  parts.push(
-    "Se fizer sentido para você, eu já posso te explicar também como funciona a taxa única do material didático, sem compromisso."
-  )
+  parts.push("Também é uma formação que fortalece o currículo e passa mais segurança na hora de buscar uma oportunidade.")
+  parts.push("Quer que eu te explique agora como funciona a matrícula?")
 
   return parts.join("\n\n")
 }
