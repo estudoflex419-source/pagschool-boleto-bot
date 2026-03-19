@@ -896,6 +896,45 @@ function parseEmissaoJson(value) {
   }
 }
 
+function extractBoletoFields(source) {
+  const sources = []
+
+  function push(obj) {
+    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+      sources.push(obj)
+    }
+  }
+
+  push(source)
+  push(source?.data)
+  push(source?.data?.data)
+  push(source?.boleto)
+  push(source?.data?.boleto)
+  push(source?.parcela)
+  push(source?.data?.parcela)
+
+  function pick(keys = []) {
+    for (const obj of sources) {
+      for (const key of keys) {
+        const value = obj?.[key]
+        if (value !== undefined && value !== null && value !== "") {
+          return value
+        }
+      }
+    }
+    return ""
+  }
+
+  return {
+    nossoNumero: String(pick(["nossoNumero", "nosso_numero"]) || ""),
+    linhaDigitavel: String(
+      pick(["linhaDigitavel", "numeroBoleto", "codigoBarras", "linha_digitavel"]) || ""
+    ),
+    emissaoSicrediJson: pick(["emissaoSicrediJson"]) || "",
+    pdfUrl: String(pick(["pdfUrl", "linkPDF", "urlPdf", "pdf"]) || "")
+  }
+}
+
 function pickBestParcela(contract, preferredParcelaId = null) {
   const parcelas = Array.isArray(contract?.parcelas) ? contract.parcelas : []
   if (!parcelas.length) return null
@@ -916,13 +955,28 @@ function pickBestParcela(contract, preferredParcelaId = null) {
 }
 
 function extractLinhaDigitavel(parcela) {
-  const emissao = parseEmissaoJson(parcela?.emissaoSicrediJson)
-  return emissao?.linhaDigitavel || parcela?.linhaDigitavel || parcela?.numeroBoleto || ""
+  const extracted = extractBoletoFields(parcela)
+  const emissao = parseEmissaoJson(extracted.emissaoSicrediJson || parcela?.emissaoSicrediJson)
+
+  return String(
+    extracted.linhaDigitavel ||
+      emissao?.linhaDigitavel ||
+      parcela?.linhaDigitavel ||
+      parcela?.numeroBoleto ||
+      ""
+  )
 }
 
 function extractNossoNumero(parcela) {
-  const emissao = parseEmissaoJson(parcela?.emissaoSicrediJson)
-  return String(parcela?.nossoNumero || emissao?.nossoNumero || "")
+  const extracted = extractBoletoFields(parcela)
+  const emissao = parseEmissaoJson(extracted.emissaoSicrediJson || parcela?.emissaoSicrediJson)
+
+  return String(
+    extracted.nossoNumero ||
+      parcela?.nossoNumero ||
+      emissao?.nossoNumero ||
+      ""
+  )
 }
 
 async function gerarBoletoParcela(parcelaId) {
@@ -1076,6 +1130,15 @@ async function normalizarParcelasDoContrato(alunoId, contratoId, input) {
 
 function buildSecondViaResult(aluno, contract, parcela) {
   const nossoNumero = extractNossoNumero(parcela)
+  const extracted = extractBoletoFields(parcela)
+
+  const directPdfUrl = String(
+    extracted.pdfUrl ||
+      parcela?.pdfUrl ||
+      parcela?.linkPDF ||
+      parcela?.urlPdf ||
+      ""
+  )
 
   return {
     aluno,
@@ -1083,7 +1146,7 @@ function buildSecondViaResult(aluno, contract, parcela) {
     parcela,
     nossoNumero,
     linhaDigitavel: extractLinhaDigitavel(parcela),
-    pdfUrl: nossoNumero ? buildPdfUrl(parcela?.id, nossoNumero) : ""
+    pdfUrl: directPdfUrl || (nossoNumero ? buildPdfUrl(parcela?.id, nossoNumero) : "")
   }
 }
 
@@ -1093,23 +1156,25 @@ async function garantirBoletoDaParcela(parcela) {
 
   if (!nossoNumero) {
     const generated = await gerarBoletoParcela(parcela.id)
+    const extracted = extractBoletoFields(generated)
 
     working = {
       ...working,
       ...generated,
-      id: working.id || parcela.id
+      id: working.id || parcela.id,
+      nossoNumero: extracted.nossoNumero || working.nossoNumero || "",
+      numeroBoleto: extracted.linhaDigitavel || working.numeroBoleto || "",
+      linhaDigitavel: extracted.linhaDigitavel || working.linhaDigitavel || "",
+      emissaoSicrediJson: extracted.emissaoSicrediJson || working.emissaoSicrediJson || "",
+      pdfUrl: extracted.pdfUrl || working.pdfUrl || "",
+      linkPDF: extracted.pdfUrl || working.linkPDF || "",
+      urlPdf: extracted.pdfUrl || working.urlPdf || ""
     }
 
-    if (!working.nossoNumero && generated?.nossoNumero) {
-      working.nossoNumero = generated.nossoNumero
-    }
+    nossoNumero = extractNossoNumero(working)
 
-    if (!working.numeroBoleto && generated?.numeroBoleto) {
-      working.numeroBoleto = generated.numeroBoleto
-    }
-
-    if (!working.emissaoSicrediJson && generated?.emissaoSicrediJson) {
-      working.emissaoSicrediJson = generated.emissaoSicrediJson
+    if (!nossoNumero) {
+      throw new Error("A PagSchool gerou a resposta do boleto, mas não retornou nossoNumero.")
     }
   }
 
