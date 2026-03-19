@@ -190,7 +190,142 @@ Podemos sim deixar para o próximo mês.
 
 Se ficar melhor para você, eu posso organizar o boleto à vista para a data que você preferir, assim você consegue se planejar com calma.
 
-Qual dia fica melhor para você: 5, 10, 15, 20 ou outro?`
+Qual dia fica melhor para você: 5, 10, 15, 20 ou outro?
+
+Se preferir, também posso mudar agora para:
+1 para Carnê
+2 para Cartão
+3 para PIX`
+}
+
+function detectPaymentSelection(text = "", options = {}) {
+  const { allowNumeric = false } = options
+  const raw = String(text || "").trim().toLowerCase()
+
+  if (!raw) return ""
+
+  if (
+    (allowNumeric && raw === "1") ||
+    /\bcarn[eê]\b/.test(raw) ||
+    raw.includes("quero carne") ||
+    raw.includes("quero carnê") ||
+    raw.includes("eu quero carne") ||
+    raw.includes("eu quero carnê") ||
+    raw.includes("prefiro carne") ||
+    raw.includes("prefiro carnê")
+  ) {
+    return "Carnê"
+  }
+
+  if (
+    (allowNumeric && raw === "2") ||
+    raw.includes("cartao") ||
+    raw.includes("cartão") ||
+    raw.includes("quero cartao") ||
+    raw.includes("quero cartão") ||
+    raw.includes("prefiro cartao") ||
+    raw.includes("prefiro cartão")
+  ) {
+    return "Cartão"
+  }
+
+  if (
+    (allowNumeric && raw === "3") ||
+    /\bpix\b/.test(raw) ||
+    raw.includes("quero pix") ||
+    raw.includes("prefiro pix")
+  ) {
+    return "PIX"
+  }
+
+  return ""
+}
+
+async function continueFromSelectedPayment(convo, phone, payment) {
+  convo.payment = payment
+  convo.paymentTeaserShown = false
+  convo.phone = extractPhoneFromWhatsApp(phone) || convo.phone || ""
+
+  if (payment === "PIX") {
+    const needsCourse = !String(convo.course || "").trim()
+
+    if (needsCourse) {
+      convo.step = "collecting_pix_course"
+      return {
+        text: `Perfeito 😊 Vamos seguir na opção PIX à vista.
+Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
+
+Para finalizar no PIX, eu preciso só destes dados:
+- Curso
+- Nome completo
+- CPF
+
+Me envie o nome do curso, por favor.`
+      }
+    }
+
+    if (!String(convo.name || "").trim()) {
+      convo.step = "collecting_name"
+      return {
+        text: `Perfeito 😊 Vamos seguir na opção PIX à vista.
+Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
+
+Me envie seu nome completo, por favor.`
+      }
+    }
+
+    if (!String(convo.cpf || "").trim()) {
+      convo.step = "collecting_cpf"
+      return {
+        text: "Perfeito 😊 Agora me envie seu CPF com 11 números para eu te passar a chave PIX."
+      }
+    }
+
+    convo.step = "post_sale"
+    return { text: buildPixMessage() }
+  }
+
+  if (payment === "Cartão") {
+    const nextData = getNextEnrollmentDataPrompt(convo)
+
+    if (nextData) {
+      convo.step = nextData.step
+      return {
+        text: `Perfeito 😊 Vamos seguir na opção cartão.
+
+Para deixar tudo encaminhado, preciso de alguns dados de cadastro.
+
+${nextData.prompt}`
+      }
+    }
+
+    convo.step = "post_sale"
+    return { text: buildCardMessage(convo.course) }
+  }
+
+  const nextData = getNextEnrollmentDataPrompt(convo)
+
+  if (nextData) {
+    convo.step = nextData.step
+    return {
+      text: `Perfeito 😊 Vamos seguir com o carnê.
+
+Essa costuma ser a opção que muita gente escolhe porque fica mais leve para começar.
+
+${nextData.prompt}`
+    }
+  }
+
+  if (convo.dueDay || convo.deferredPaymentDay) {
+    return await finalizeCarneEnrollment(convo, phone)
+  }
+
+  convo.step = "collecting_due_day"
+  return {
+    text: `Perfeito 😊 Vamos seguir com o carnê.
+
+${sales.askDueDay()}`
+  }
 }
 
 function buildDeferredPaymentConfirmMessage(day) {
@@ -1083,6 +1218,17 @@ async function processMessage(phone, text) {
     const raw = String(text || "").trim().toLowerCase()
     const isPriceQuestion = sales.isPriceQuestion(text)
 
+    const paymentSelectedInFlexibleFlow = detectPaymentSelection(text, {
+      allowNumeric: ["payment_choice", "payment_deferral_day", "post_sale"].includes(convo.step)
+    })
+
+    if (
+      paymentSelectedInFlexibleFlow &&
+      ["payment_choice", "payment_deferral_day", "offer_transition", "post_sale"].includes(convo.step)
+    ) {
+      return await continueFromSelectedPayment(convo, phone, paymentSelectedInFlexibleFlow)
+    }
+
     if (!convo.step) {
       resetConversation(convo)
     }
@@ -1335,63 +1481,10 @@ async function processMessage(phone, text) {
         return { text: buildPaymentHelpMessage(convo.course) }
       }
 
-      if (
-        raw === "1" ||
-        raw.includes("carne") ||
-        raw.includes("carnê") ||
-        raw.includes("boleto")
-      ) {
-        convo.payment = "Carnê"
-        convo.paymentTeaserShown = false
-        convo.phone = extractPhoneFromWhatsApp(phone) || ""
-        convo.step = "collecting_name"
-        return {
-          text: `Perfeito 😊 Vamos seguir com o carnê.
+      const selectedPayment = detectPaymentSelection(text, { allowNumeric: true })
 
-Essa costuma ser a opção que muita gente escolhe porque fica mais leve para começar.
-
-Me envie seu nome completo, por favor.`
-        }
-      }
-
-      if (
-        raw === "2" ||
-        raw.includes("cartao") ||
-        raw.includes("cartão")
-      ) {
-        convo.payment = "Cartão"
-        convo.paymentTeaserShown = false
-        convo.phone = extractPhoneFromWhatsApp(phone) || ""
-        convo.step = "collecting_name"
-        return {
-          text: `Perfeito 😊 Vamos seguir na opção cartão.
-
-Me envie seu nome completo, por favor.`
-        }
-      }
-
-      if (
-        raw === "3" ||
-        raw === "pix" ||
-        raw.includes("pix")
-      ) {
-        convo.payment = "PIX"
-        convo.paymentTeaserShown = false
-        convo.phone = extractPhoneFromWhatsApp(phone) || ""
-
-        const needsCourse = !String(convo.course || "").trim()
-        convo.step = needsCourse ? "collecting_pix_course" : "collecting_name"
-
-        return {
-          text: `Perfeito 😊 Vamos seguir na opção PIX à vista.
-Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
-
-Para finalizar no PIX, eu preciso só destes dados:
-${needsCourse ? "- Curso\n" : ""}- Nome completo
-- CPF
-
-${needsCourse ? "Me envie o nome do curso, por favor." : "Me envie seu nome completo, por favor."}`
-        }
+      if (selectedPayment) {
+        return await continueFromSelectedPayment(convo, phone, selectedPayment)
       }
 
       return { text: buildPaymentChoiceMessage(convo.course) }
