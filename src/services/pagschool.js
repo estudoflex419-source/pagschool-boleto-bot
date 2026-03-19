@@ -1,5 +1,6 @@
 require("dotenv").config()
 
+const path = require("path")
 const axios = require("axios")
 const {
   PUBLIC_BASE_URL,
@@ -584,9 +585,9 @@ async function apiRequestWithFallbackPaths(method, paths = [], data, responseTyp
   const uniquePaths = [...new Set((paths || []).filter(Boolean))]
   let lastError = null
 
-  for (const path of uniquePaths) {
+  for (const pathItem of uniquePaths) {
     try {
-      return await apiRequest(method, path, data, responseType)
+      return await apiRequest(method, pathItem, data, responseType)
     } catch (error) {
       lastError = error
       const message = String(error?.message || error)
@@ -708,14 +709,14 @@ async function buscarAlunoPorCpf(cpf, options = {}) {
   let sawNonAuthError = false
   const candidates = buildAlunoSearchCandidates(cleanCpf)
 
-  for (const path of candidates) {
+  for (const candidate of candidates) {
     try {
-      const resp = await apiRequest("get", path)
+      const resp = await apiRequest("get", candidate)
       const aluno = extractAlunoFromRows(resp?.data, cleanCpf)
       if (aluno?.id) return aluno
     } catch (error) {
       const message = String(error?.message || error)
-      debugLog("Buscar aluno falhou em", path, message)
+      debugLog("Buscar aluno falhou em", candidate, message)
 
       if (message.includes("PagSchool 401") || message.includes("PagSchool 403")) {
         lastAuthError = message
@@ -1185,6 +1186,7 @@ function buildSecondViaResult(aluno, contract, parcela) {
     aluno,
     contract,
     parcela,
+    parcelaId: parcela?.id || "",
     nossoNumero,
     linhaDigitavel: extractLinhaDigitavel(parcela),
     pdfUrl: directPdfUrl || (nossoNumero ? buildPdfUrl(parcela?.id, nossoNumero) : "")
@@ -1316,6 +1318,227 @@ async function garantirBoletoDaParcela(parcela, context = {}) {
   throw new Error("A PagSchool ainda não retornou o boleto dessa parcela.")
 }
 
+/* =========================================================
+   HELPERS DO PDF PARA ENVIO NA META
+========================================================= */
+
+function pickFirstFilled(...values) {
+  for (const value of values) {
+    if (value === 0) return "0"
+    if (value !== null && value !== undefined && String(value).trim()) {
+      return String(value).trim()
+    }
+  }
+  return ""
+}
+
+function normalizePdfBuffer(value) {
+  if (!value) return null
+
+  if (Buffer.isBuffer(value)) {
+    return value
+  }
+
+  if (value?.type === "Buffer" && Array.isArray(value.data)) {
+    return Buffer.from(value.data)
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const clean = value.replace(/^data:application\/pdf;base64,/, "")
+      const buffer = Buffer.from(clean, "base64")
+      if (buffer.length) return buffer
+    } catch (_error) {
+      return null
+    }
+  }
+
+  return null
+}
+
+function extractDirectPdfBuffer(secondVia) {
+  const candidates = [
+    secondVia?.pdfBuffer,
+    secondVia?.buffer,
+    secondVia?.documentBuffer,
+    secondVia?.arquivo?.buffer,
+    secondVia?.pdf?.buffer,
+    secondVia?.body,
+    secondVia?.data
+  ]
+
+  for (const item of candidates) {
+    const buffer = normalizePdfBuffer(item)
+    if (buffer && buffer.length) {
+      return buffer
+    }
+  }
+
+  return null
+}
+
+function extractPdfUrl(secondVia) {
+  const candidates = [
+    secondVia?.pdfUrl,
+    secondVia?.pdf,
+    secondVia?.urlPdf,
+    secondVia?.linkPdf,
+    secondVia?.linkPDF,
+    secondVia?.arquivo?.url,
+    secondVia?.arquivo?.pdfUrl,
+    secondVia?.parcela?.pdf,
+    secondVia?.parcela?.pdfUrl,
+    secondVia?.parcela?.linkPDF,
+    secondVia?.boleto?.pdf,
+    secondVia?.boleto?.pdfUrl
+  ]
+
+  for (const item of candidates) {
+    if (typeof item === "string" && /^https?:\/\//i.test(item.trim())) {
+      return item.trim()
+    }
+  }
+
+  return ""
+}
+
+function resolveParcelaId(secondVia) {
+  return pickFirstFilled(
+    secondVia?.parcela?.id,
+    secondVia?.parcelaId,
+    secondVia?.idParcela,
+    secondVia?.boleto?.parcelaId
+  )
+}
+
+function resolveNossoNumero(secondVia) {
+  return pickFirstFilled(
+    secondVia?.nossoNumero,
+    secondVia?.parcela?.nossoNumero,
+    secondVia?.numeroBoleto,
+    secondVia?.parcela?.numeroBoleto,
+    secondVia?.boleto?.nossoNumero
+  )
+}
+
+function filenameFromUrl(url, fallback) {
+  try {
+    const pathname = new URL(url).pathname
+    const basename = path.basename(pathname || "")
+    if (basename && basename !== "/") return basename
+  } catch (_error) {}
+
+  return fallback
+}
+
+function normalizeDownloadedPdf(pdf, fallbackFilename) {
+  if (!pdf) return null
+
+  const buffer =
+    extractDirectPdfBuffer(pdf) ||
+    normalizePdfBuffer(pdf?.buffer) ||
+    normalizePdfBuffer(pdf?.pdfBuffer) ||
+    normalizePdfBuffer(pdf?.body) ||
+    normalizePdfBuffer(pdf?.data)
+
+  if (!buffer || !buffer.length) {
+    return null
+  }
+
+  return {
+    buffer,
+    filename: pickFirstFilled(pdf?.filename, pdf?.fileName, fallbackFilename),
+    mimeType: pickFirstFilled(pdf?.mimeType, pdf?.contentType, "application/pdf")
+  }
+}
+
+async function downloadPdfBufferFromUrl(pdfUrl) {
+  const resp = await axios.get(pdfUrl, {
+    responseType: "arraybuffer",
+    timeout: DEFAULT_TIMEOUT,
+    validateStatus: () => true
+  })
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Falha ao baixar PDF por URL (${resp.status})`)
+  }
+
+  const buffer = Buffer.from(resp.data || [])
+  if (!buffer.length) {
+    throw new Error("PDF baixado por URL veio vazio")
+  }
+
+  return buffer
+}
+
+async function buildPdfPayloadFromSecondVia(secondVia, prefix = "boleto") {
+  if (!secondVia) {
+    console.error("[PAGSCHOOL][buildPdfPayloadFromSecondVia] secondVia vazio")
+    return null
+  }
+
+  const parcelaId = resolveParcelaId(secondVia)
+  const nossoNumero = resolveNossoNumero(secondVia)
+  const pdfUrl = extractPdfUrl(secondVia)
+  const fallbackFilename = `${prefix}-${parcelaId || nossoNumero || Date.now()}.pdf`
+
+  const directBuffer = extractDirectPdfBuffer(secondVia)
+  if (directBuffer && directBuffer.length) {
+    return {
+      buffer: directBuffer,
+      filename: fallbackFilename,
+      mimeType: "application/pdf"
+    }
+  }
+
+  if (parcelaId && typeof baixarPdfParcela === "function") {
+    try {
+      const pdf = await baixarPdfParcela(parcelaId, nossoNumero)
+      const normalized = normalizeDownloadedPdf(pdf, fallbackFilename)
+
+      if (normalized) {
+        return normalized
+      }
+
+      console.error("[PAGSCHOOL][buildPdfPayloadFromSecondVia] baixarPdfParcela retornou sem buffer válido", {
+        parcelaId,
+        nossoNumero
+      })
+    } catch (error) {
+      console.error(
+        "[PAGSCHOOL][buildPdfPayloadFromSecondVia] erro ao baixar por parcela:",
+        error?.response?.data || error
+      )
+    }
+  }
+
+  if (pdfUrl) {
+    try {
+      const buffer = await downloadPdfBufferFromUrl(pdfUrl)
+
+      return {
+        buffer,
+        filename: filenameFromUrl(pdfUrl, fallbackFilename),
+        mimeType: "application/pdf"
+      }
+    } catch (error) {
+      console.error(
+        "[PAGSCHOOL][buildPdfPayloadFromSecondVia] erro ao baixar por URL:",
+        error?.response?.data || error
+      )
+    }
+  }
+
+  console.error("[PAGSCHOOL][buildPdfPayloadFromSecondVia] não consegui montar o PDF", {
+    parcelaId,
+    nossoNumero,
+    temPdfUrl: Boolean(pdfUrl),
+    keys: Object.keys(secondVia || {})
+  })
+
+  return null
+}
+
 async function obterSegundaViaPorCpf(cpf) {
   const aluno = await buscarAlunoPorCpf(cpf, { strictAuth: true })
 
@@ -1324,6 +1547,7 @@ async function obterSegundaViaPorCpf(cpf) {
       aluno: null,
       contract: null,
       parcela: null,
+      parcelaId: "",
       nossoNumero: "",
       linhaDigitavel: "",
       pdfUrl: ""
@@ -1337,6 +1561,7 @@ async function obterSegundaViaPorCpf(cpf) {
       aluno,
       contract: null,
       parcela: null,
+      parcelaId: "",
       nossoNumero: "",
       linhaDigitavel: "",
       pdfUrl: ""
@@ -1363,6 +1588,7 @@ async function obterSegundaViaPorCpf(cpf) {
     aluno,
     contract: contratos[0] || null,
     parcela: null,
+    parcelaId: "",
     nossoNumero: "",
     linhaDigitavel: "",
     pdfUrl: ""
@@ -1452,5 +1678,6 @@ module.exports = {
   obterSegundaViaPorCpf,
   criarMatriculaComCarne,
   gerarBoletoParcela,
-  baixarPdfParcela
+  baixarPdfParcela,
+  buildPdfPayloadFromSecondVia
 }
