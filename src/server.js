@@ -7,13 +7,19 @@ const cors = require("cors")
 const helmet = require("helmet")
 const morgan = require("morgan")
 
-const { PORT, META_VERIFY_TOKEN, INTERNAL_LEAD_NOTIFY_PHONE: CONFIG_INTERNAL_LEAD_NOTIFY_PHONE } = require("./config")
-const { sendText, sendDocument } = require("./services/meta")
+const {
+  PORT,
+  META_VERIFY_TOKEN,
+  INTERNAL_LEAD_NOTIFY_PHONE: CONFIG_INTERNAL_LEAD_NOTIFY_PHONE
+} = require("./config")
+
+const { sendText, sendDocumentBuffer } = require("./services/meta")
 const { askAI } = require("./services/openai")
 const {
   obterSegundaViaPorCpf,
   criarMatriculaComCarne,
-  baixarPdfParcela
+  baixarPdfParcela,
+  buildPdfPayloadFromSecondVia
 } = require("./services/pagschool")
 const { getConversation } = require("./crm/conversations")
 const sales = require("./sales/salesFlow")
@@ -48,11 +54,14 @@ const DEFAULT_PAYMENT_PLAN = {
   installments: 12,
   installmentValue: 80
 }
+
 const DEFAULT_PIX_CASH_VALUE = 550
+
 const INTERNAL_LEAD_NOTIFY_PHONE =
   CONFIG_INTERNAL_LEAD_NOTIFY_PHONE ||
   process.env.INTERNAL_LEAD_NOTIFY_PHONE ||
   "13981484410"
+
 const INTERNAL_LEAD_FALLBACK_FILE = path.join(process.cwd(), "internal-lead-queue.json")
 
 const app = express()
@@ -630,6 +639,7 @@ function enqueueInternalLeadFallback(convo = {}, sourcePhone = "", reason = "") 
     const phone =
       String(convo.phone || "").trim() ||
       String(extractPhoneFromWhatsApp(sourcePhone) || "").trim()
+
     const queueItem = {
       queuedAt: new Date().toISOString(),
       reason: String(reason || "").trim(),
@@ -860,7 +870,7 @@ async function finalizeCarneEnrollment(convo, sourcePhone = "") {
       nomeCurso: convo.course,
       dueDay: dueDayNumber
     })
-  } catch (error) {
+  } catch (_error) {
     await notifyInternalLead(convo, sourcePhone)
     convo.step = "offer_transition"
 
@@ -899,14 +909,15 @@ Assim que as parcelas estiverem disponíveis, a equipe poderá seguir com o envi
     }
   }
 
+  const pdfPayload = await buildPdfPayloadFromSecondVia(created.secondVia, "carne")
+
   return {
     text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.
 
 ${buildSecondViaText(created.secondVia)}`,
-    documentUrl: created.secondVia?.pdfUrl || "",
-    filename: created.secondVia?.nossoNumero
-      ? `carne-${created.secondVia.nossoNumero}.pdf`
-      : "carne.pdf",
+    documentBuffer: pdfPayload?.buffer || null,
+    filename: pdfPayload?.filename || "carne.pdf",
+    mimeType: pdfPayload?.mimeType || "application/pdf",
     caption: "Segue o PDF do seu carnê."
   }
 }
@@ -927,7 +938,11 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
   if (nextData) {
     convo.step = nextData.step
     return {
-      text: `Perfeito 😊\n\nPara emitir seu boleto único, preciso concluir alguns dados de cadastro.\n\n${nextData.prompt}`
+      text: `Perfeito 😊
+
+Para emitir seu boleto único, preciso concluir alguns dados de cadastro.
+
+${nextData.prompt}`
     }
   }
 
@@ -958,13 +973,16 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
       descontoAdimplencia: 0,
       descontoAdimplenciaValorFixo: null
     })
-  } catch (error) {
+  } catch (_error) {
     await notifyInternalLead(convo, sourcePhone, { force: true })
     convo.step = "post_sale"
     convo.paymentTeaserShown = false
 
     return {
-      text: `Perfeito 😊\n\nTive uma instabilidade para emitir o boleto automaticamente agora, mas seus dados já ficaram registrados.\nNossa equipe vai acompanhar e concluir a emissão com prioridade.`
+      text: `Perfeito 😊
+
+Tive uma instabilidade para emitir o boleto automaticamente agora, mas seus dados já ficaram registrados.
+Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
     }
   }
 
@@ -978,22 +996,32 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
 
   if (created?.error) {
     return {
-      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do boleto.\n\nMotivo: ${created.error}\n\nSe quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final da emissão.`
+      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do boleto.
+
+Motivo: ${created.error}
+
+Se quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final da emissão.`
     }
   }
 
   if (created?.carnePendente || !created?.secondVia?.parcela) {
     return {
-      text: `Perfeito 😊\n\nSua matrícula foi criada, mas o boleto ainda está sendo processado pela plataforma.\nAssim que a emissão for concluída, a equipe poderá seguir com o envio.`
+      text: `Perfeito 😊
+
+Sua matrícula foi criada, mas o boleto ainda está sendo processado pela plataforma.
+Assim que a emissão for concluída, a equipe poderá seguir com o envio.`
     }
   }
 
+  const pdfPayload = await buildPdfPayloadFromSecondVia(created.secondVia, "boleto")
+
   return {
-    text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.\n\n${buildSecondViaText(created.secondVia)}`,
-    documentUrl: created.secondVia?.pdfUrl || "",
-    filename: created.secondVia?.nossoNumero
-      ? `boleto-${created.secondVia.nossoNumero}.pdf`
-      : "boleto.pdf",
+    text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.
+
+${buildSecondViaText(created.secondVia)}`,
+    documentBuffer: pdfPayload?.buffer || null,
+    filename: pdfPayload?.filename || "boleto.pdf",
+    mimeType: pdfPayload?.mimeType || "application/pdf",
     caption: "Segue o PDF do seu boleto."
   }
 }
@@ -1332,12 +1360,13 @@ async function processMessage(phone, text) {
       convo.step = "existing_student_done"
       convo.paymentTeaserShown = false
 
+      const pdfPayload = await buildPdfPayloadFromSecondVia(secondVia, "carne")
+
       return {
         text: buildSecondViaText(secondVia),
-        documentUrl: secondVia?.pdfUrl || "",
-        filename: secondVia?.nossoNumero
-          ? `carne-${secondVia.nossoNumero}.pdf`
-          : "carne.pdf",
+        documentBuffer: pdfPayload?.buffer || null,
+        filename: pdfPayload?.filename || "carne.pdf",
+        mimeType: pdfPayload?.mimeType || "application/pdf",
         caption: "Segue a sua segunda via em PDF."
       }
     }
@@ -1360,6 +1389,7 @@ async function processMessage(phone, text) {
       const courseInfo =
         findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name) ||
         buildFallbackCourseInfoByName(detectedCourse.name)
+
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
 
@@ -1478,10 +1508,7 @@ async function processMessage(phone, text) {
     }
 
     if (convo.step === "offer_transition") {
-      if (
-        sales.isAffirmative(text) ||
-        sales.detectCloseMoment(text)
-      ) {
+      if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
         convo.step = "payment_choice"
         convo.paymentTeaserShown = false
         return { text: buildPaymentChoiceMessage(convo.course) }
@@ -1848,22 +1875,63 @@ app.post("/meta/webhook", async (req, res) => {
     const response = await processMessage(phone, text)
 
     if (response?.text) {
-      await sendText(phone, response.text)
+      try {
+        await sendText(phone, response.text)
+      } catch (error) {
+        console.error("[META][WEBHOOK][TEXT] erro ao enviar texto:", error?.response?.data || error)
+      }
     }
 
-    if (response?.documentUrl) {
-      await sendDocument(
-        phone,
-        response.documentUrl,
-        response.filename,
-        response.caption
-      )
+    if (response?.documentBuffer) {
+      try {
+        const normalizedBuffer = Buffer.isBuffer(response.documentBuffer)
+          ? response.documentBuffer
+          : response.documentBuffer?.type === "Buffer" && Array.isArray(response.documentBuffer.data)
+            ? Buffer.from(response.documentBuffer.data)
+            : null
+
+        if (!normalizedBuffer || !normalizedBuffer.length) {
+          console.error("[META][WEBHOOK][DOC] documentBuffer inválido:", {
+            filename: response.filename,
+            mimeType: response.mimeType
+          })
+        } else {
+          console.log("[META][WEBHOOK][DOC] enviando documento:", {
+            phone,
+            filename: response.filename || "documento.pdf",
+            mimeType: response.mimeType || "application/pdf",
+            bytes: normalizedBuffer.length
+          })
+
+          await sendDocumentBuffer(
+            phone,
+            normalizedBuffer,
+            response.filename || "documento.pdf",
+            response.caption || "",
+            response.mimeType || "application/pdf"
+          )
+        }
+      } catch (error) {
+        console.error("[META][WEBHOOK][DOC] erro ao enviar documento:", error?.response?.data || error)
+
+        try {
+          await sendText(
+            phone,
+            "Eu consegui gerar o seu PDF, mas houve uma falha no envio agora. Vou reenviar em seguida."
+          )
+        } catch (notifyError) {
+          console.error(
+            "[META][WEBHOOK][DOC][FALLBACK_TEXT] erro ao avisar falha:",
+            notifyError?.response?.data || notifyError
+          )
+        }
+      }
     }
 
     return res.sendStatus(200)
   } catch (error) {
-    console.error("Erro no webhook da Meta:", error)
-    return res.sendStatus(200)
+    console.error("Erro no webhook da Meta:", error?.response?.data || error)
+    return res.sendStatus(500)
   }
 })
 
