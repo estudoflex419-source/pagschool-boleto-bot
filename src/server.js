@@ -429,6 +429,14 @@ Assim que o pagamento do carnê for confirmado, nossa equipe segue com a libera�
 Se quiser, eu continuo te ajudando por aqui.`
     }
 
+    if (convo.payment === "Boleto à vista") {
+      return `Perfeito 😊
+
+Assim que o pagamento do boleto for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
+
+Se você já pagou, pode me enviar o comprovante por aqui.`
+    }
+
     return `Perfeito 😊
 
 Assim que o pagamento for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
@@ -464,8 +472,9 @@ Se surgir qualquer dúvida, pode me chamar por aqui.`
 
 function buildInternalLeadNotificationText(convo = {}) {
   const payment = String(convo.payment || "").trim() || "não informado"
+  const normalizedPayment = normalize(payment)
   const day =
-    normalize(payment) === "carne"
+    normalizedPayment === "carne" || normalizedPayment === "boleto a vista"
       ? String(convo.dueDay || convo.deferredPaymentDay || "").trim() || "não informado"
       : "não se aplica"
 
@@ -725,6 +734,94 @@ ${buildSecondViaText(created.secondVia)}`,
       ? `carne-${created.secondVia.nossoNumero}.pdf`
       : "carne.pdf",
     caption: "Segue o PDF do seu carnê."
+  }
+}
+
+async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
+  const dueDayNumber = Number(convo.dueDay || convo.deferredPaymentDay || 0)
+
+  if (!dueDayNumber || dueDayNumber < 1 || dueDayNumber > 28) {
+    convo.step = "collecting_due_day"
+    return { text: sales.askDueDay() }
+  }
+
+  convo.dueDay = dueDayNumber
+  convo.payment = "Boleto à vista"
+  await notifyInternalLead(convo, sourcePhone, { force: true })
+
+  let created = null
+
+  try {
+    created = await criarMatriculaComCarne({
+      cpf: convo.cpf,
+      telefoneCelular: convo.phone || "",
+      nomeAluno: convo.name,
+      dataNascimento: convo.birthDate,
+      email: convo.email,
+      uf: convo.state,
+      genero: convo.gender,
+      cep: convo.cep,
+      logradouro: convo.street,
+      enderecoComplemento: convo.complement,
+      bairro: convo.neighborhood,
+      local: convo.city,
+      numero: convo.number,
+      nomeCurso: convo.course,
+      dueDay: dueDayNumber,
+      quantidadeParcelas: 1,
+      parcelas: 1,
+      valorParcela: DEFAULT_PIX_CASH_VALUE,
+      descontoAdimplencia: 0,
+      descontoAdimplenciaValorFixo: null
+    })
+  } catch (error) {
+    await notifyInternalLead(convo, sourcePhone)
+    convo.step = "offer_transition"
+
+    return {
+      text: `Perfeito 😊
+
+Tive uma instabilidade para emitir o boleto automaticamente agora, mas seus dados já ficaram registrados.
+Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
+    }
+  }
+
+  convo.step = "post_sale"
+  convo.alunoId = created?.aluno?.id || null
+  convo.contratoId = created?.contrato?.id || null
+  convo.parcelaId = created?.secondVia?.parcela?.id || null
+  convo.nossoNumero = created?.secondVia?.nossoNumero || ""
+  convo.paymentTeaserShown = false
+  await notifyInternalLead(convo, sourcePhone)
+
+  if (created?.error) {
+    return {
+      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do boleto.
+
+Motivo: ${created.error}
+
+Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final da emissão.`
+    }
+  }
+
+  if (created?.carnePendente || !created?.secondVia?.parcela) {
+    return {
+      text: `Perfeito 😊
+
+Sua matrícula foi criada, mas o boleto ainda está sendo processado pela plataforma.
+Assim que a emissão for concluída, a equipe poderá seguir com o envio.`
+    }
+  }
+
+  return {
+    text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.
+
+${buildSecondViaText(created.secondVia)}`,
+    documentUrl: created.secondVia?.pdfUrl || "",
+    filename: created.secondVia?.nossoNumero
+      ? `boleto-${created.secondVia.nossoNumero}.pdf`
+      : "boleto.pdf",
+    caption: "Segue o PDF do seu boleto."
   }
 }
 
@@ -1309,7 +1406,7 @@ ${needsCourse ? "Me envie o nome do curso, por favor." : "Me envie seu nome comp
 
       convo.deferredPaymentDay = String(preferredDay)
       convo.dueDay = preferredDay
-      convo.payment = "Carnê"
+      convo.payment = "Boleto à vista"
       convo.phone = convo.phone || extractPhoneFromWhatsApp(phone) || ""
       await notifyInternalLead(convo, phone)
 
@@ -1325,7 +1422,7 @@ Para emitir o boleto, me confirme primeiro o curso que você quer fazer.`
 
       const nextData = getNextEnrollmentDataPrompt(convo)
       if (!nextData) {
-        return await finalizeCarneEnrollment(convo, phone)
+        return await finalizeDeferredBoletoEnrollment(convo, phone)
       }
 
       convo.step = nextData.step
@@ -1500,6 +1597,19 @@ ${nextData.prompt}`
         return { text: sales.askDueDay() }
       }
 
+      if (convo.payment === "Boleto à vista") {
+        if (convo.deferredPaymentDay && !convo.dueDay) {
+          convo.dueDay = Number(convo.deferredPaymentDay)
+        }
+
+        if (convo.dueDay) {
+          return await finalizeDeferredBoletoEnrollment(convo, phone)
+        }
+
+        convo.step = "collecting_due_day"
+        return { text: sales.askDueDay() }
+      }
+
       convo.step = "post_sale"
       await notifyInternalLead(convo, phone)
 
@@ -1518,6 +1628,11 @@ ${nextData.prompt}`
       }
 
       convo.dueDay = dueDay
+
+      if (convo.payment === "Boleto à vista") {
+        return await finalizeDeferredBoletoEnrollment(convo, phone)
+      }
+
       return await finalizeCarneEnrollment(convo, phone)
     }
 
