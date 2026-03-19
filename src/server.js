@@ -419,22 +419,108 @@ Pode me responder só com o número.`
 }
 
 function buildCourseListMessage() {
-  if (!COURSE_SITE_KNOWLEDGE.length) {
-    return `Perfeito 😊
+  return `Perfeito 😊 Pra eu te indicar melhor, me fala seu objetivo principal:
 
-${sales.showCourses()}`
+1 - Conseguir emprego mais rápido
+2 - Área da saúde
+3 - Administrativo / escritório
+4 - Beleza / estética
+5 - Tecnologia / internet
+6 - Já tenho um curso em mente
+
+Se preferir, também pode me mandar direto o nome do curso.`
+}
+
+function isLowContextReply(text = "") {
+  const t = normalizeLoose(text)
+
+  if (!t) return true
+  if (t.length <= 2) return true
+
+  const lowSignals = new Set([
+    "sim",
+    "ok",
+    "pode",
+    "quero",
+    "tenho",
+    "isso",
+    "aham",
+    "uhum",
+    "blz",
+    "beleza",
+    "nao",
+    "não"
+  ])
+
+  return lowSignals.has(t)
+}
+
+function buildGoalClarification(courseName = "") {
+  const label = String(courseName || "esse curso").trim()
+  return `Perfeito 😊 Pra eu te orientar melhor no ${label}, me diz em uma frase seu objetivo principal (ex.: emprego mais rápido, mudar de área ou melhorar currículo).`
+}
+
+function mapGoalReply(text = "") {
+  const t = normalizeLoose(text)
+  if (!t) return ""
+
+  if (
+    t.includes("emprego") ||
+    t.includes("trabalho") ||
+    t.includes("oportunidade") ||
+    t.includes("curriculo") ||
+    t.includes("currículo")
+  ) {
+    return "quero me preparar melhor para oportunidades de trabalho"
   }
 
-  const names = COURSE_SITE_KNOWLEDGE.map(course => course.title)
+  if (t.includes("renda")) {
+    return "quero melhorar minha renda com uma nova qualificação"
+  }
 
-  return `Perfeito 😊
+  if (t.includes("mudar de area") || t.includes("mudar de área")) {
+    return "quero mudar de área com mais segurança"
+  }
 
-Temos ${names.length} cursos profissionalizantes disponíveis.
+  return String(text || "").trim()
+}
 
-Cursos da instituição:
-- ${names.join("\n- ")}
+function buildExperienceClarification(courseName = "") {
+  const c = normalizeLoose(courseName)
 
-Se quiser, me fala seu objetivo (por exemplo: emprego rápido, tecnologia, saúde, área administrativa ou renda extra) que eu te indico os cursos ideais para o seu perfil.`
+  if (c.includes("ingles") || c.includes("inglês")) {
+    return "Entendi 😊 Você está começando do zero no inglês ou já tem alguma base?"
+  }
+
+  return "Entendi 😊 Você está começando do zero ou já teve algum contato com essa área?"
+}
+
+function mapExperienceReply(text = "") {
+  const t = normalizeLoose(text)
+  if (!t) return ""
+
+  if (
+    t.includes("zero") ||
+    t.includes("nenhuma") ||
+    t.includes("nunca") ||
+    t.includes("nao") ||
+    t.includes("não")
+  ) {
+    return "começando do zero"
+  }
+
+  if (
+    t.includes("ja") ||
+    t.includes("já") ||
+    t.includes("tenho") ||
+    t.includes("trabalho") ||
+    t.includes("experiencia") ||
+    t.includes("experiência")
+  ) {
+    return "já teve contato com a área"
+  }
+
+  return String(text || "").trim()
 }
 
 function formatMoney(value) {
@@ -1155,16 +1241,37 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
   const parts = []
 
-  parts.push(`Perfeito 😊 Vou te explicar de forma rápida sobre ${displayName}.`)
+  parts.push(`Perfeito 😊 ${displayName} pode ser uma boa opção para o seu momento.`)
 
-  if (normalizedCourseInfo) {
-    parts.push(buildCourseHighlights(normalizedCourseInfo))
+  if (normalizedCourseInfo?.summary) {
+    parts.push(String(normalizedCourseInfo.summary).trim().replace(/\.$/, "") + ".")
   } else {
-    parts.push("Esse curso é uma boa opção para quem quer aprender de forma prática, entender a rotina da área e se preparar melhor para oportunidades no mercado.")
+    parts.push("É uma formação prática, com certificado, pensada para quem quer aprender e se posicionar melhor no mercado.")
   }
 
-  parts.push(buildInstitutionalTrustBlock())
-  parts.push("Se quiser, no próximo passo eu já te explico valores e qual opção costuma ficar mais leve para começar.")
+  if (normalizedCourseInfo?.learns?.length) {
+    parts.push(`No curso você vai aprender temas como ${normalizedCourseInfo.learns.slice(0, 4).join(", ")}.`)
+  }
+
+  if (normalizedCourseInfo?.workload || normalizedCourseInfo?.duration) {
+    const workload = normalizedCourseInfo?.workload
+      ? `Carga horária: ${normalizedCourseInfo.workload}.`
+      : "Carga horária: não informada no documento."
+    const duration = normalizedCourseInfo?.duration
+      ? ` Duração média: ${normalizedCourseInfo.duration}.`
+      : ""
+    parts.push(`${workload}${duration}`)
+  }
+
+  if (normalizedCourseInfo?.market) {
+    parts.push(`Mercado de trabalho: ${normalizedCourseInfo.market}.`)
+  }
+
+  if (normalizedCourseInfo?.salary) {
+    parts.push(`Média salarial informada no documento: ${normalizedCourseInfo.salary}.`)
+  }
+
+  parts.push(`Me conta: o que você busca com ${displayName} neste momento?`)
 
   return parts.join("\n\n")
 }
@@ -1507,6 +1614,30 @@ async function processMessage(phone, text) {
     }
 
     if (convo.step === "course_selection") {
+      if (raw === "1") {
+        return { text: "Ótimo 😊 Para emprego rápido, alguns cursos que costumam chamar atenção são Administração, Operador de Caixa e Recepcionista Hospitalar.\n\nQual deles mais combina com você?" }
+      }
+
+      if (raw === "2") {
+        return { text: "Perfeito 😊 Na área da saúde, alguns cursos que costumam chamar bastante atenção são Agente de Saúde, Enfermagem e Farmácia.\n\nQual deles você quer entender melhor?" }
+      }
+
+      if (raw === "3") {
+        return { text: "Boa escolha 😊 Para administrativo / escritório, eu posso te indicar Administração, Contabilidade e Recursos Humanos.\n\nQual desses te interessou mais?" }
+      }
+
+      if (raw === "4") {
+        return { text: "Legal 😊 Em beleza / estética, os mais procurados costumam ser Barbeiro, Cabeleireiro e Massoterapia.\n\nQual deles você quer conhecer melhor?" }
+      }
+
+      if (raw === "5") {
+        return { text: "Perfeito 😊 Em tecnologia / internet, os que mais costumam chamar atenção são Informática, Designer Gráfico e Marketing Digital.\n\nQual deles você quer ver primeiro?" }
+      }
+
+      if (raw === "6") {
+        return { text: "Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te explico melhor." }
+      }
+
       if (courseInfoFromText) {
         convo.course = courseInfoFromText.title
         convo.step = "diagnosis_goal"
@@ -1514,17 +1645,29 @@ async function processMessage(phone, text) {
         return { text: buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText) }
       }
 
-      return { text: buildCourseListMessage() }
+      if (isLowContextReply(text)) {
+        return { text: buildCourseListMessage() }
+      }
+
+      return { text: "Me manda o nome do curso ou o número da opção que combina mais com o que você procura 😊" }
     }
 
     if (convo.step === "diagnosis_goal") {
-      convo.goal = text
+      if (isLowContextReply(text)) {
+        return { text: buildGoalClarification(convo.course) }
+      }
+
+      convo.goal = mapGoalReply(text)
       convo.step = "diagnosis_experience"
-      return { text: sales.askExperience(convo.course) }
+      return { text: buildExperienceClarification(convo.course) }
     }
 
     if (convo.step === "diagnosis_experience") {
-      convo.experience = text
+      if (isLowContextReply(text)) {
+        return { text: buildExperienceClarification(convo.course) }
+      }
+
+      convo.experience = mapExperienceReply(text)
       convo.step = "offer_transition"
       return { text: sales.buildValueConnection(convo) }
     }
