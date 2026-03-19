@@ -829,31 +829,6 @@ function getNextEnrollmentDataPrompt(convo = {}) {
   return null
 }
 
-function getNextDeferredBoletoDataPrompt(convo = {}) {
-  if (!String(convo.course || "").trim()) {
-    return {
-      step: "collecting_boleto_course",
-      prompt: "Me confirme o curso que voce quer para eu emitir o boleto unico."
-    }
-  }
-
-  if (!String(convo.name || "").trim()) {
-    return {
-      step: "collecting_name",
-      prompt: "Perfeito. Agora me envie seu nome completo."
-    }
-  }
-
-  if (!String(convo.cpf || "").trim()) {
-    return {
-      step: "collecting_cpf",
-      prompt: "Perfeito. Agora me envie seu CPF com 11 numeros."
-    }
-  }
-
-  return null
-}
-
 async function finalizeCarneEnrollment(convo, sourcePhone = "") {
   const dueDayNumber = Number(convo.dueDay || convo.deferredPaymentDay || 0)
 
@@ -948,25 +923,78 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
   convo.payment = "Boleto a vista"
   convo.phone = convo.phone || extractPhoneFromWhatsApp(sourcePhone) || ""
 
-  const nextData = getNextDeferredBoletoDataPrompt(convo)
+  const nextData = getNextEnrollmentDataPrompt(convo)
   if (nextData) {
     convo.step = nextData.step
-    return { text: nextData.prompt }
+    return {
+      text: `Perfeito 😊\n\nPara emitir seu boleto único, preciso concluir alguns dados de cadastro.\n\n${nextData.prompt}`
+    }
   }
 
-  const sent = await notifyInternalLead(convo, sourcePhone, { force: true })
+  await notifyInternalLead(convo, sourcePhone, { force: true })
+
+  let created = null
+
+  try {
+    created = await criarMatriculaComCarne({
+      cpf: convo.cpf,
+      telefoneCelular: convo.phone || "",
+      nomeAluno: convo.name,
+      dataNascimento: convo.birthDate,
+      email: convo.email,
+      uf: convo.state,
+      genero: convo.gender,
+      cep: convo.cep,
+      logradouro: convo.street,
+      enderecoComplemento: convo.complement,
+      bairro: convo.neighborhood,
+      local: convo.city,
+      numero: convo.number,
+      nomeCurso: convo.course,
+      dueDay: dueDayNumber,
+      quantidadeParcelas: 1,
+      parcelas: 1,
+      valorParcela: DEFAULT_PIX_CASH_VALUE,
+      descontoAdimplencia: 0,
+      descontoAdimplenciaValorFixo: null
+    })
+  } catch (error) {
+    await notifyInternalLead(convo, sourcePhone, { force: true })
+    convo.step = "post_sale"
+    convo.paymentTeaserShown = false
+
+    return {
+      text: `Perfeito 😊\n\nTive uma instabilidade para emitir o boleto automaticamente agora, mas seus dados já ficaram registrados.\nNossa equipe vai acompanhar e concluir a emissão com prioridade.`
+    }
+  }
 
   convo.step = "post_sale"
+  convo.alunoId = created?.aluno?.id || null
+  convo.contratoId = created?.contrato?.id || null
+  convo.parcelaId = created?.secondVia?.parcela?.id || null
+  convo.nossoNumero = created?.secondVia?.nossoNumero || ""
   convo.paymentTeaserShown = false
+  await notifyInternalLead(convo, sourcePhone, { force: true })
 
-  if (!sent) {
+  if (created?.error) {
     return {
-      text: `Perfeito.\n\nSeu pedido de boleto unico para o dia ${dueDayNumber} ja ficou registrado.\nAgora nossa equipe vai finalizar a emissao e te enviar pelos canais oficiais.`
+      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do boleto.\n\nMotivo: ${created.error}\n\nSe quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final da emissão.`
+    }
+  }
+
+  if (created?.carnePendente || !created?.secondVia?.parcela) {
+    return {
+      text: `Perfeito 😊\n\nSua matrícula foi criada, mas o boleto ainda está sendo processado pela plataforma.\nAssim que a emissão for concluída, a equipe poderá seguir com o envio.`
     }
   }
 
   return {
-    text: `Perfeito.\n\nDia ${dueDayNumber} ficou combinado para o boleto unico a vista.\nSeus dados ja foram encaminhados para a equipe responsavel e vamos seguir com a emissao.`
+    text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.\n\n${buildSecondViaText(created.secondVia)}`,
+    documentUrl: created.secondVia?.pdfUrl || "",
+    filename: created.secondVia?.nossoNumero
+      ? `boleto-${created.secondVia.nossoNumero}.pdf`
+      : "boleto.pdf",
+    caption: "Segue o PDF do seu boleto."
   }
 }
 
@@ -1528,7 +1556,7 @@ Para eu gerar seu boleto único à vista, me confirme primeiro o curso que você
         }
       }
 
-      const nextData = getNextDeferredBoletoDataPrompt(convo)
+      const nextData = getNextEnrollmentDataPrompt(convo)
 
       if (!nextData) {
         return await finalizeDeferredBoletoEnrollment(convo, phone)
@@ -1578,7 +1606,7 @@ ${nextData.prompt}`
       }
 
       convo.course = boletoCourseInfo.title
-      const nextData = getNextDeferredBoletoDataPrompt(convo)
+      const nextData = getNextEnrollmentDataPrompt(convo)
 
       if (!nextData) {
         return await finalizeDeferredBoletoEnrollment(convo, phone)
@@ -1623,7 +1651,8 @@ ${nextData.prompt}`
       }
 
       if (convo.payment === "Boleto a vista") {
-        return await finalizeDeferredBoletoEnrollment(convo, phone)
+        convo.step = "collecting_birth"
+        return { text: sales.askBirthDate() }
       }
 
       convo.step = "collecting_birth"
