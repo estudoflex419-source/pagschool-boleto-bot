@@ -31,14 +31,14 @@ function getConversation(phone) {
       nossoNumero: "",
       internalLeadNotified: false,
       internalLeadNotifiedAt: "",
-      internalLeadNotifyKey: ""
+      internalLeadNotifyKey: "",
+      lastUserText: "",
+      lastAssistantText: "",
+      lastStepWhenAnswered: ""
     })
   }
 
   return conversations.get(phone)
 }
-
-module.exports = { getConversation }
-
 
 module.exports = { getConversation }
