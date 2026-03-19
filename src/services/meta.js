@@ -1,237 +1,251 @@
+// src/services/meta.js
 const axios = require("axios")
-const {
-  META_PHONE_ID,
-  META_TOKEN,
-  META_GRAPH_VERSION
-} = require("../config")
+const FormData = require("form-data")
+const config = require("../config")
 
-const MAX_TEXT_LENGTH = 4096
-const MAX_CAPTION_LENGTH = 1024
-const MAX_FILENAME_LENGTH = 240
+const META_PHONE_ID = String(
+  config.META_PHONE_ID ||
+    config.META_PHONE_NUMBER_ID ||
+    process.env.META_PHONE_ID ||
+    process.env.META_PHONE_NUMBER_ID ||
+    ""
+).trim()
 
-function compact(value) {
-  return String(value || "").trim()
-}
+const META_TOKEN = String(
+  config.META_TOKEN ||
+    config.META_ACCESS_TOKEN ||
+    process.env.META_TOKEN ||
+    process.env.META_ACCESS_TOKEN ||
+    ""
+).trim()
 
-function normalizePhone(value) {
-  let digits = String(value || "").replace(/\D/g, "")
+const META_GRAPH_VERSION = String(
+  config.META_GRAPH_VERSION ||
+    config.META_API_VERSION ||
+    process.env.META_GRAPH_VERSION ||
+    process.env.META_API_VERSION ||
+    "v22.0"
+).trim()
 
-  if (!digits) return ""
+const GRAPH_BASE = `https://graph.facebook.com/${META_GRAPH_VERSION}`
 
-  if (digits.startsWith("00")) {
-    digits = digits.slice(2)
+function ensureMetaConfig() {
+  if (!META_PHONE_ID) {
+    throw new Error("META_PHONE_ID / META_PHONE_NUMBER_ID não configurado")
   }
 
-  if (digits.startsWith("0") && !digits.startsWith("055")) {
-    digits = digits.replace(/^0+/, "")
-  }
-
-  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
-    return digits
-  }
-
-  if (digits.length === 10 || digits.length === 11) {
-    return `55${digits}`
-  }
-
-  return digits
-}
-
-function ensureValidPhone(phone) {
-  const normalized = normalizePhone(phone)
-
-  if (!normalized || normalized.length < 12 || normalized.length > 13) {
-    throw new Error(`Telefone inválido para envio na Meta: ${phone}`)
-  }
-
-  return normalized
-}
-
-function ensureValidUrl(url) {
-  const value = compact(url)
-
-  if (!/^https?:\/\//i.test(value)) {
-    throw new Error(`URL de documento inválida: ${value}`)
-  }
-
-  return value
-}
-
-function sanitizeText(text) {
-  return String(text || "")
-    .replace(/\r/g, "")
-    .replace(/\u0000/g, "")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-}
-
-function splitTextIntoChunks(text, maxLength = MAX_TEXT_LENGTH) {
-  const clean = sanitizeText(text)
-
-  if (!clean) return []
-
-  if (clean.length <= maxLength) {
-    return [clean]
-  }
-
-  const chunks = []
-  let remaining = clean
-
-  while (remaining.length > maxLength) {
-    let slice = remaining.slice(0, maxLength)
-    let breakIndex = Math.max(
-      slice.lastIndexOf("\n\n"),
-      slice.lastIndexOf("\n"),
-      slice.lastIndexOf(". "),
-      slice.lastIndexOf("! "),
-      slice.lastIndexOf("? "),
-      slice.lastIndexOf("; "),
-      slice.lastIndexOf(", "),
-      slice.lastIndexOf(" ")
-    )
-
-    if (breakIndex < Math.floor(maxLength * 0.45)) {
-      breakIndex = maxLength
-    }
-
-    const part = remaining.slice(0, breakIndex).trim()
-    if (part) {
-      chunks.push(part)
-    }
-
-    remaining = remaining.slice(breakIndex).trim()
-  }
-
-  if (remaining) {
-    chunks.push(remaining)
-  }
-
-  return chunks
-}
-
-function buildMetaUrl() {
-  if (!META_GRAPH_VERSION || !META_PHONE_ID) {
-    throw new Error(
-      "Configuração Meta ausente. Defina META_PHONE_ID (ou PHONE_NUMBER_ID) e META_GRAPH_VERSION."
-    )
-  }
-
-  return `https://graph.facebook.com/${META_GRAPH_VERSION}/${META_PHONE_ID}/messages`
-}
-
-function buildHeaders() {
   if (!META_TOKEN) {
-    throw new Error("Configuração Meta ausente. Defina META_TOKEN (ou WHATSAPP_TOKEN).")
+    throw new Error("META_TOKEN / META_ACCESS_TOKEN não configurado")
+  }
+}
+
+function normalizeBuffer(input) {
+  if (!input) return null
+
+  if (Buffer.isBuffer(input)) {
+    return input
   }
 
+  if (input?.type === "Buffer" && Array.isArray(input.data)) {
+    return Buffer.from(input.data)
+  }
+
+  if (typeof input === "string" && input.trim()) {
+    try {
+      const clean = input.replace(/^data:application\/pdf;base64,/, "")
+      const buf = Buffer.from(clean, "base64")
+      if (buf.length) return buf
+    } catch (_) {
+      return null
+    }
+  }
+
+  return null
+}
+
+function formatAxiosError(error) {
   return {
-    Authorization: `Bearer ${META_TOKEN}`,
-    "Content-Type": "application/json"
+    message: error?.message,
+    status: error?.response?.status,
+    data: error?.response?.data
   }
 }
 
-function safeLogData(value) {
-  try {
-    return JSON.stringify(value)
-  } catch (_error) {
-    return String(value || "")
+async function sendText(to, body) {
+  ensureMetaConfig()
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: String(to),
+    type: "text",
+    text: {
+      body: String(body || "")
+    }
   }
-}
 
-async function postToMeta(payload, label) {
-  const url = buildMetaUrl()
-
-  const resp = await axios.post(url, payload, {
-    headers: buildHeaders(),
-    timeout: 30000,
-    validateStatus: () => true
-  })
-
-  console.log(`[${label} STATUS]`, resp.status)
-  console.log(`[${label} DATA]`, safeLogData(resp.data))
+  const resp = await axios.post(
+    `${GRAPH_BASE}/${META_PHONE_ID}/messages`,
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${META_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      timeout: 60000,
+      validateStatus: () => true
+    }
+  )
 
   if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(`${label} falhou (${resp.status}): ${safeLogData(resp.data)}`)
+    console.error("[META][sendText] erro ao enviar texto:", {
+      to,
+      status: resp.status,
+      data: resp.data
+    })
+    throw new Error(`Falha ao enviar texto pela Meta (${resp.status})`)
   }
+
+  console.log("[META][sendText] enviado com sucesso:", {
+    to,
+    status: resp.status,
+    messageId: resp.data?.messages?.[0]?.id || null
+  })
 
   return resp.data
 }
 
-function buildTextPayload(phone, text) {
-  return {
-    messaging_product: "whatsapp",
-    to: ensureValidPhone(phone),
-    type: "text",
-    text: {
-      preview_url: false,
-      body: sanitizeText(text)
+async function uploadDocumentBuffer(buffer, filename, mimeType = "application/pdf") {
+  ensureMetaConfig()
+
+  const normalized = normalizeBuffer(buffer)
+
+  if (!normalized || !normalized.length) {
+    throw new Error("Buffer do documento inválido ou vazio")
+  }
+
+  const form = new FormData()
+  form.append("messaging_product", "whatsapp")
+  form.append("file", normalized, {
+    filename: filename || "documento.pdf",
+    contentType: mimeType || "application/pdf"
+  })
+
+  const resp = await axios.post(
+    `${GRAPH_BASE}/${META_PHONE_ID}/media`,
+    form,
+    {
+      headers: {
+        Authorization: `Bearer ${META_TOKEN}`,
+        ...form.getHeaders()
+      },
+      timeout: 120000,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      validateStatus: () => true
     }
+  )
+
+  if (resp.status < 200 || resp.status >= 300) {
+    console.error("[META][uploadDocumentBuffer] erro no upload:", {
+      status: resp.status,
+      data: resp.data,
+      filename,
+      mimeType,
+      bytes: normalized.length
+    })
+    throw new Error(`Falha no upload do documento para a Meta (${resp.status})`)
   }
+
+  const mediaId = resp.data?.id
+
+  if (!mediaId) {
+    console.error("[META][uploadDocumentBuffer] resposta sem media id:", resp.data)
+    throw new Error("A Meta não retornou media id no upload do documento")
+  }
+
+  console.log("[META][uploadDocumentBuffer] upload concluído:", {
+    mediaId,
+    filename,
+    mimeType,
+    bytes: normalized.length
+  })
+
+  return mediaId
 }
 
-async function sendText(phone, text) {
-  const chunks = splitTextIntoChunks(text)
+async function sendDocumentByMediaId(to, mediaId, filename, caption = "") {
+  ensureMetaConfig()
 
-  if (!chunks.length) {
-    return null
+  const documentPayload = {
+    id: mediaId,
+    filename: filename || "documento.pdf"
   }
 
-  const results = []
-
-  for (let i = 0; i < chunks.length; i += 1) {
-    const payload = buildTextPayload(phone, chunks[i])
-    const label = chunks.length > 1 ? `META_TEXT_${i + 1}` : "META_TEXT"
-    const result = await postToMeta(payload, label)
-    results.push(result)
+  if (caption) {
+    documentPayload.caption = String(caption)
   }
-
-  return results[results.length - 1] || null
-}
-
-async function sendDocument(phone, documentUrl, filename, caption) {
-  const safePhone = ensureValidPhone(phone)
-  const safeUrl = ensureValidUrl(documentUrl)
-  const safeFilename = compact(filename || "carne.pdf").slice(0, MAX_FILENAME_LENGTH) || "carne.pdf"
-  const safeCaption = sanitizeText(caption || "Segue o PDF.").slice(0, MAX_CAPTION_LENGTH)
 
   const payload = {
     messaging_product: "whatsapp",
-    to: safePhone,
+    to: String(to),
     type: "document",
-    document: {
-      link: safeUrl,
-      filename: safeFilename
+    document: documentPayload
+  }
+
+  const resp = await axios.post(
+    `${GRAPH_BASE}/${META_PHONE_ID}/messages`,
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${META_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      timeout: 60000,
+      validateStatus: () => true
     }
+  )
+
+  if (resp.status < 200 || resp.status >= 300) {
+    console.error("[META][sendDocumentByMediaId] erro ao enviar documento:", {
+      to,
+      status: resp.status,
+      data: resp.data,
+      mediaId,
+      filename
+    })
+    throw new Error(`Falha ao enviar documento pela Meta (${resp.status})`)
   }
 
-  if (safeCaption) {
-    payload.document.caption = safeCaption
-  }
+  console.log("[META][sendDocumentByMediaId] documento enviado:", {
+    to,
+    status: resp.status,
+    messageId: resp.data?.messages?.[0]?.id || null,
+    mediaId,
+    filename
+  })
 
+  return resp.data
+}
+
+async function sendDocumentBuffer(
+  to,
+  buffer,
+  filename,
+  caption = "",
+  mimeType = "application/pdf"
+) {
   try {
-    return await postToMeta(payload, "META_DOCUMENT")
+    const mediaId = await uploadDocumentBuffer(buffer, filename, mimeType)
+    return await sendDocumentByMediaId(to, mediaId, filename, caption)
   } catch (error) {
-    console.error("Erro ao enviar documento na Meta:", error?.message || error)
-
-    const fallbackText = [
-      safeCaption || "Perfeito 😊",
-      "Não consegui anexar o PDF diretamente no WhatsApp agora.",
-      `Segue o link para abrir o documento: ${safeUrl}`
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-
-    await sendText(safePhone, fallbackText)
-    return {
-      ok: false,
-      fallback: true,
-      documentUrl: safeUrl
-    }
+    console.error("[META][sendDocumentBuffer] falha geral:", formatAxiosError(error))
+    throw error
   }
 }
 
 module.exports = {
   sendText,
-  sendDocument
+  uploadDocumentBuffer,
+  sendDocumentByMediaId,
+  sendDocumentBuffer
 }
