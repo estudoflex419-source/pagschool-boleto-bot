@@ -1,4 +1,3 @@
-// src/services/meta.js
 const axios = require("axios")
 const FormData = require("form-data")
 const config = require("../config")
@@ -55,7 +54,7 @@ function normalizeBuffer(input) {
       const clean = input.replace(/^data:application\/pdf;base64,/, "")
       const buf = Buffer.from(clean, "base64")
       if (buf.length) return buf
-    } catch (_) {
+    } catch (_error) {
       return null
     }
   }
