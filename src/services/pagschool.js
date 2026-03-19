@@ -24,7 +24,9 @@ const DEFAULT_DESCONTO_ADIMPLENCIA = Number(process.env.DEFAULT_DESCONTO_ADIMPLE
 const DEFAULT_TIMEOUT = Number(process.env.PAGSCHOOL_TIMEOUT || 30000)
 const DEBUG = String(process.env.PAGSCHOOL_DEBUG || "").trim() === "1"
 
-const PAGSCHOOL_AUTH_SCHEME = String(CONFIG_AUTH_SCHEME || process.env.PAGSCHOOL_AUTH_SCHEME || "jwt")
+const PAGSCHOOL_AUTH_SCHEME = String(
+  CONFIG_AUTH_SCHEME || process.env.PAGSCHOOL_AUTH_SCHEME || "jwt"
+)
   .trim()
   .toLowerCase()
 
@@ -144,7 +146,7 @@ function buildNumeroContrato() {
 
 function buildPdfUrl(parcelaId, nossoNumero) {
   if (!PUBLIC_BASE || !parcelaId || !nossoNumero) return ""
-  return `${PUBLIC_BASE}/carne/pdf/${parcelaId}/${nossoNumero}`
+  return `${PUBLIC_BASE}/carne/pdf/${encodeURIComponent(parcelaId)}/${encodeURIComponent(nossoNumero)}`
 }
 
 function getDefaultPlan(nomeCurso) {
@@ -790,7 +792,12 @@ function buildContractPayload(input, alunoId) {
   const nomeCurso = String(input.nomeCurso || plan.nomeCurso || "CURSO").trim()
   const duracaoCurso = Number(input.duracaoCurso || plan.duracaoCurso || DEFAULT_DURACAO_CURSO)
   const valorParcela = Number(input.valorParcela || plan.valorParcela || DEFAULT_VALOR_PARCELA)
-  const parcelas = Number(input.quantidadeParcelas || input.parcelas || plan.quantidadeParcelas || DEFAULT_QUANTIDADE_PARCELAS)
+  const parcelas = Number(
+    input.quantidadeParcelas ||
+      input.parcelas ||
+      plan.quantidadeParcelas ||
+      DEFAULT_QUANTIDADE_PARCELAS
+  )
   const descontoAdimplenciaRaw =
     input.descontoAdimplencia !== undefined ? input.descontoAdimplencia : plan.descontoAdimplencia
   const descontoAdimplenciaValorFixoRaw =
@@ -979,6 +986,11 @@ function extractNossoNumero(parcela) {
   )
 }
 
+function is404Or405Error(error) {
+  const message = String(error?.message || error || "")
+  return message.includes("PagSchool 404") || message.includes("PagSchool 405")
+}
+
 async function gerarBoletoParcela(parcelaId) {
   const resp = await apiRequestWithFallbackMethods(
     ["post", "get"],
@@ -1011,18 +1023,26 @@ async function baixarPdfParcela(parcelaId, nossoNumero) {
 }
 
 async function atualizarParcela(payload) {
-  const resp = await apiRequestWithFallbackPaths("put", [
-    "/parcela-contrato/update",
-    "/parcelas-contrato/update"
-  ], payload)
+  const resp = await apiRequestWithFallbackPaths(
+    "put",
+    [
+      "/parcela-contrato/update",
+      "/parcelas-contrato/update"
+    ],
+    payload
+  )
   return resp.data
 }
 
 async function criarParcela(payload) {
-  const resp = await apiRequestWithFallbackPaths("post", [
-    "/parcela-contrato/create",
-    "/parcelas-contrato/create"
-  ], payload)
+  const resp = await apiRequestWithFallbackPaths(
+    "post",
+    [
+      "/parcela-contrato/create",
+      "/parcelas-contrato/create"
+    ],
+    payload
+  )
   return resp.data
 }
 
@@ -1038,15 +1058,23 @@ function buildDesiredSchedule(input) {
   const plan = getCoursePlan(input.nomeCurso)
   const dueDay = Math.min(Math.max(Number(input.dueDay || 1), 1), 28)
   const firstDate = buildFirstDueDate(dueDay)
+  const quantidadeParcelas = Number(
+    input.quantidadeParcelas ||
+      input.parcelas ||
+      plan.quantidadeParcelas ||
+      DEFAULT_QUANTIDADE_PARCELAS
+  )
+  const valorParcela = Number(input.valorParcela || plan.valorParcela || DEFAULT_VALOR_PARCELA)
+  const nomeCurso = String(input.nomeCurso || plan.nomeCurso || "CURSO").trim()
 
   const result = []
 
-  for (let i = 0; i < Number(plan.quantidadeParcelas || DEFAULT_QUANTIDADE_PARCELAS); i += 1) {
+  for (let i = 0; i < quantidadeParcelas; i += 1) {
     result.push({
       numeroParcela: i + 1,
-      valor: Number(plan.valorParcela || DEFAULT_VALOR_PARCELA),
+      valor: valorParcela,
       vencimento: addMonthsKeepingDay(firstDate, i, dueDay),
-      descricao: `${plan.nomeCurso} - Parcela ${i + 1}`
+      descricao: `${nomeCurso} - Parcela ${i + 1}`
     })
   }
 
@@ -1117,7 +1145,7 @@ async function normalizarParcelasDoContrato(alunoId, contratoId, input) {
     }
   }
 
-  await sleep(800)
+  await sleep(1200)
 
   const contratoFinal = await buscarContratoPorId(alunoId, contratoId)
 
@@ -1126,6 +1154,19 @@ async function normalizarParcelasDoContrato(alunoId, contratoId, input) {
   }
 
   return contratoFinal
+}
+
+async function recarregarParcelaDoContrato(alunoId, contratoId, parcelaId) {
+  const contrato = await buscarContratoPorId(alunoId, contratoId)
+  if (!contrato) return null
+
+  const exata = pickBestParcela(contrato, parcelaId)
+  if (!exata) return null
+
+  return {
+    contrato,
+    parcela: exata
+  }
 }
 
 function buildSecondViaResult(aluno, contract, parcela) {
@@ -1150,35 +1191,129 @@ function buildSecondViaResult(aluno, contract, parcela) {
   }
 }
 
-async function garantirBoletoDaParcela(parcela) {
-  let working = { ...parcela }
-  let nossoNumero = extractNossoNumero(working)
+async function garantirBoletoDaParcela(parcela, context = {}) {
+  const alunoId = context?.alunoId || null
+  const contratoId = context?.contratoId || null
 
-  if (!nossoNumero) {
-    const generated = await gerarBoletoParcela(parcela.id)
-    const extracted = extractBoletoFields(generated)
+  let working = { ...(parcela || {}) }
+  let lastError = null
 
-    working = {
-      ...working,
-      ...generated,
-      id: working.id || parcela.id,
-      nossoNumero: extracted.nossoNumero || working.nossoNumero || "",
-      numeroBoleto: extracted.linhaDigitavel || working.numeroBoleto || "",
-      linhaDigitavel: extracted.linhaDigitavel || working.linhaDigitavel || "",
-      emissaoSicrediJson: extracted.emissaoSicrediJson || working.emissaoSicrediJson || "",
-      pdfUrl: extracted.pdfUrl || working.pdfUrl || "",
-      linkPDF: extracted.pdfUrl || working.linkPDF || "",
-      urlPdf: extracted.pdfUrl || working.urlPdf || ""
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    let nossoNumero = extractNossoNumero(working)
+    let pdfUrl = String(
+      extractBoletoFields(working).pdfUrl ||
+        working?.pdfUrl ||
+        working?.linkPDF ||
+        working?.urlPdf ||
+        ""
+    )
+
+    if (nossoNumero) {
+      return {
+        ...working,
+        nossoNumero,
+        pdfUrl: pdfUrl || buildPdfUrl(working?.id, nossoNumero)
+      }
     }
 
-    nossoNumero = extractNossoNumero(working)
+    try {
+      const generated = await gerarBoletoParcela(working.id)
+      const extracted = extractBoletoFields(generated)
 
-    if (!nossoNumero) {
-      throw new Error("A PagSchool gerou a resposta do boleto, mas não retornou nossoNumero.")
+      working = {
+        ...working,
+        ...generated,
+        id: working.id || parcela.id,
+        nossoNumero: extracted.nossoNumero || working.nossoNumero || "",
+        numeroBoleto: extracted.linhaDigitavel || working.numeroBoleto || "",
+        linhaDigitavel: extracted.linhaDigitavel || working.linhaDigitavel || "",
+        emissaoSicrediJson: extracted.emissaoSicrediJson || working.emissaoSicrediJson || "",
+        pdfUrl: extracted.pdfUrl || working.pdfUrl || "",
+        linkPDF: extracted.pdfUrl || working.linkPDF || "",
+        urlPdf: extracted.pdfUrl || working.urlPdf || ""
+      }
+
+      nossoNumero = extractNossoNumero(working)
+      pdfUrl = String(
+        extractBoletoFields(working).pdfUrl ||
+          working?.pdfUrl ||
+          working?.linkPDF ||
+          working?.urlPdf ||
+          ""
+      )
+
+      if (nossoNumero) {
+        return {
+          ...working,
+          nossoNumero,
+          pdfUrl: pdfUrl || buildPdfUrl(working?.id, nossoNumero)
+        }
+      }
+    } catch (error) {
+      lastError = error
+      debugLog("Falha ao gerar boleto da parcela:", working?.id, error?.message || error)
+    }
+
+    if (alunoId && contratoId) {
+      try {
+        await sleep(1200)
+        const updated = await recarregarParcelaDoContrato(alunoId, contratoId, working?.id || parcela?.id)
+
+        if (updated?.parcela) {
+          working = {
+            ...updated.parcela
+          }
+
+          const updatedNossoNumero = extractNossoNumero(working)
+          const updatedPdfUrl = String(
+            extractBoletoFields(working).pdfUrl ||
+              working?.pdfUrl ||
+              working?.linkPDF ||
+              working?.urlPdf ||
+              ""
+          )
+
+          if (updatedNossoNumero) {
+            return {
+              ...working,
+              nossoNumero: updatedNossoNumero,
+              pdfUrl: updatedPdfUrl || buildPdfUrl(working?.id, updatedNossoNumero)
+            }
+          }
+        }
+      } catch (reloadError) {
+        debugLog("Falha ao recarregar parcela do contrato:", reloadError?.message || reloadError)
+      }
+    } else {
+      await sleep(1000)
+    }
+
+    if (lastError && !is404Or405Error(lastError)) {
+      break
     }
   }
 
-  return working
+  const finalNossoNumero = extractNossoNumero(working)
+  if (finalNossoNumero) {
+    return {
+      ...working,
+      nossoNumero: finalNossoNumero,
+      pdfUrl:
+        String(
+          extractBoletoFields(working).pdfUrl ||
+            working?.pdfUrl ||
+            working?.linkPDF ||
+            working?.urlPdf ||
+            ""
+        ) || buildPdfUrl(working?.id, finalNossoNumero)
+    }
+  }
+
+  if (lastError) {
+    throw lastError
+  }
+
+  throw new Error("A PagSchool ainda não retornou o boleto dessa parcela.")
 }
 
 async function obterSegundaViaPorCpf(cpf) {
@@ -1213,7 +1348,11 @@ async function obterSegundaViaPorCpf(cpf) {
       const bestParcela = pickBestParcela(contract, contract?.proximaparcela_id)
       if (!bestParcela) continue
 
-      const parcelaComBoleto = await garantirBoletoDaParcela(bestParcela)
+      const parcelaComBoleto = await garantirBoletoDaParcela(bestParcela, {
+        alunoId: aluno.id,
+        contratoId: contract.id
+      })
+
       return buildSecondViaResult(aluno, contract, parcelaComBoleto)
     } catch (error) {
       debugLog("Falha ao gerar segunda via para contrato", contract?.id, error?.message || error)
@@ -1278,7 +1417,10 @@ async function criarMatriculaComCarne(input) {
 
     if (melhorParcela?.id) {
       try {
-        const parcelaComBoleto = await garantirBoletoDaParcela(melhorParcela)
+        const parcelaComBoleto = await garantirBoletoDaParcela(melhorParcela, {
+          alunoId: aluno.id,
+          contratoId
+        })
         secondVia = buildSecondViaResult(aluno, contrato, parcelaComBoleto)
       } catch (error) {
         debugLog("Falha ao garantir boleto da melhor parcela:", error?.message || error)
