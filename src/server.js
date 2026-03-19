@@ -47,7 +47,10 @@ const DEFAULT_PAYMENT_PLAN = {
   installmentValue: 80
 }
 const DEFAULT_PIX_CASH_VALUE = 550
-const INTERNAL_LEAD_NOTIFY_PHONE = CONFIG_INTERNAL_LEAD_NOTIFY_PHONE || process.env.INTERNAL_LEAD_NOTIFY_PHONE || "13981484410"
+const INTERNAL_LEAD_NOTIFY_PHONE =
+  CONFIG_INTERNAL_LEAD_NOTIFY_PHONE ||
+  process.env.INTERNAL_LEAD_NOTIFY_PHONE ||
+  "13981484410"
 
 const app = express()
 
@@ -55,6 +58,7 @@ app.use(cors())
 app.use(helmet({ contentSecurityPolicy: false }))
 app.use(morgan("dev"))
 app.use(express.json({ limit: "5mb" }))
+app.use(express.urlencoded({ extended: true, limit: "5mb" }))
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" })
@@ -188,7 +192,7 @@ function buildDeferredPaymentOfferMessage() {
   return `Sem problema 😊
 Podemos sim deixar para o próximo mês.
 
-Se ficar melhor para você, eu posso organizar o boleto à vista para a data que você preferir, assim você consegue se planejar com calma.
+Se ficar melhor para você, eu posso organizar um boleto único à vista para a data que você preferir, assim você consegue se planejar com calma.
 
 Qual dia fica melhor para você: 5, 10, 15, 20 ou outro?
 
@@ -326,14 +330,6 @@ ${nextData.prompt}`
 
 ${sales.askDueDay()}`
   }
-}
-
-function buildDeferredPaymentConfirmMessage(day) {
-  return `Perfeito 😊
-Então vou considerar dia ${day} como a melhor data para você.
-
-Quando chegar mais perto, seguimos com a emissão do boleto à vista da forma mais organizada.
-Se quiser, eu já posso te orientar no próximo passo para deixar tudo encaminhado.`
 }
 
 function wantsPaymentDetails(text) {
@@ -567,7 +563,7 @@ Se quiser, eu continuo te ajudando por aqui.`
     if (convo.payment === "Boleto à vista") {
       return `Perfeito 😊
 
-Assim que o pagamento do boleto for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
+Assim que o pagamento do boleto único for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
 
 Se você já pagou, pode me enviar o comprovante por aqui.`
     }
@@ -639,10 +635,13 @@ async function notifyInternalLead(convo = {}, sourcePhone = "", options = {}) {
   if (!force && convo.internalLeadNotifyKey && convo.internalLeadNotifyKey === notifyKey) return false
 
   try {
-    await sendText(INTERNAL_LEAD_NOTIFY_PHONE, buildInternalLeadNotificationText({
-      ...convo,
-      phone
-    }))
+    await sendText(
+      INTERNAL_LEAD_NOTIFY_PHONE,
+      buildInternalLeadNotificationText({
+        ...convo,
+        phone
+      })
+    )
     convo.internalLeadNotified = true
     convo.internalLeadNotifiedAt = new Date().toISOString()
     convo.internalLeadNotifyKey = notifyKey
@@ -1011,7 +1010,11 @@ function buildCourseHighlights(courseInfo) {
     const summary = String(courseInfo.summary).trim().replace(/\.$/, "")
     lines.push(`${summary.charAt(0).toUpperCase()}${summary.slice(1)}.`)
   } else if (courseInfo.description) {
-    const firstLine = String(courseInfo.description).split(/\r?\n/).map(item => item.trim()).find(Boolean)
+    const firstLine = String(courseInfo.description)
+      .split(/\r?\n/)
+      .map(item => item.trim())
+      .find(Boolean)
+
     if (firstLine) {
       lines.push(firstLine.replace(/\.$/, "") + ".")
     }
@@ -1494,14 +1497,15 @@ async function processMessage(phone, text) {
       const preferredDay = detectPreferredFutureDay(text)
 
       if (!preferredDay) {
-        return { text: "Sem problema 😊 Me diz só qual dia você prefere no próximo mês entre 1 e 28 (ex.: 5, 10, 15, 20 ou outro dia)." }
+        return {
+          text: "Sem problema 😊 Me diz só qual dia você prefere no próximo mês entre 1 e 28 (ex.: 5, 10, 15, 20 ou outro dia)."
+        }
       }
 
       convo.deferredPaymentDay = String(preferredDay)
       convo.dueDay = preferredDay
       convo.payment = "Boleto à vista"
       convo.phone = convo.phone || extractPhoneFromWhatsApp(phone) || ""
-      await notifyInternalLead(convo, phone)
 
       if (!String(convo.course || "").trim()) {
         convo.step = "course_selection"
@@ -1509,11 +1513,12 @@ async function processMessage(phone, text) {
           text: `Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Para emitir o boleto, me confirme primeiro o curso que você quer fazer.`
+Para eu gerar seu boleto único à vista, me confirme primeiro o curso que você quer fazer.`
         }
       }
 
       const nextData = getNextEnrollmentDataPrompt(convo)
+
       if (!nextData) {
         return await finalizeDeferredBoletoEnrollment(convo, phone)
       }
@@ -1524,7 +1529,7 @@ Para emitir o boleto, me confirme primeiro o curso que você quer fazer.`
         text: `Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Para emitir o boleto e já deixar tudo encaminhado, preciso de alguns dados de cadastro.
+Agora vou só pegar seus dados para gerar o boleto único à vista.
 
 ${nextData.prompt}`
       }
@@ -1545,7 +1550,9 @@ ${nextData.prompt}`
       convo.step = "collecting_name"
       await notifyInternalLead(convo, phone)
 
-      return { text: `Perfeito 😊 Curso ${convo.course} selecionado. Agora me envie seu nome completo, por favor.` }
+      return {
+        text: `Perfeito 😊 Curso ${convo.course} selecionado. Agora me envie seu nome completo, por favor.`
+      }
     }
 
     if (convo.step === "collecting_name") {
