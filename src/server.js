@@ -297,8 +297,7 @@ Me envie seu nome completo, por favor.`
     return { text: buildPixMessage() }
   }
 
-  if (payment === "Cartão") {
-    const nextData = getNextEnrollmentDataPrompt(convo)
+  if (payment === "Cartão") {     const nextData = getNextEnrollmentDataPrompt(convo)
 
     if (nextData) {
       convo.step = nextData.step
@@ -344,14 +343,17 @@ function wantsPaymentDetails(text) {
   const t = normalizeLoose(text)
 
   return (
-    sales.isAffirmative(text) ||
     t.includes("mostrar") ||
     t.includes("mostra") ||
     t.includes("me mostra") ||
     t.includes("quero ver") ||
     t.includes("pode mostrar") ||
     t.includes("sim pode") ||
-    t.includes("me explica melhor")
+    t.includes("me explica melhor") ||
+    t.includes("formas de pagamento") ||
+    t.includes("opcoes de pagamento") ||
+    t.includes("opções de pagamento") ||
+    t.includes("quero ver os valores")
   )
 }
 
@@ -565,44 +567,45 @@ Taxa única do material: Carnê ${plan.installments}x de R$ ${formatMoney(plan.i
 Se quiser, já me responde: 1 (Carnê), 2 (Cartão) ou 3 (PIX).`
 }
 
+function buildPaymentIntroMessage(courseName = "") {
+  const courseLabel = courseName || "o curso"
+
+  return `Claro 😊
+
+No ${courseLabel}, o curso é gratuito e não tem mensalidade.
+Existe apenas a taxa do material didático.
+
+Você prefere ver as opções de pagamento ou entender melhor o curso primeiro?`
+}
+
+
 function buildPaymentChoiceMessage(courseName = "") {
   const courseLabel = courseName || "o curso"
   const plan = getPaymentPlan(courseName)
 
   return `Perfeito 😊
 
-No ${courseLabel}, a taxa única do material didático pode ser feita destas formas:
+Para ${courseLabel}, hoje funciona assim:
 
-1 - *Carnê*
-${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
-Você ainda pode escolher o melhor dia de vencimento entre 1 e 28.
+1 - Carnê: ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
+2 - Cartão
+3 - PIX à vista: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}
 
-2 - *Cartão*
-Se preferir, seguimos no cartão e a equipe finaliza a condição com você.
-
-3 - *PIX à vista*
-Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}
-Pagamento direto e, após a confirmação, seguimos com a liberação.
-
-Pode me responder com:
-1 para Carnê
-2 para Cartão
-3 para PIX`
+Se a ideia for começar com algo mais leve no mês, o carnê costuma ajudar mais.`
 }
 
 function buildPaymentHelpMessage(courseName = "") {
   const courseLabel = courseName || "o curso"
   const plan = getPaymentPlan(courseName)
+    return `Claro 😊
 
-  return `Claro 😊
+Para ${courseLabel}, normalmente fica assim:
 
-Para ${courseLabel}, normalmente funciona assim:
+Carnê: ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
+Cartão: alinhado com a equipe
+PIX à vista: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}
 
-- *Carnê*: costuma ser a opção que muita gente escolhe porque fica mais leve para começar, em ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
-- *Cartão*: bom para quem prefere alinhar a condição diretamente com a equipe
-- *PIX à vista*: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}, costuma ser a opção mais direta, porque a confirmação é mais rápida
-
-Se você quer começar sem pesar tanto no mês, o carnê geralmente acaba sendo a opção mais confortável.`
+Para começar sem pesar tanto no mês, o carnê costuma ser a opção mais leve.`
 }
 
 function buildPixMessage() {
@@ -892,8 +895,7 @@ function getNextEnrollmentDataPrompt(convo = {}) {
 async function finalizeCarneEnrollment(convo, sourcePhone = "") {
   const dueDayNumber = Number(convo.dueDay || convo.deferredPaymentDay || 0)
 
-  if (!dueDayNumber || dueDayNumber < 1 || dueDayNumber > 28) {
-    convo.step = "collecting_due_day"
+  if (!dueDayNumber || dueDayNumber < 1 || dueDayNumber > 28) {    convo.step = "collecting_due_day"
     return { text: sales.askDueDay() }
   }
 
@@ -1192,28 +1194,10 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   }
 
   if (normalizedCourseInfo?.learns?.length) {
-    parts.push(`No curso você vai aprender temas como ${normalizedCourseInfo.learns.slice(0, 4).join(", ")}.`)
-  }
+    parts.push(`Você vai aprender temas como ${normalizedCourseInfo.learns.slice(0, 3).join(", ")}.`)
+      }
 
-  if (normalizedCourseInfo?.workload || normalizedCourseInfo?.duration) {
-    const workload = normalizedCourseInfo?.workload
-      ? `Carga horária: ${normalizedCourseInfo.workload}.`
-      : "Carga horária: não informada no documento."
-    const duration = normalizedCourseInfo?.duration
-      ? ` Duração média: ${normalizedCourseInfo.duration}.`
-      : ""
-    parts.push(`${workload}${duration}`)
-  }
-
-  if (normalizedCourseInfo?.market) {
-    parts.push(`Mercado de trabalho: ${normalizedCourseInfo.market}.`)
-  }
-
-  if (normalizedCourseInfo?.salary) {
-    parts.push(`Média salarial informada no documento: ${normalizedCourseInfo.salary}.`)
-  }
-
-  parts.push(`Me conta: o que você busca com ${displayName} neste momento?`)
+  parts.push(`Hoje, com ${displayName}, o que mais pesa para você: conseguir emprego mais rápido, melhorar currículo ou mudar de área?`)
 
   return parts.join("\n\n")
 }
@@ -1360,12 +1344,12 @@ async function processMessage(phone, text) {
     const isPriceQuestion = sales.isPriceQuestion(text)
 
     const paymentSelectedInFlexibleFlow = detectPaymentSelection(text, {
-      allowNumeric: ["payment_choice", "payment_deferral_day", "post_sale"].includes(convo.step)
+      allowNumeric: ["payment_intro", "payment_choice", "payment_deferral_day", "post_sale"].includes(convo.step)
     })
 
     if (
       paymentSelectedInFlexibleFlow &&
-      ["payment_choice", "payment_deferral_day", "offer_transition", "post_sale"].includes(convo.step)
+      ["payment_intro", "payment_choice", "payment_deferral_day", "offer_transition", "post_sale"].includes(convo.step)
     ) {
       return await continueFromSelectedPayment(convo, phone, paymentSelectedInFlexibleFlow)
     }
@@ -1471,7 +1455,7 @@ async function processMessage(phone, text) {
       }
 
       if (isPriceQuestion) {
-        convo.step = "payment_choice"
+        convo.step = "payment_intro"
         convo.paymentTeaserShown = false
         return { text: buildPriceAnswerMessage(convo.course, courseInfo) }
       }
@@ -1492,7 +1476,7 @@ async function processMessage(phone, text) {
       }
 
       if (isPriceQuestion) {
-        convo.step = "payment_choice"
+        convo.step = "payment_intro"
         convo.paymentTeaserShown = false
         return { text: buildPriceAnswerMessage(courseInfoFromText.title, courseInfoFromText) }
       }
@@ -1510,17 +1494,14 @@ async function processMessage(phone, text) {
       convo.course &&
       isPriceQuestion &&
       ["diagnosis_goal", "diagnosis_experience", "offer_transition", "course_selection"].includes(convo.step)
-    ) {
-      const selectedCourseInfo =
+    ) {      const selectedCourseInfo =
         findSiteCourseKnowledge(convo.course, convo.course) ||
         findSiteCourseKnowledge(text, convo.course)
 
-      convo.step = "payment_choice"
+      convo.step = "payment_intro"
       convo.paymentTeaserShown = false
       return {
-        text: buildPriceAnswerMessage(convo.course, selectedCourseInfo, {
-          compactCourseExplanation: true
-        })
+        text: buildPriceAnswerMessage(convo.course, selectedCourseInfo)
       }
     }
 
@@ -1616,9 +1597,9 @@ async function processMessage(phone, text) {
 
     if (convo.step === "offer_transition") {
       if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
-        convo.step = "payment_choice"
+        convo.step = "payment_intro"
         convo.paymentTeaserShown = false
-        return { text: buildPaymentChoiceMessage(convo.course) }
+        return { text: buildPaymentIntroMessage(convo.course) }
       }
 
       if (isPriceQuestion) {
@@ -1626,12 +1607,10 @@ async function processMessage(phone, text) {
           findSiteCourseKnowledge(convo.course, convo.course) ||
           findSiteCourseKnowledge(text, convo.course)
 
-        convo.step = "payment_choice"
+        convo.step = "payment_intro"
         convo.paymentTeaserShown = false
         return {
-          text: buildPriceAnswerMessage(convo.course, selectedCourseInfo, {
-            compactCourseExplanation: true
-          })
+          text: buildPriceAnswerMessage(convo.course, selectedCourseInfo)
         }
       }
 
@@ -1648,7 +1627,33 @@ async function processMessage(phone, text) {
       }
 
       return {
-        text: "Se fizer sentido para você, eu já posso te mostrar as formas de pagamento 😊"
+        text: "Sem problema 😊 Posso te explicar melhor como funciona o curso ou, se preferir, já te passo os valores."
+      }
+    }
+
+    if (convo.step === "payment_intro") {
+      if (wantsPaymentDetails(text) || isPaymentGuidanceQuestion(text)) {
+        convo.step = "payment_choice"
+        return { text: buildPaymentChoiceMessage(convo.course) }
+      }
+
+      if (isCannotPayNowIntent(text)) {
+        convo.step = "payment_deferral_day"
+        return { text: buildDeferredPaymentOfferMessage() }
+      }
+
+      if (convo.course && isCourseDetailsQuestion(text)) {
+        const courseInfo =
+          findSiteCourseKnowledge(text, convo.course) ||
+          buildFallbackCourseInfoByName(convo.course)
+
+        if (courseInfo) {
+          return { text: buildSelectedCourseAnswer(text, courseInfo) }
+        }
+      }
+
+      return {
+        text: "Sem problema 😊 Me fala só se você quer ver as opções de pagamento ou entender melhor o curso primeiro."
       }
     }
 
@@ -1787,9 +1792,7 @@ ${nextData.prompt}`
       if (convo.payment === "Boleto a vista") {
         convo.step = "collecting_birth"
         return { text: sales.askBirthDate() }
-      }
-
-      convo.step = "collecting_birth"
+      }      convo.step = "collecting_birth"
       return { text: sales.askBirthDate() }
     }
 
