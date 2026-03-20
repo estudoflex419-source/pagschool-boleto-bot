@@ -2,10 +2,6 @@ require("dotenv").config()
 
 const fs = require("fs")
 const path = require("path")
-const express = require("express")
-const cors = require("cors")
-const helmet = require("helmet")
-const morgan = require("morgan")
 
 const {
   PORT,
@@ -42,6 +38,15 @@ const {
   buildPromptKnowledge
 } = require("./knowledge/course-knowledge")
 
+const { createApp } = require("./app/create-app")
+const { createHealthRoutes } = require("./app/routes/health-routes")
+const { createMetaRoutes } = require("./app/routes/meta-routes")
+const { createPdfRoutes } = require("./app/routes/pdf-routes")
+const metaWebhookParser = require("./meta/meta-webhook")
+const { createProcessedMessageStore } = require("./stores/processed-message-store")
+const conversationService = require("./domain/conversation/conversation-service")
+const { createDefaultConversation } = require("./domain/conversation/conversation-schema")
+
 const COURSE_SITE_KNOWLEDGE = getCourseCatalog().map(toServerCourseInfo)
 
 if (!COURSE_SITE_KNOWLEDGE.length) {
@@ -63,39 +68,6 @@ const INTERNAL_LEAD_NOTIFY_PHONE =
   "13981484410"
 
 const INTERNAL_LEAD_FALLBACK_FILE = path.join(process.cwd(), "internal-lead-queue.json")
-
-const app = express()
-
-app.use(cors())
-app.use(helmet({ contentSecurityPolicy: false }))
-app.use(morgan("dev"))
-app.use(express.json({ limit: "5mb" }))
-app.use(express.urlencoded({ extended: true, limit: "5mb" }))
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" })
-})
-
-app.get("/", (_req, res) => {
-  res.send("ESTUDO FLEX BOT V11 ONLINE 🚀")
-})
-
-app.get("/meta/webhook", (req, res) => {
-  try {
-    const mode = req.query["hub.mode"]
-    const token = req.query["hub.verify_token"]
-    const challenge = req.query["hub.challenge"]
-
-    if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
-      return res.status(200).send(challenge)
-    }
-
-    return res.sendStatus(403)
-  } catch (error) {
-    console.error("Erro na verificação do webhook:", error)
-    return res.sendStatus(500)
-  }
-})
 
 function responseToBuffer(data) {
   if (!data) return Buffer.alloc(0)
@@ -812,37 +784,7 @@ async function notifyInternalLead(convo = {}, sourcePhone = "", options = {}) {
 }
 
 function resetConversation(convo) {
-  Object.assign(convo, {
-    step: "menu",
-    path: "",
-    course: "",
-    goal: "",
-    experience: "",
-    payment: "",
-    paymentTeaserShown: false,
-    name: "",
-    cpf: "",
-    birthDate: "",
-    email: "",
-    gender: "",
-    phone: "",
-    cep: "",
-    street: "",
-    number: "",
-    complement: "",
-    neighborhood: "",
-    city: "",
-    state: "",
-    deferredPaymentDay: "",
-    dueDay: "",
-    alunoId: null,
-    contratoId: null,
-    parcelaId: null,
-    nossoNumero: "",
-    internalLeadNotified: false,
-    internalLeadNotifiedAt: "",
-    internalLeadNotifyKey: ""
-  })
+  Object.assign(convo, createDefaultConversation())
 }
 
 function wantsReset(text) {
@@ -2019,124 +1961,22 @@ ${nextData.prompt}`
   }
 }
 
-app.post("/meta/webhook", async (req, res) => {
-  try {
-    const msg = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
+const processedMessageStore = createProcessedMessageStore()
+processedMessageStore.load()
+conversationService.ensureLoaded()
 
-    if (!msg) {
-      return res.sendStatus(200)
-    }
-
-    const phone = msg.from
-    const text =
-      msg.text?.body ||
-      msg.button?.text ||
-      msg.interactive?.button_reply?.title ||
-      msg.interactive?.list_reply?.title ||
-      ""
-
-    console.log("Mensagem recebida:", { phone, text })
-
-    const response = await processMessage(phone, text)
-
-    if (response?.text) {
-      try {
-        await sendText(phone, response.text)
-      } catch (error) {
-        console.error("[META][WEBHOOK][TEXT] erro ao enviar texto:", error?.response?.data || error)
-      }
-    }
-
-    if (response?.documentBuffer) {
-      try {
-        const normalizedBuffer = Buffer.isBuffer(response.documentBuffer)
-          ? response.documentBuffer
-          : response.documentBuffer?.type === "Buffer" && Array.isArray(response.documentBuffer.data)
-            ? Buffer.from(response.documentBuffer.data)
-            : null
-
-        if (!normalizedBuffer || !normalizedBuffer.length) {
-          console.error("[META][WEBHOOK][DOC] documentBuffer inválido:", {
-            filename: response.filename,
-            mimeType: response.mimeType
-          })
-        } else {
-          console.log("[META][WEBHOOK][DOC] enviando documento:", {
-            phone,
-            filename: response.filename || "documento.pdf",
-            mimeType: response.mimeType || "application/pdf",
-            bytes: normalizedBuffer.length
-          })
-
-          await sendDocumentBuffer(
-            phone,
-            normalizedBuffer,
-            response.filename || "documento.pdf",
-            response.caption || "",
-            response.mimeType || "application/pdf"
-          )
-        }
-      } catch (error) {
-        console.error("[META][WEBHOOK][DOC] erro ao enviar documento:", error?.response?.data || error)
-
-        try {
-          await sendText(
-            phone,
-            "Eu consegui gerar o seu PDF, mas houve uma falha no envio agora. Vou reenviar em seguida."
-          )
-        } catch (notifyError) {
-          console.error(
-            "[META][WEBHOOK][DOC][FALLBACK_TEXT] erro ao avisar falha:",
-            notifyError?.response?.data || notifyError
-          )
-        }
-      }
-    }
-
-    return res.sendStatus(200)
-  } catch (error) {
-    console.error("Erro no webhook da Meta:", error?.response?.data || error)
-    return res.sendStatus(500)
-  }
-})
-
-app.get("/carne/pdf/:parcelaId/:nossoNumero", async (req, res) => {
-  try {
-    const parcelaId = String(req.params.parcelaId || "")
-    const nossoNumero = String(req.params.nossoNumero || "")
-
-    if (!parcelaId || !nossoNumero) {
-      return res.status(400).send("parcelaId e nossoNumero são obrigatórios")
-    }
-
-    const resp = await baixarPdfParcela(parcelaId, nossoNumero)
-
-    if (isPdfHttpResponse(resp)) {
-      res.setHeader("Content-Type", "application/pdf")
-      res.setHeader("Content-Disposition", `inline; filename="carne-${nossoNumero}.pdf"`)
-      return res.status(200).send(resp.data)
-    }
-
-    return res.status(500).send("A PagSchool não retornou um PDF válido.")
-  } catch (error) {
-    console.error("Erro ao servir PDF do carnê:", error?.message || error)
-    return res.status(500).send(String(error.message || error))
-  }
-})
-
-app.use((_req, res) => {
-  res.status(404).json({
-    ok: false,
-    message: "Rota não encontrada"
-  })
-})
-
-app.use((error, _req, res, _next) => {
-  console.error("Erro interno do servidor:", error)
-  res.status(500).json({
-    ok: false,
-    message: "Erro interno do servidor"
-  })
+const app = createApp({
+  healthRoutes: createHealthRoutes(),
+  metaRoutes: createMetaRoutes({
+    verifyToken: META_VERIFY_TOKEN,
+    processMessage,
+    metaClient: { sendText, sendDocumentBuffer },
+    metaWebhookParser,
+    processedMessageStore,
+    conversationService,
+    normalizePhone: value => String(value || "")
+  }),
+  pdfRoutes: createPdfRoutes({ baixarPdfParcela })
 })
 
 app.listen(PORT || 3000, () => {
