@@ -127,6 +127,7 @@ function buildResponseRulesBlock(responseRules = {}) {
     rules.push("- primeiro explique o valor profissional do curso; depois convide para avançar")
   }
 
+  rules.push("- não use carga horária, média salarial ou mercado logo na primeira resposta, a menos que o cliente peça")
   rules.push("- responda em no máximo 2 parágrafos curtos")
   rules.push("- evite listas longas")
   rules.push("- nunca repita a mesma ideia em frases diferentes")
@@ -284,7 +285,7 @@ async function askAI(text, context = {}) {
           content: [{ type: "input_text", text: buildUserPrompt(text) }]
         }
       ],
-      max_output_tokens: 220
+      max_output_tokens: 140
     }
 
     const resp = await axios.post(
