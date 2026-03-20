@@ -383,6 +383,141 @@ function formatMoneyBR(value = 0) {
   })
 }
 
+function toTitleCaseName(value = "") {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
+function splitIncomingLines(text = "") {
+  return String(text)
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+function parseEnrollmentBundle(text, currentCourse = "") {
+  const lines = splitIncomingLines(text)
+
+  const parsed = {
+    fullName: "",
+    cpf: "",
+    birthDate: "",
+    cep: "",
+    houseNumber: "",
+    course: currentCourse || ""
+  }
+
+  for (const line of lines) {
+    const digits = line.replace(/\D/g, "")
+
+    if (!parsed.cpf && digits.length === 11) {
+      parsed.cpf = digits
+      continue
+    }
+
+    if (!parsed.birthDate && /^\d{2}\/\d{2}\/\d{4}$/.test(line)) {
+      parsed.birthDate = line
+      continue
+    }
+
+    if (!parsed.cep && digits.length === 8) {
+      parsed.cep = digits
+      continue
+    }
+
+    const detectedCourse =
+      typeof findCourseInText === "function" ? findCourseInText(line) : ""
+
+    if (!parsed.course && detectedCourse) {
+      parsed.course = detectedCourse
+      continue
+    }
+
+    if (
+      !parsed.houseNumber &&
+      /^\d{1,6}$/.test(digits) &&
+      digits !== parsed.cep &&
+      digits !== parsed.cpf
+    ) {
+      parsed.houseNumber = digits
+      continue
+    }
+
+    if (!parsed.fullName && /[a-zA-ZÀ-ÿ]/.test(line) && !detectedCourse) {
+      parsed.fullName = toTitleCaseName(line)
+    }
+  }
+
+  if (!parsed.course && typeof findCourseInText === "function") {
+    const wholeTextCourse = findCourseInText(text)
+    if (wholeTextCourse) parsed.course = wholeTextCourse
+  }
+
+  return parsed
+}
+
+function mergeEnrollmentData(convo, incoming) {
+  convo.salesLead = convo.salesLead || {}
+  convo.salesLead.enrollment = convo.salesLead.enrollment || {}
+
+  const target = convo.salesLead.enrollment
+
+  for (const [key, value] of Object.entries(incoming || {})) {
+    if (value) target[key] = value
+  }
+
+  if (convo.salesLead.course && !target.course) {
+    target.course = convo.salesLead.course
+  }
+
+  return target
+}
+
+function getMissingEnrollmentFields(data = {}) {
+  const missing = []
+
+  if (!data.fullName) missing.push("nome completo")
+  if (!data.cpf || String(data.cpf).replace(/\D/g, "").length !== 11) missing.push("CPF")
+  if (!data.birthDate || !/^\d{2}\/\d{2}\/\d{4}$/.test(data.birthDate)) missing.push("data de nascimento")
+  if (!data.cep || String(data.cep).replace(/\D/g, "").length !== 8) missing.push("CEP")
+  if (!data.houseNumber) missing.push("número da casa")
+  if (!data.course) missing.push("curso escolhido")
+
+  return missing
+}
+
+function buildMissingEnrollmentMessage(data, missing) {
+  return `Perfeito 😊
+
+Recebi uma parte dos seus dados, mas ainda faltam:
+
+- ${missing.join("\n- ")}
+
+Pode me mandar só o que falta.`
+}
+
+function buildEnrollmentConfirmation(data, paymentMethod = "") {
+  return `Perfeito 😊
+
+Recebi seus dados da inscrição:
+
+- Nome: ${data.fullName}
+- CPF: ${data.cpf}
+- Data de nascimento: ${data.birthDate}
+- CEP: ${data.cep}
+- Número da casa: ${data.houseNumber}
+- Curso: ${data.course}
+- Forma de pagamento: ${paymentMethod || "não informado"}
+
+Se estiver tudo certo, responda *CONFIRMAR*.
+Se quiser corrigir algo, me mande apenas o campo certo.`
+}
+
 function detectCantPayNow(text = "") {
   const t = normalizeFlowText(text)
 
@@ -1837,6 +1972,59 @@ Anotei aqui um *boleto para o próximo mês* no valor de *${formatMoneyBR(desire
 
 Assim que a emissão estiver concluída, ele é enviado por aqui.`
       )
+      return
+    }
+
+    // TRAVA DE MATRÍCULA
+    if (convo.salesLead?.stage === "collecting_enrollment") {
+      const parsed = parseEnrollmentBundle(text, convo.salesLead?.course || convo.course || "")
+      const enrollment = mergeEnrollmentData(convo, parsed)
+      const missing = getMissingEnrollmentFields(enrollment)
+
+      if (missing.length) {
+        await sendText(phone, buildMissingEnrollmentMessage(enrollment, missing))
+        return
+      }
+
+      convo.salesLead.fullName = enrollment.fullName
+      convo.salesLead.cpf = enrollment.cpf
+      convo.salesLead.birthDate = enrollment.birthDate
+      convo.salesLead.cep = enrollment.cep
+      convo.salesLead.houseNumber = enrollment.houseNumber
+      convo.salesLead.course = enrollment.course
+      convo.salesLead.stage = "awaiting_enrollment_confirmation"
+
+      const paymentMethod =
+        convo.salesLead.paymentMethod ||
+        convo.salesLead.paymentChoice ||
+        convo.salesLead.selectedPaymentMethod ||
+        "À vista / Pix"
+
+      await sendText(phone, buildEnrollmentConfirmation(enrollment, paymentMethod))
+      return
+    }
+
+    if (convo.salesLead?.stage === "awaiting_enrollment_confirmation") {
+      const clean = String(text || "").trim().toLowerCase()
+
+      if (clean === "confirmar") {
+        // daqui pra frente segue seu fluxo de pagamento
+        // pix -> enviar chave pix
+        // se a pessoa disser que não consegue pagar agora -> gerar carnê para o próximo mês
+        convo.salesLead.stage = "payment_intro"
+        return
+      }
+
+      const parsed = parseEnrollmentBundle(text, convo.salesLead?.course || convo.course || "")
+      const enrollment = mergeEnrollmentData(convo, parsed)
+
+      const paymentMethod =
+        convo.salesLead.paymentMethod ||
+        convo.salesLead.paymentChoice ||
+        convo.salesLead.selectedPaymentMethod ||
+        "À vista / Pix"
+
+      await sendText(phone, buildEnrollmentConfirmation(enrollment, paymentMethod))
       return
     }
 
