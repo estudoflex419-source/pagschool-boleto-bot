@@ -283,7 +283,7 @@ const COURSE_CATALOG = [
       "é uma formação prática para quem quer se preparar melhor para vagas em lojas e comércios",
     market:
       "lojas, supermercados, farmácias e comércio em geral",
-      workload: "96h",
+    workload: "96h",
     salary: "R$ 1.513,00",
     learns: [
       "atendimento",
