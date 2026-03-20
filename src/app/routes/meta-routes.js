@@ -11,6 +11,27 @@ function normalizeDocumentBuffer(input) {
   return null;
 }
 
+function normalizeOutgoingTexts(response = {}) {
+  if (Array.isArray(response?.messages)) {
+    return response.messages
+      .map(item => String(item || "").trim())
+      .filter(Boolean)
+      .slice(0, 3);
+  }
+
+  const text = String(response?.text || "").trim();
+  if (!text) return [];
+
+  if (text.length <= 450) return [text];
+
+  const paragraphs = text.split(/\n\s*\n/g).map(item => item.trim()).filter(Boolean);
+  if (paragraphs.length >= 2) {
+    return paragraphs.slice(0, 3);
+  }
+
+  return [text];
+}
+
 function createMetaRoutes({
   verifyToken,
   processMessage,
@@ -48,66 +69,83 @@ function createMetaRoutes({
       }
 
       for (const event of events) {
-
         const messageId = String(event.id || "").trim();
-        if (messageId && processedMessageStore?.has?.(messageId)) {
-          continue;
-        }
 
-        const response = await processMessage(event.from, event.text);
-
-        if (response?.text) {
-          try {
-            await metaClient.sendText(event.from, response.text);
-          } catch (error) {
-            console.error("[META][WEBHOOK][TEXT] erro ao enviar texto:", error?.response?.data || error);
-          }
-        }
-
-        if (response?.documentBuffer) {
-          try {
-            const normalizedBuffer = normalizeDocumentBuffer(response.documentBuffer);
-
-            if (!normalizedBuffer || !normalizedBuffer.length) {
-              console.error("[META][WEBHOOK][DOC] documentBuffer inválido:", {
-                filename: response.filename,
-                mimeType: response.mimeType,
-              });
-            } else {
-              await metaClient.sendDocumentBuffer(
-                event.from,
-                normalizedBuffer,
-                response.filename || "documento.pdf",
-                response.caption || "",
-                response.mimeType || "application/pdf"
-              );
-            }
-          } catch (error) {
-            console.error("[META][WEBHOOK][DOC] erro ao enviar documento:", error?.response?.data || error);
-
-            try {
-              await metaClient.sendText(
-                event.from,
-                "Eu consegui gerar o seu PDF, mas houve uma falha no envio agora. Vou reenviar em seguida."
-              );
-            } catch (notifyError) {
-              console.error(
-                "[META][WEBHOOK][DOC][FALLBACK_TEXT] erro ao avisar falha:",
-                notifyError?.response?.data || notifyError
-              );
-            }
-          }
-        }
-
-        if (conversationService?.touchConversation) {
-          conversationService.touchConversation(event.from);
-        }
-
-        if (messageId && processedMessageStore?.save) {
-          processedMessageStore.save(messageId, {
+        if (messageId && processedMessageStore?.reserve) {
+          const reserved = processedMessageStore.reserve(messageId, {
             phone: event.from,
             text: event.text,
           });
+
+          if (!reserved) {
+            continue;
+          }
+        } else if (messageId && processedMessageStore?.has?.(messageId)) {
+          continue;
+        }
+
+        try {
+          const response = await processMessage(event.from, event.text);
+          const outgoingTexts = normalizeOutgoingTexts(response);
+
+          for (const text of outgoingTexts) {
+            try {
+              await metaClient.sendText(event.from, text);
+            } catch (error) {
+              console.error("[META][WEBHOOK][TEXT] erro ao enviar texto:", error?.response?.data || error);
+            }
+          }
+
+          if (response?.documentBuffer) {
+            try {
+              const normalizedBuffer = normalizeDocumentBuffer(response.documentBuffer);
+
+              if (!normalizedBuffer || !normalizedBuffer.length) {
+                console.error("[META][WEBHOOK][DOC] documentBuffer inválido:", {
+                  filename: response.filename,
+                  mimeType: response.mimeType,
+                });
+              } else {
+                await metaClient.sendDocumentBuffer(
+                  event.from,
+                  normalizedBuffer,
+                  response.filename || "documento.pdf",
+                  response.caption || "",
+                  response.mimeType || "application/pdf"
+                );
+              }
+            } catch (error) {
+              console.error("[META][WEBHOOK][DOC] erro ao enviar documento:", error?.response?.data || error);
+
+              try {
+                await metaClient.sendText(
+                  event.from,
+                  "Eu consegui gerar o seu PDF, mas houve uma falha no envio agora. Vou reenviar em seguida."
+                );
+              } catch (notifyError) {
+                console.error(
+                  "[META][WEBHOOK][DOC][FALLBACK_TEXT] erro ao avisar falha:",
+                  notifyError?.response?.data || notifyError
+                );
+              }
+            }
+          }
+
+          if (conversationService?.touchConversation) {
+            conversationService.touchConversation(event.from);
+          }
+
+          if (messageId && processedMessageStore?.complete) {
+            processedMessageStore.complete(messageId, {
+              phone: event.from,
+              text: event.text,
+            });
+          }
+        } catch (error) {
+          if (messageId && processedMessageStore?.remove) {
+            processedMessageStore.remove(messageId);
+          }
+          throw error;
         }
       }
 
