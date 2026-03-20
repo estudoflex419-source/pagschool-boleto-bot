@@ -376,6 +376,174 @@ Me envie, por favor:
 *Forma de pagamento escolhida:* ${paymentLabel}`
 }
 
+function formatMoneyBR(value = 0) {
+  return Number(value || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  })
+}
+
+function detectCantPayNow(text = "") {
+  const t = normalizeFlowText(text)
+
+  return (
+    t.includes("nao tenho agora") ||
+    t.includes("não tenho agora") ||
+    t.includes("nao consigo agora") ||
+    t.includes("não consigo agora") ||
+    t.includes("agora nao") ||
+    t.includes("agora não") ||
+    t.includes("so mes que vem") ||
+    t.includes("só mes que vem") ||
+    t.includes("so no proximo mes") ||
+    t.includes("só no próximo mês") ||
+    t.includes("mes que vem") ||
+    t.includes("mês que vem") ||
+    t.includes("depois eu pago") ||
+    t.includes("mais pra frente") ||
+    t.includes("nao da agora") ||
+    t.includes("não dá agora") ||
+    t.includes("sem dinheiro agora")
+  )
+}
+
+function detectPixNow(text = "") {
+  const t = normalizeFlowText(text)
+
+  return (
+    t.includes("manda o pix") ||
+    t.includes("pode mandar o pix") ||
+    t.includes("vou pagar no pix") ||
+    t.includes("vou fazer o pix") ||
+    t.includes("pago no pix") ||
+    t.includes("pix") ||
+    isSimplePositive(t)
+  )
+}
+
+function extractDesiredAmount(text = "") {
+  const raw = String(text || "").trim()
+
+  const match = raw.match(/(?:r\$\s*)?(\d{1,4}(?:[.,]\d{1,2})?)/i)
+  if (!match) return 0
+
+  let value = String(match[1])
+
+  if (value.includes(".") && value.includes(",")) {
+    value = value.replace(/\./g, "").replace(",", ".")
+  } else {
+    value = value.replace(",", ".")
+  }
+
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return 0
+
+  return Math.round(numberValue * 100) / 100
+}
+
+function getNextMonthDueDateBR(preferredDay = 10) {
+  const today = new Date()
+  const safeDay = Math.max(1, Math.min(28, Number(preferredDay) || 10))
+
+  const nextMonthDate = new Date(
+    today.getFullYear(),
+    today.getMonth() + 1,
+    safeDay
+  )
+
+  const dd = String(nextMonthDate.getDate()).padStart(2, "0")
+  const mm = String(nextMonthDate.getMonth() + 1).padStart(2, "0")
+  const yyyy = String(nextMonthDate.getFullYear())
+
+  return `${dd}/${mm}/${yyyy}`
+}
+
+function buildPixPaymentMessage(convo = {}) {
+  const selectedCourse =
+    convo?.salesLead?.course ||
+    convo?.course ||
+    "seu curso"
+
+  return `Perfeito 😊
+
+Sua inscrição do curso *${selectedCourse}* foi organizada.
+
+Para concluir agora, o pagamento via *Pix* fica em:
+
+*R$ 550,00*
+
+*Chave Pix (CNPJ):* 22211962/000122
+*Nome:* ALEXANDER PHILADELPHO BEZERRA
+
+Depois que fizer o pagamento, me envie o comprovante por aqui.
+
+Caso você não consiga fazer agora, me fala algo como:
+*não consigo agora*
+ou
+*quero para o próximo mês*
+
+que eu sigo com a opção de boleto para o próximo mês.`
+}
+
+function buildDeferredBoletoAskAmountMessage(dueDateBR) {
+  return `Sem problema 😊
+
+Eu posso deixar um *boleto para o próximo mês*.
+
+Me fala o *valor que você quer colocar* nesse boleto.
+
+Exemplo:
+*95*
+ou
+*R$ 95,00*
+
+Vencimento previsto: *${dueDateBR}*`
+}
+
+function buildDeferredBoletoCreatedMessage(amount, dueDateBR, result = {}) {
+  const lines = []
+
+  lines.push(`Perfeito 😊`)
+  lines.push(``)
+  lines.push(`Seu boleto foi organizado para o próximo mês.`)
+  lines.push(``)
+  lines.push(`*Valor:* ${formatMoneyBR(amount)}`)
+  lines.push(`*Vencimento:* ${dueDateBR}`)
+
+  if (result?.linhaDigitavel) {
+    lines.push(``)
+    lines.push(`*Linha digitável:*`)
+    lines.push(String(result.linhaDigitavel))
+  }
+
+  if (result?.pdfUrl) {
+    lines.push(``)
+    lines.push(`*Link do boleto:*`)
+    lines.push(String(result.pdfUrl))
+  }
+
+  lines.push(``)
+  lines.push(`Qualquer dúvida, sigo com você por aqui 😊`)
+
+  return lines.join("\n")
+}
+
+/*
+  ESTE PONTO FICA PRONTO SEM QUEBRAR O BOT.
+  QUANDO VOCÊ TIVER O ENDPOINT REAL DO PAGSCHOOL
+  QUE CRIA UMA NOVA COBRANÇA/PARCELA, TROQUE O RETURN.
+*/
+async function createDeferredBoleto(payload = {}) {
+  // Exemplo futuro:
+  // return await criarBoletoProximoMes(payload)
+
+  return {
+    ok: false,
+    reason: "PAGSCHOOL_ENDPOINT_NOT_CONFIGURED",
+    payload
+  }
+}
+
 function isCannotPayNowIntent(text) {
   const t = normalizeLoose(text)
 
@@ -1582,6 +1750,96 @@ Podemos continuar agora mesmo.`
       return
     }
 
+    /*
+      PIX JÁ FOI OFERECIDO E AGORA O BOT ESPERA A DECISÃO
+    */
+    if (currentStage === "awaiting_pix_payment") {
+      if (detectCantPayNow(cleanText)) {
+        const dueDateBR = getNextMonthDueDateBR(convo.salesLead.dueDay || 10)
+
+        convo.salesLead.stage = "awaiting_deferred_boleto_amount"
+        convo.salesLead.deferredDueDateBR = dueDateBR
+
+        await sendText(phone, buildDeferredBoletoAskAmountMessage(dueDateBR))
+        return
+      }
+
+      if (detectPixNow(cleanText)) {
+        await sendText(
+          phone,
+          `Perfeito 😊
+
+Pode fazer o Pix usando estes dados:
+
+*Valor:* R$ 550,00
+*Chave Pix (CNPJ):* 22211962/000122
+*Nome:* ALEXANDER PHILADELPHO BEZERRA
+
+Depois me envie o comprovante por aqui.`
+        )
+        return
+      }
+    }
+
+    /*
+      CLIENTE ESCOLHEU DEIXAR PARA O PRÓXIMO MÊS
+      AGORA O BOT ESPERA O VALOR
+    */
+    if (currentStage === "awaiting_deferred_boleto_amount") {
+      const desiredAmount = extractDesiredAmount(text)
+
+      if (!desiredAmount) {
+        await sendText(
+          phone,
+          `Sem problema 😊
+
+Me fala só o valor que você quer colocar no boleto do próximo mês.
+
+Exemplo:
+*95*
+ou
+*R$ 95,00*`
+        )
+        return
+      }
+
+      const dueDateBR =
+        convo.salesLead.deferredDueDateBR ||
+        getNextMonthDueDateBR(convo.salesLead.dueDay || 10)
+
+      const result = await createDeferredBoleto({
+        phone,
+        amount: desiredAmount,
+        dueDateBR,
+        convo
+      })
+
+      convo.salesLead.deferredBoletoAmount = desiredAmount
+      convo.salesLead.deferredDueDateBR = dueDateBR
+
+      if (result?.ok) {
+        convo.salesLead.stage = "deferred_boleto_created"
+
+        await sendText(
+          phone,
+          buildDeferredBoletoCreatedMessage(desiredAmount, dueDateBR, result)
+        )
+        return
+      }
+
+      convo.salesLead.stage = "deferred_boleto_requested"
+
+      await sendText(
+        phone,
+        `Perfeito 😊
+
+Anotei aqui um *boleto para o próximo mês* no valor de *${formatMoneyBR(desiredAmount)}*, com vencimento em *${dueDateBR}*.
+
+Assim que a emissão estiver concluída, ele é enviado por aqui.`
+      )
+      return
+    }
+
     const normalizedText = normalize(text || "")
     const matchedKnowledgeCourse = findCourseInText(text)
     const detectedCourse = matchedKnowledgeCourse
@@ -2140,6 +2398,12 @@ ${nextData.prompt}`
       }
 
       convo.state = normalizeUF(text)
+
+      if (convo.salesLead?.paymentMethod === "pix") {
+        convo.salesLead.stage = "awaiting_pix_payment"
+        await sendText(phone, buildPixPaymentMessage(convo))
+        return
+      }
 
       if (convo.payment === "Carnê") {
         if (convo.deferredPaymentDay && !convo.dueDay) {
