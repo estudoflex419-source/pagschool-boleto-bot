@@ -153,6 +153,205 @@ function isPaymentGuidanceQuestion(text) {
   )
 }
 
+function normalizeFlowText(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+}
+
+function wantsPaymentDetails(text = "") {
+  const t = normalizeFlowText(text)
+
+  return (
+    t.includes("pagamento") ||
+    t.includes("pagamentos") ||
+    t.includes("valor") ||
+    t.includes("valores") ||
+    t.includes("preco") ||
+    t.includes("precos") ||
+    t.includes("material didatico") ||
+    t.includes("material didático") ||
+    t.includes("taxa") ||
+    t.includes("taxa do material") ||
+    t.includes("carne") ||
+    t.includes("carnê") ||
+    t.includes("cartao") ||
+    t.includes("cartão") ||
+    t.includes("pix") ||
+    t.includes("a vista") ||
+    t.includes("à vista") ||
+    t.includes("forma de pagamento") ||
+    t.includes("formas de pagamento") ||
+    t.includes("opcao de pagamento") ||
+    t.includes("opções de pagamento") ||
+    t.includes("opcoes de pagamento")
+  )
+}
+
+function detectPaymentMethod(text = "") {
+  const t = normalizeFlowText(text)
+
+  if (
+    t === "1" ||
+    t === "carne" ||
+    t === "carnê" ||
+    t.includes("carnê") ||
+    t.includes("carne")
+  ) {
+    return "carne"
+  }
+
+  if (
+    t === "2" ||
+    t === "cartao" ||
+    t === "cartão" ||
+    t.includes("cartao") ||
+    t.includes("cartão") ||
+    t.includes("credito") ||
+    t.includes("crédito") ||
+    t.includes("debito") ||
+    t.includes("débito")
+  ) {
+    return "cartao"
+  }
+
+  if (
+    t === "3" ||
+    t === "pix" ||
+    t === "a vista" ||
+    t === "à vista" ||
+    t.includes("pix") ||
+    t.includes("a vista") ||
+    t.includes("à vista") ||
+    t.includes("avista")
+  ) {
+    return "pix"
+  }
+
+  return ""
+}
+
+function wantsStartNow(text = "") {
+  const t = normalizeFlowText(text)
+
+  return (
+    t.includes("como comeco") ||
+    t.includes("como começo") ||
+    t.includes("quero comecar") ||
+    t.includes("quero começar") ||
+    t.includes("como faz pra comecar") ||
+    t.includes("como faz pra começar") ||
+    t.includes("como funciona a inscricao") ||
+    t.includes("como funciona a inscrição") ||
+    t.includes("quero me inscrever") ||
+    t.includes("quero fazer a inscricao") ||
+    t.includes("quero fazer a inscrição") ||
+    t.includes("posso começar") ||
+    t.includes("pode explicar a inscricao") ||
+    t.includes("pode explicar a inscrição") ||
+    t.includes("quero continuar") ||
+    t.includes("vamos continuar") ||
+    t.includes("pode continuar")
+  )
+}
+
+function isSimplePositive(text = "") {
+  const t = normalizeFlowText(text)
+
+  return (
+    t === "sim" ||
+    t === "quero" ||
+    t === "quero sim" ||
+    t === "pode" ||
+    t === "ok" ||
+    t === "okay" ||
+    t === "ta bom" ||
+    t === "tá bom" ||
+    t === "vamos" ||
+    t === "bora" ||
+    t === "fechado" ||
+    t === "certo"
+  )
+}
+
+function buildPaymentIntroMessage() {
+  return `Perfeito 😊
+
+O curso é totalmente gratuito.
+
+Você paga apenas a *taxa única do material didático*, e temos 3 formas de pagamento.
+
+Quer que eu te mostre os valores certinhos?`
+}
+
+function buildPaymentChoiceMessage() {
+  return `Perfeito 😊
+
+O curso é totalmente gratuito.
+Existe apenas a taxa única do material didático.
+
+*VALOR DO MATERIAL DIDÁTICO:*
+- 📘 *Carnê:* R$ 1.140,00 em 12 vezes de R$ 95,00
+- 💳 *Cartão:* R$ 780,00 em 12 vezes de R$ 65,00
+- 💵 *À vista ou Pix:* R$ 550,00
+
+Qual opção fica melhor para você?
+
+1 - Carnê
+2 - Cartão
+3 - À vista / Pix`
+}
+
+function buildPaymentMethodReply(method) {
+  if (method === "carne") {
+    return `Perfeito 😊
+
+No *carnê*, a taxa do material didático fica em:
+
+*12 vezes de R$ 95,00*
+Total: *R$ 1.140,00*
+
+Se quiser, já posso te explicar agora como funciona a inscrição.`
+  }
+
+  if (method === "cartao") {
+    return `Perfeito 😊
+
+No *cartão*, a taxa do material didático fica em:
+
+*12 vezes de R$ 65,00*
+Total: *R$ 780,00*
+
+Se quiser, já posso te explicar agora como funciona a inscrição.`
+  }
+
+  if (method === "pix") {
+    return `Perfeito 😊
+
+No *Pix / à vista*, a taxa do material didático fica em:
+
+*R$ 550,00*
+
+Se quiser, já posso te explicar agora como funciona a inscrição.`
+  }
+
+  return buildPaymentChoiceMessage()
+}
+
+function buildPaymentHelpMessage() {
+  return `Sem problema 😊
+
+Hoje temos estas opções para a taxa do material didático:
+
+1 - Carnê
+2 - Cartão
+3 - À vista / Pix
+
+Me fala qual você prefere, que eu te explico certinho.`
+}
+
 function isCannotPayNowIntent(text) {
   const t = normalizeLoose(text)
 
@@ -205,7 +404,7 @@ function buildDeferredPaymentOfferMessage() {
   return `Sem problema 😊
 Podemos sim deixar para o próximo mês.
 
-Se ficar melhor para você, eu posso organizar um boleto único à vista para a data que você preferir, assim você consegue se planejar com calma.
+Se ficar melhor para você, eu posso organizar um carnê único à vista para a data que você preferir, assim você consegue se planejar com calma.
 
 Qual dia fica melhor para você: 5, 10, 15, 20 ou outro?`
 }
@@ -337,24 +536,6 @@ ${nextData.prompt}`
 
 ${sales.askDueDay()}`
   }
-}
-
-function wantsPaymentDetails(text) {
-  const t = normalizeLoose(text)
-
-  return (
-    t.includes("mostrar") ||
-    t.includes("mostra") ||
-    t.includes("me mostra") ||
-    t.includes("quero ver") ||
-    t.includes("pode mostrar") ||
-    t.includes("sim pode") ||
-    t.includes("me explica melhor") ||
-    t.includes("formas de pagamento") ||
-    t.includes("opcoes de pagamento") ||
-    t.includes("opções de pagamento") ||
-    t.includes("quero ver os valores")
-  )
 }
 
 function findSiteCourseKnowledge(text, currentCourse = "") {
@@ -567,47 +748,6 @@ Taxa única do material: Carnê ${plan.installments}x de R$ ${formatMoney(plan.i
 Se quiser, já me responde: 1 (Carnê), 2 (Cartão) ou 3 (PIX).`
 }
 
-function buildPaymentIntroMessage(courseName = "") {
-  const courseLabel = courseName || "o curso"
-
-  return `Claro 😊
-
-No ${courseLabel}, o curso é gratuito e não tem mensalidade.
-Existe apenas a taxa do material didático.
-
-Você prefere ver as opções de pagamento ou entender melhor o curso primeiro?`
-}
-
-
-function buildPaymentChoiceMessage(courseName = "") {
-  const courseLabel = courseName || "o curso"
-  const plan = getPaymentPlan(courseName)
-
-  return `Perfeito 😊
-
-Para ${courseLabel}, hoje funciona assim:
-
-1 - Carnê: ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
-2 - Cartão
-3 - PIX à vista: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}
-
-Se a ideia for começar com algo mais leve no mês, o carnê costuma ajudar mais.`
-}
-
-function buildPaymentHelpMessage(courseName = "") {
-  const courseLabel = courseName || "o curso"
-  const plan = getPaymentPlan(courseName)
-    return `Claro 😊
-
-Para ${courseLabel}, normalmente fica assim:
-
-Carnê: ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)}
-Cartão: alinhado com a equipe
-PIX à vista: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}
-
-Para começar sem pesar tanto no mês, o carnê costuma ser a opção mais leve.`
-}
-
 function buildPixMessage() {
   return `Perfeito 😊
 
@@ -660,7 +800,7 @@ Se quiser, eu continuo te ajudando por aqui.`
     if (convo.payment === "Boleto a vista") {
       return `Perfeito 😊
 
-Assim que o pagamento do boleto único for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
+Assim que o pagamento do carnê único for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
 
 Se você já pagou, pode me enviar o comprovante por aqui.`
     }
@@ -929,7 +1069,7 @@ async function finalizeCarneEnrollment(convo, sourcePhone = "") {
     return {
       text: `Perfeito 😊
 
-Tive uma instabilidade para emitir o boleto automaticamente agora, mas seus dados já ficaram registrados.
+Tive uma instabilidade para emitir o carnê automaticamente agora, mas seus dados já ficaram registrados.
 Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
     }
   }
@@ -948,7 +1088,7 @@ Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
 
 Motivo: ${created.error}
 
-Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do boleto.`
+Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do carnê.`
     }
   }
 
@@ -961,16 +1101,16 @@ Assim que as parcelas estiverem disponíveis, a equipe poderá seguir com o envi
     }
   }
 
-  const pdfPayload = await buildPdfPayloadFromSecondVia(created.secondVia, "carne")
+  const pdfPayload = await buildPdfPayloadFromSecondVia(created.secondVia, "boleto")
 
   return {
     text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.
 
 ${buildSecondViaText(created.secondVia)}`,
     documentBuffer: pdfPayload?.buffer || null,
-    filename: pdfPayload?.filename || "carne.pdf",
+    filename: pdfPayload?.filename || "boleto.pdf",
     mimeType: pdfPayload?.mimeType || "application/pdf",
-    caption: "Segue o PDF do seu carnê."
+    caption: "Segue o PDF do seu boleto."
   }
 }
 
@@ -992,7 +1132,7 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
     return {
       text: `Perfeito 😊
 
-Para emitir seu boleto único, preciso concluir alguns dados de cadastro.
+Para emitir seu carnê único, preciso concluir alguns dados de cadastro.
 
 ${nextData.prompt}`
     }
@@ -1033,7 +1173,7 @@ ${nextData.prompt}`
     return {
       text: `Perfeito 😊
 
-Tive uma instabilidade para emitir o boleto automaticamente agora, mas seus dados já ficaram registrados.
+Tive uma instabilidade para emitir o carnê automaticamente agora, mas seus dados já ficaram registrados.
 Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
     }
   }
@@ -1048,7 +1188,7 @@ Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
 
   if (created?.error) {
     return {
-      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do boleto.
+      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do carnê.
 
 Motivo: ${created.error}
 
@@ -1060,7 +1200,7 @@ Se quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final d
     return {
       text: `Perfeito 😊
 
-Sua matrícula foi criada, mas o boleto ainda está sendo processado pela plataforma.
+Sua matrícula foi criada, mas o carnê ainda está sendo processado pela plataforma.
 Assim que a emissão for concluída, a equipe poderá seguir com o envio.`
     }
   }
@@ -1334,6 +1474,70 @@ async function fallbackAI(text, convo, action = "") {
 async function processMessage(phone, text) {
   try {
     const convo = getConversation(phone)
+    const cleanText = normalizeFlowText(text || "")
+
+    convo.salesLead = convo.salesLead || {}
+
+    const currentStage = convo.salesLead.stage || ""
+    const chosenPaymentMethod = detectPaymentMethod(cleanText)
+
+    /*
+      1) SE JÁ ESTÁ ESPERANDO A FORMA DE PAGAMENTO,
+      TRATA PRIMEIRO A RESPOSTA DO CLIENTE
+    */
+    if (currentStage === "awaiting_payment_method") {
+      if (!chosenPaymentMethod) {
+        await sendText(phone, buildPaymentHelpMessage())
+        return
+      }
+
+      convo.salesLead.paymentMethod = chosenPaymentMethod
+      convo.salesLead.stage = "payment_method_selected"
+
+      await sendText(phone, buildPaymentMethodReply(chosenPaymentMethod))
+      return
+    }
+
+    /*
+      2) SE JÁ ESCOLHEU A FORMA DE PAGAMENTO,
+      PERMITE TROCAR OU AVANÇAR
+    */
+    if (currentStage === "payment_method_selected") {
+      if (chosenPaymentMethod) {
+        convo.salesLead.paymentMethod = chosenPaymentMethod
+        await sendText(phone, buildPaymentMethodReply(chosenPaymentMethod))
+        return
+      }
+
+      if (wantsStartNow(cleanText) || isSimplePositive(cleanText)) {
+        convo.salesLead.stage = "enrollment_explanation"
+
+        await sendText(
+          phone,
+          `Perfeito 😊
+
+Para começar, o processo é bem simples.
+
+Você me envia os dados necessários para a inscrição,
+eu organizo tudo com você por aqui
+e depois seguimos com a forma de pagamento escolhida.
+
+Se quiser, já podemos continuar agora mesmo.`
+        )
+        return
+      }
+    }
+
+    /*
+      3) SE O CLIENTE PEDIR INFORMAÇÕES DE PAGAMENTO,
+      ABRE O MENU CORRETO
+    */
+    if (wantsPaymentDetails(cleanText)) {
+      convo.salesLead.stage = "awaiting_payment_method"
+      await sendText(phone, buildPaymentChoiceMessage())
+      return
+    }
+
     const normalizedText = normalize(text || "")
     const matchedKnowledgeCourse = findCourseInText(text)
     const detectedCourse = matchedKnowledgeCourse
@@ -1691,7 +1895,7 @@ async function processMessage(phone, text) {
           text: `Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Para eu gerar seu boleto único à vista, me confirme primeiro o curso que você quer fazer.`
+Para eu gerar seu carnê único à vista, me confirme primeiro o curso que você quer fazer.`
         }
       }
 
@@ -1707,7 +1911,7 @@ Para eu gerar seu boleto único à vista, me confirme primeiro o curso que você
         text: `Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Agora vou só pegar seus dados para gerar o boleto único à vista.
+Agora vou só pegar seus dados para gerar o carnê único à vista.
 
 ${nextData.prompt}`
       }
@@ -1740,7 +1944,7 @@ ${nextData.prompt}`
 
       if (!boletoCourseInfo?.title) {
         return {
-          text: "Perfeito 😊 Para emitir seu boleto único, me informe o nome do curso."
+          text: "Perfeito 😊 Para emitir seu carnê único, me informe o nome do curso."
         }
       }
 
@@ -1769,7 +1973,7 @@ ${nextData.prompt}`
       }
 
       if (convo.payment === "Boleto a vista") {
-        return { text: "Perfeito 😊 Agora me envie seu CPF com 11 números para concluir o boleto único." }
+        return { text: "Perfeito 😊 Agora me envie seu CPF com 11 números para concluir o carnê único." }
       }
 
       return { text: sales.askCPF() }
