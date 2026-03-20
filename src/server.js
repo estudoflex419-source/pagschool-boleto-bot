@@ -352,6 +352,30 @@ Hoje temos estas opções para a taxa do material didático:
 Me fala qual você prefere, que eu te explico certinho.`
 }
 
+function buildEnrollmentStartMessage(convo = {}) {
+  const method = convo?.salesLead?.paymentMethod || ""
+
+  let paymentLabel = "não informado"
+  if (method === "carne") paymentLabel = "Carnê"
+  if (method === "cartao") paymentLabel = "Cartão"
+  if (method === "pix") paymentLabel = "À vista / Pix"
+
+  return `Perfeito 😊
+
+Então vamos iniciar sua inscrição.
+
+Me envie, por favor:
+
+- Nome completo
+- CPF
+- Data de nascimento
+- CEP
+- Número da casa
+- Curso escolhido
+
+*Forma de pagamento escolhida:* ${paymentLabel}`
+}
+
 function isCannotPayNowIntent(text) {
   const t = normalizeLoose(text)
 
@@ -1482,8 +1506,18 @@ async function processMessage(phone, text) {
     const chosenPaymentMethod = detectPaymentMethod(cleanText)
 
     /*
-      1) SE JÁ ESTÁ ESPERANDO A FORMA DE PAGAMENTO,
-      TRATA PRIMEIRO A RESPOSTA DO CLIENTE
+      1) ESTÁGIO: O BOT ACABOU DE OFERECER MOSTRAR OS VALORES
+    */
+    if (currentStage === "payment_intro") {
+      if (isSimplePositive(cleanText) || wantsPaymentDetails(cleanText)) {
+        convo.salesLead.stage = "awaiting_payment_method"
+        await sendText(phone, buildPaymentChoiceMessage())
+        return
+      }
+    }
+
+    /*
+      2) ESTÁGIO: ESPERANDO A ESCOLHA DA FORMA DE PAGAMENTO
     */
     if (currentStage === "awaiting_payment_method") {
       if (!chosenPaymentMethod) {
@@ -1499,8 +1533,7 @@ async function processMessage(phone, text) {
     }
 
     /*
-      2) SE JÁ ESCOLHEU A FORMA DE PAGAMENTO,
-      PERMITE TROCAR OU AVANÇAR
+      3) ESTÁGIO: CLIENTE JÁ ESCOLHEU A FORMA DE PAGAMENTO
     */
     if (currentStage === "payment_method_selected") {
       if (chosenPaymentMethod) {
@@ -1522,15 +1555,26 @@ Você me envia os dados necessários para a inscrição,
 eu organizo tudo com você por aqui
 e depois seguimos com a forma de pagamento escolhida.
 
-Se quiser, já podemos continuar agora mesmo.`
+Podemos continuar agora mesmo.`
         )
         return
       }
     }
 
     /*
-      3) SE O CLIENTE PEDIR INFORMAÇÕES DE PAGAMENTO,
-      ABRE O MENU CORRETO
+      4) ESTÁGIO: O BOT JÁ EXPLICOU A INSCRIÇÃO E AGORA ESPERA UM "SIM"
+    */
+    if (currentStage === "enrollment_explanation") {
+      if (wantsStartNow(cleanText) || isSimplePositive(cleanText)) {
+        convo.salesLead.stage = "collecting_enrollment"
+
+        await sendText(phone, buildEnrollmentStartMessage(convo))
+        return
+      }
+    }
+
+    /*
+      5) SE O CLIENTE PEDIR PAGAMENTO EM QUALQUER MOMENTO
     */
     if (wantsPaymentDetails(cleanText)) {
       convo.salesLead.stage = "awaiting_payment_method"
@@ -1803,6 +1847,8 @@ Se quiser, já podemos continuar agora mesmo.`
       if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
+        convo.salesLead = convo.salesLead || {}
+        convo.salesLead.stage = "payment_intro"
         return { text: buildPaymentIntroMessage(convo.course) }
       }
 
