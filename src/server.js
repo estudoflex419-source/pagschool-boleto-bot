@@ -110,8 +110,77 @@ function getDurationByWorkloadHours(hours) {
   return ""
 }
 
+function extractCourseLabel(value = "") {
+  if (!value) return ""
+
+  if (typeof value === "string") {
+    return String(value).trim()
+  }
+
+  if (typeof value === "object") {
+    return String(
+      value.title ||
+      value.name ||
+      value.nome ||
+      value.nomeCurso ||
+      ""
+    ).trim()
+  }
+
+  return ""
+}
+
+function normalizeCourseInfoCandidate(candidate) {
+  if (!candidate) return null
+
+  if (
+    typeof candidate === "object" &&
+    (
+      candidate.title ||
+      candidate.summary ||
+      candidate.description ||
+      candidate.learns ||
+      candidate.market ||
+      candidate.salary
+    )
+  ) {
+    return toServerCourseInfo(candidate) || candidate
+  }
+
+  const label = extractCourseLabel(candidate)
+  if (!label) return null
+
+  const byName = getCourseByName(label)
+  if (byName) {
+    return toServerCourseInfo(byName) || byName
+  }
+
+  return buildFallbackCourseInfoByName(label)
+}
+
+function getReadableSalesLeadPaymentMethod(value = "") {
+  const normalized = normalizeFlowText(value)
+
+  if (normalized === "carne") return "Carnê"
+  if (normalized === "cartao") return "Cartão"
+  if (normalized === "pix") return "À vista / Pix"
+
+  return String(value || "").trim() || "não informado"
+}
+
+function mapSalesLeadPaymentToConversationPayment(value = "") {
+  const normalized = normalizeFlowText(value)
+
+  if (normalized === "carne") return "Carnê"
+  if (normalized === "cartao") return "Cartão"
+  if (normalized === "pix") return "PIX"
+
+  return ""
+}
+
 function buildFallbackCourseInfoByName(courseName = "") {
-  const flowCourse = sales.findCourse(courseName)
+  const normalizedCourseName = extractCourseLabel(courseName)
+  const flowCourse = sales.findCourse(normalizedCourseName)
   if (!flowCourse) return null
 
   const workload = String(flowCourse.workload || "").trim()
@@ -120,7 +189,7 @@ function buildFallbackCourseInfoByName(courseName = "") {
   const duration = String(flowCourse.duration || "").trim() || getDurationByWorkloadHours(workloadHours)
 
   return {
-    title: flowCourse.name || courseName,
+    title: flowCourse.name || normalizedCourseName,
     aliases: flowCourse.keywords || [],
     workload: workload || "",
     duration,
@@ -373,6 +442,8 @@ Me envie, por favor:
 - Número da casa
 - Curso escolhido
 
+Pode mandar tudo junto, uma informação em cada linha.
+
 *Forma de pagamento escolhida:* ${paymentLabel}`
 }
 
@@ -409,7 +480,7 @@ function parseEnrollmentBundle(text, currentCourse = "") {
     birthDate: "",
     cep: "",
     houseNumber: "",
-    course: currentCourse || ""
+    course: extractCourseLabel(currentCourse) || ""
   }
 
   for (const line of lines) {
@@ -430,8 +501,9 @@ function parseEnrollmentBundle(text, currentCourse = "") {
       continue
     }
 
-    const detectedCourse =
+    const detectedCourseRaw =
       typeof findCourseInText === "function" ? findCourseInText(line) : ""
+    const detectedCourse = extractCourseLabel(detectedCourseRaw)
 
     if (!parsed.course && detectedCourse) {
       parsed.course = detectedCourse
@@ -454,7 +526,8 @@ function parseEnrollmentBundle(text, currentCourse = "") {
   }
 
   if (!parsed.course && typeof findCourseInText === "function") {
-    const wholeTextCourse = findCourseInText(text)
+    const wholeTextCourseRaw = findCourseInText(text)
+    const wholeTextCourse = extractCourseLabel(wholeTextCourseRaw)
     if (wholeTextCourse) parsed.course = wholeTextCourse
   }
 
@@ -468,11 +541,17 @@ function mergeEnrollmentData(convo, incoming) {
   const target = convo.salesLead.enrollment
 
   for (const [key, value] of Object.entries(incoming || {})) {
-    if (value) target[key] = value
+    if (value) {
+      target[key] = key === "course" ? extractCourseLabel(value) : value
+    }
   }
 
   if (convo.salesLead.course && !target.course) {
-    target.course = convo.salesLead.course
+    target.course = extractCourseLabel(convo.salesLead.course)
+  }
+
+  if (convo.course && !target.course) {
+    target.course = extractCourseLabel(convo.course)
   }
 
   return target
@@ -491,7 +570,7 @@ function getMissingEnrollmentFields(data = {}) {
   return missing
 }
 
-function buildMissingEnrollmentMessage(data, missing) {
+function buildMissingEnrollmentMessage(_data, missing) {
   return `Perfeito 😊
 
 Recebi uma parte dos seus dados, mas ainda faltam:
@@ -511,11 +590,124 @@ Recebi seus dados da inscrição:
 - Data de nascimento: ${data.birthDate}
 - CEP: ${data.cep}
 - Número da casa: ${data.houseNumber}
-- Curso: ${data.course}
+- Curso: ${extractCourseLabel(data.course)}
 - Forma de pagamento: ${paymentMethod || "não informado"}
 
 Se estiver tudo certo, responda *CONFIRMAR*.
 Se quiser corrigir algo, me mande apenas o campo certo.`
+}
+
+function applyEnrollmentToConversation(convo, sourcePhone = "") {
+  convo.salesLead = convo.salesLead || {}
+  convo.salesLead.enrollment = convo.salesLead.enrollment || {}
+
+  const enrollment = convo.salesLead.enrollment || {}
+
+  const courseLabel =
+    extractCourseLabel(enrollment.course) ||
+    extractCourseLabel(convo.salesLead.course) ||
+    extractCourseLabel(convo.course)
+
+  if (enrollment.fullName) convo.name = enrollment.fullName
+  if (enrollment.cpf) convo.cpf = enrollment.cpf
+  if (enrollment.birthDate) convo.birthDate = enrollment.birthDate
+  if (enrollment.cep) convo.cep = enrollment.cep
+  if (enrollment.houseNumber) convo.number = enrollment.houseNumber
+  if (courseLabel) {
+    convo.course = courseLabel
+    convo.salesLead.course = courseLabel
+  }
+
+  convo.phone = convo.phone || extractPhoneFromWhatsApp(sourcePhone) || ""
+
+  convo.salesLead.fullName = convo.name || convo.salesLead.fullName || ""
+  convo.salesLead.cpf = convo.cpf || convo.salesLead.cpf || ""
+  convo.salesLead.birthDate = convo.birthDate || convo.salesLead.birthDate || ""
+  convo.salesLead.cep = convo.cep || convo.salesLead.cep || ""
+  convo.salesLead.houseNumber = convo.number || convo.salesLead.houseNumber || ""
+  convo.salesLead.course = convo.course || convo.salesLead.course || ""
+
+  const mappedPayment = mapSalesLeadPaymentToConversationPayment(
+    convo.salesLead.paymentMethod ||
+    convo.salesLead.paymentChoice ||
+    convo.salesLead.selectedPaymentMethod ||
+    convo.payment
+  )
+
+  if (mappedPayment && !convo.payment) {
+    convo.payment = mappedPayment
+  }
+}
+
+async function continueAfterEnrollmentConfirmation(convo, sourcePhone = "") {
+  applyEnrollmentToConversation(convo, sourcePhone)
+
+  const selectedPaymentKey = normalizeFlowText(
+    convo.salesLead.paymentMethod ||
+    convo.salesLead.paymentChoice ||
+    convo.salesLead.selectedPaymentMethod ||
+    ""
+  )
+
+  convo.salesLead.stage = ""
+
+  const nextData = getNextEnrollmentDataPrompt(convo)
+
+  if (nextData) {
+    convo.step = nextData.step
+    return {
+      text: `Perfeito 😊
+
+Dados principais confirmados.
+
+Agora vou só te pedir os dados finais para concluir sua inscrição.
+
+${nextData.prompt}`
+    }
+  }
+
+  if (selectedPaymentKey === "pix" || convo.payment === "PIX") {
+    convo.payment = "PIX"
+    convo.salesLead.paymentMethod = "pix"
+    convo.salesLead.stage = "awaiting_pix_payment"
+    convo.step = "payment_intro"
+
+    return {
+      text: buildPixPaymentMessage(convo)
+    }
+  }
+
+  if (selectedPaymentKey === "cartao" || convo.payment === "Cartão") {
+    convo.payment = "Cartão"
+    convo.step = "post_sale"
+    await notifyInternalLead(convo, sourcePhone)
+
+    return {
+      text: buildCardMessage(convo.course)
+    }
+  }
+
+  if (selectedPaymentKey === "carne" || convo.payment === "Carnê") {
+    convo.payment = "Carnê"
+
+    if (convo.deferredPaymentDay && !convo.dueDay) {
+      convo.dueDay = Number(convo.deferredPaymentDay)
+    }
+
+    if (convo.dueDay) {
+      return await finalizeCarneEnrollment(convo, sourcePhone)
+    }
+
+    convo.step = "collecting_due_day"
+    return {
+      text: sales.askDueDay()
+    }
+  }
+
+  convo.step = "payment_choice"
+  return {
+    text: buildPaymentChoiceMessage()
+  }
 }
 
 function detectCantPayNow(text = "") {
@@ -669,9 +861,6 @@ function buildDeferredBoletoCreatedMessage(amount, dueDateBR, result = {}) {
   QUE CRIA UMA NOVA COBRANÇA/PARCELA, TROQUE O RETURN.
 */
 async function createDeferredBoleto(payload = {}) {
-  // Exemplo futuro:
-  // return await criarBoletoProximoMes(payload)
-
   return {
     ok: false,
     reason: "PAGSCHOOL_ENDPOINT_NOT_CONFIGURED",
@@ -823,7 +1012,8 @@ Me envie seu nome completo, por favor.`
     return { text: buildPixMessage() }
   }
 
-  if (payment === "Cartão") {     const nextData = getNextEnrollmentDataPrompt(convo)
+  if (payment === "Cartão") {
+    const nextData = getNextEnrollmentDataPrompt(convo)
 
     if (nextData) {
       convo.step = nextData.step
@@ -866,13 +1056,13 @@ ${sales.askDueDay()}`
 }
 
 function findSiteCourseKnowledge(text, currentCourse = "") {
-  const byText = toServerCourseInfo(findCourseInText(text))
+  const byText = normalizeCourseInfoCandidate(findCourseInText(text))
   if (byText) return byText
 
-  const byCurrent = toServerCourseInfo(getCourseByName(currentCourse))
+  const byCurrent = normalizeCourseInfoCandidate(getCourseByName(currentCourse))
   if (byCurrent) return byCurrent
 
-  const byCombined = toServerCourseInfo(findCourseInText(`${currentCourse} ${text}`))
+  const byCombined = normalizeCourseInfoCandidate(findCourseInText(`${currentCourse} ${text}`))
   if (byCombined) return byCombined
 
   const byCurrentFallback = buildFallbackCourseInfoByName(currentCourse)
@@ -1362,7 +1552,8 @@ function getNextEnrollmentDataPrompt(convo = {}) {
 async function finalizeCarneEnrollment(convo, sourcePhone = "") {
   const dueDayNumber = Number(convo.dueDay || convo.deferredPaymentDay || 0)
 
-  if (!dueDayNumber || dueDayNumber < 1 || dueDayNumber > 28) {    convo.step = "collecting_due_day"
+  if (!dueDayNumber || dueDayNumber < 1 || dueDayNumber > 28) {
+    convo.step = "collecting_due_day"
     return { text: sales.askDueDay() }
   }
 
@@ -1662,7 +1853,7 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
 
   if (normalizedCourseInfo?.learns?.length) {
     parts.push(`Você vai aprender temas como ${normalizedCourseInfo.learns.slice(0, 3).join(", ")}.`)
-      }
+  }
 
   parts.push(`Hoje, com ${displayName}, o que mais pesa para você: conseguir emprego mais rápido, melhorar currículo ou mudar de área?`)
 
@@ -1975,15 +2166,20 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       return
     }
 
-    // TRAVA DE MATRÍCULA
+    /*
+      TRAVA DE MATRÍCULA
+      ISSO EVITA O BOT VOLTAR PARA O FLUXO COMERCIAL
+      QUANDO O ALUNO MANDA O PACOTE DE DADOS
+    */
     if (convo.salesLead?.stage === "collecting_enrollment") {
       const parsed = parseEnrollmentBundle(text, convo.salesLead?.course || convo.course || "")
       const enrollment = mergeEnrollmentData(convo, parsed)
       const missing = getMissingEnrollmentFields(enrollment)
 
       if (missing.length) {
-        await sendText(phone, buildMissingEnrollmentMessage(enrollment, missing))
-        return
+        return {
+          text: buildMissingEnrollmentMessage(enrollment, missing)
+        }
       }
 
       convo.salesLead.fullName = enrollment.fullName
@@ -1991,47 +2187,57 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       convo.salesLead.birthDate = enrollment.birthDate
       convo.salesLead.cep = enrollment.cep
       convo.salesLead.houseNumber = enrollment.houseNumber
-      convo.salesLead.course = enrollment.course
+      convo.salesLead.course = extractCourseLabel(enrollment.course)
       convo.salesLead.stage = "awaiting_enrollment_confirmation"
 
-      const paymentMethod =
+      const paymentMethod = getReadableSalesLeadPaymentMethod(
         convo.salesLead.paymentMethod ||
         convo.salesLead.paymentChoice ||
         convo.salesLead.selectedPaymentMethod ||
         "À vista / Pix"
+      )
 
-      await sendText(phone, buildEnrollmentConfirmation(enrollment, paymentMethod))
-      return
+      return {
+        text: buildEnrollmentConfirmation(enrollment, paymentMethod)
+      }
     }
 
     if (convo.salesLead?.stage === "awaiting_enrollment_confirmation") {
-      const clean = String(text || "").trim().toLowerCase()
+      const clean = normalizeFlowText(text)
 
-      if (clean === "confirmar") {
-        // daqui pra frente segue seu fluxo de pagamento
-        // pix -> enviar chave pix
-        // se a pessoa disser que não consegue pagar agora -> gerar carnê para o próximo mês
-        convo.salesLead.stage = "payment_intro"
-        return
+      const confirmSignals = new Set([
+        "confirmar",
+        "confirmo",
+        "sim",
+        "ok",
+        "certo",
+        "pode confirmar",
+        "confirmado"
+      ])
+
+      if (confirmSignals.has(clean)) {
+        return await continueAfterEnrollmentConfirmation(convo, phone)
       }
 
       const parsed = parseEnrollmentBundle(text, convo.salesLead?.course || convo.course || "")
       const enrollment = mergeEnrollmentData(convo, parsed)
 
-      const paymentMethod =
+      const paymentMethod = getReadableSalesLeadPaymentMethod(
         convo.salesLead.paymentMethod ||
         convo.salesLead.paymentChoice ||
         convo.salesLead.selectedPaymentMethod ||
         "À vista / Pix"
+      )
 
-      await sendText(phone, buildEnrollmentConfirmation(enrollment, paymentMethod))
-      return
+      return {
+        text: buildEnrollmentConfirmation(enrollment, paymentMethod)
+      }
     }
 
     const normalizedText = normalize(text || "")
     const matchedKnowledgeCourse = findCourseInText(text)
     const detectedCourse = matchedKnowledgeCourse
-      ? { name: matchedKnowledgeCourse.name }
+      ? { name: extractCourseLabel(matchedKnowledgeCourse) }
       : sales.findCourse(text)
     const courseInfoFromText = findSiteCourseKnowledge(text, convo.course)
     const raw = String(text || "").trim().toLowerCase()
@@ -2134,7 +2340,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       return { text: buildCourseListMessage() }
     }
 
-    if (detectedCourse) {
+    if (detectedCourse?.name) {
       const courseInfo =
         findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name) ||
         buildFallbackCourseInfoByName(detectedCourse.name)
@@ -2188,7 +2394,8 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       convo.course &&
       isPriceQuestion &&
       ["diagnosis_goal", "diagnosis_experience", "offer_transition", "course_selection"].includes(convo.step)
-    ) {      const selectedCourseInfo =
+    ) {
+      const selectedCourseInfo =
         findSiteCourseKnowledge(convo.course, convo.course) ||
         findSiteCourseKnowledge(text, convo.course)
 
@@ -2488,7 +2695,9 @@ ${nextData.prompt}`
       if (convo.payment === "Boleto a vista") {
         convo.step = "collecting_birth"
         return { text: sales.askBirthDate() }
-      }      convo.step = "collecting_birth"
+      }
+
+      convo.step = "collecting_birth"
       return { text: sales.askBirthDate() }
     }
 
