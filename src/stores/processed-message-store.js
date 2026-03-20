@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 const fs = require("fs");
 const path = require("path");
@@ -43,24 +43,55 @@ function createProcessedMessageStore({
     return key ? entries.has(key) : false;
   }
 
-  function save(id, payload = {}) {
+  function reserve(id, payload = {}) {
+    const key = String(id || "").trim();
+    if (!key) return false;
+    if (entries.has(key)) return false;
+
+    entries.set(key, {
+      status: "processing",
+      reservedAt: nowIso(),
+      ...payload,
+    });
+    scheduleSave();
+    return true;
+  }
+
+  function complete(id, payload = {}) {
     const key = String(id || "").trim();
     if (!key) return null;
+
+    const current = entries.get(key) || {};
     const entry = {
-      processedAt: nowIso(),
-      phone: "",
-      text: "",
+      ...current,
       ...payload,
+      status: "done",
+      processedAt: nowIso(),
     };
+
     entries.set(key, entry);
     scheduleSave();
     return entry;
+  }
+
+  function remove(id) {
+    const key = String(id || "").trim();
+    if (!key) return;
+    entries.delete(key);
+    scheduleSave();
+  }
+
+  function save(id, payload = {}) {
+    return complete(id, payload);
   }
 
   return {
     load,
     saveNow,
     has,
+    reserve,
+    complete,
+    remove,
     save,
   };
 }
