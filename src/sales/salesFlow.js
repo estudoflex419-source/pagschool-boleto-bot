@@ -283,7 +283,7 @@ const COURSE_CATALOG = [
       "é uma formação prática para quem quer se preparar melhor para vagas em lojas e comércios",
     market:
       "lojas, supermercados, farmácias e comércio em geral",
-    workload: "96h",
+      workload: "96h",
     salary: "R$ 1.513,00",
     learns: [
       "atendimento",
@@ -571,7 +571,7 @@ function buildValueConnection(convo = {}) {
   const goal = normalizeText(convo.goal)
   const experience = normalizeText(convo.experience)
 
-  let first = `Pelo que você me contou, ${courseName} faz sentido para o seu momento.`
+  let first = `${courseName} pode fazer sentido para o seu momento.`
 
   if (
     goal.includes("trabalho") ||
@@ -581,7 +581,7 @@ function buildValueConnection(convo = {}) {
     goal.includes("currículo") ||
     goal.includes("oportunidade")
   ) {
-    first = `Pelo que você me contou, ${courseName} pode te ajudar bastante a se preparar melhor para novas oportunidades.`
+    first = `${courseName} pode te ajudar bastante a se preparar melhor para novas oportunidades.`
   }
 
   if (
@@ -591,21 +591,20 @@ function buildValueConnection(convo = {}) {
     experience.includes("nao") ||
     experience.includes("não")
   ) {
-    first += " E o bom é que mesmo quem está começando do zero consegue acompanhar."
+    first += " E o bom é que dá para começar mesmo do zero."
   }
 
-  const parts = [first]
+  const parts = [`Perfeito 😊 ${first}`]
 
   if (selectedCourse.learns?.length) {
-    parts.push(`No curso você vai aprender temas como ${selectedCourse.learns.slice(0, 4).join(", ")}.`)
+    parts.push(`Você vai ver temas como ${selectedCourse.learns.slice(0, 3).join(", ")}.`)
   }
 
   if (selectedCourse.market) {
-    parts.push(`Isso pode abrir possibilidades em ${selectedCourse.market}.`)
+    parts.push(`Isso pode fortalecer seu currículo para buscar oportunidade em ${selectedCourse.market}.`)
   }
 
-  parts.push("Também é uma formação que fortalece o currículo e passa mais segurança na hora de buscar uma oportunidade.")
-  parts.push("Quer que eu te explique agora como funciona a matrícula?")
+  parts.push("Posso te explicar melhor como funciona o curso ou, se preferir, já te passo os valores.")
 
   return parts.join("\n\n")
 }
