@@ -1640,9 +1640,16 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
     return { text: sales.askDueDay() }
   }
 
+  convo.salesLead = convo.salesLead || {}
   convo.dueDay = dueDayNumber
   convo.payment = "Boleto a vista"
   convo.phone = convo.phone || extractPhoneFromWhatsApp(sourcePhone) || ""
+  convo.awaitingPaymentProof = false
+  convo.paymentTeaserShown = false
+  convo.salesLead.paymentMethod = "boleto_unico"
+  convo.salesLead.paymentChoice = "boleto_unico"
+  convo.salesLead.selectedPaymentMethod = "boleto_unico"
+  convo.salesLead.stage = "deferred_boleto_ready"
 
   const nextData = getNextEnrollmentDataPrompt(convo)
   if (nextData) {
@@ -1650,7 +1657,7 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
     return {
       text: `Perfeito 😊
 
-Para emitir seu carnê único, preciso concluir alguns dados de cadastro.
+Para emitir seu *boleto único*, preciso concluir alguns dados de cadastro.
 
 ${nextData.prompt}`
     }
@@ -1691,7 +1698,7 @@ ${nextData.prompt}`
     return {
       text: `Perfeito 😊
 
-Tive uma instabilidade para emitir o carnê automaticamente agora, mas seus dados já ficaram registrados.
+Tive uma instabilidade para emitir o *boleto único* automaticamente agora, mas seus dados já ficaram registrados.
 Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
     }
   }
@@ -1702,11 +1709,12 @@ Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
   convo.parcelaId = created?.secondVia?.parcela?.id || null
   convo.nossoNumero = created?.secondVia?.nossoNumero || ""
   convo.paymentTeaserShown = false
+  convo.salesLead.stage = "deferred_boleto_created"
   await notifyInternalLead(convo, sourcePhone, { force: true })
 
   if (created?.error) {
     return {
-      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do carnê.
+      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do *boleto único*.
 
 Motivo: ${created.error}
 
@@ -1718,7 +1726,7 @@ Se quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final d
     return {
       text: `Perfeito 😊
 
-Sua matrícula foi criada, mas o carnê ainda está sendo processado pela plataforma.
+Sua matrícula foi criada, mas o *boleto único* ainda está sendo processado pela plataforma.
 Assim que a emissão for concluída, a equipe poderá seguir com o envio.`
     }
   }
@@ -1732,9 +1740,10 @@ ${buildSecondViaText(created.secondVia)}`,
     documentBuffer: pdfPayload?.buffer || null,
     filename: pdfPayload?.filename || "boleto.pdf",
     mimeType: pdfPayload?.mimeType || "application/pdf",
-    caption: "Segue o PDF do seu boleto."
+    caption: "Segue o PDF do seu boleto único."
   }
 }
+
 
 function isCourseDetailsQuestion(text) {
   const t = normalizeLoose(text)
@@ -2159,7 +2168,7 @@ ou
         phone,
         `Perfeito 😊
 
-Anotei aqui um *boleto para o próximo mês* no valor de *${formatMoneyBR(desiredAmount)}*, com vencimento em *${dueDateBR}*.
+Anotei aqui um *boleto único para o próximo mês* no valor de *${formatMoneyBR(desiredAmount)}*, com vencimento em *${dueDateBR}*.
 
 Assim que a emissão estiver concluída, ele é enviado por aqui.`
       )
@@ -2420,17 +2429,39 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       isCannotPayNowIntent(text) &&
       [
         "offer_transition",
+        "payment_intro",
         "payment_choice",
         "diagnosis_goal",
         "diagnosis_experience",
         "collecting_name",
         "collecting_cpf",
+        "collecting_birth",
+        "collecting_email",
+        "collecting_gender",
+        "collecting_cep",
+        "collecting_number",
+        "collecting_complement",
+        "collecting_neighborhood",
+        "collecting_city",
+        "collecting_state",
+        "collecting_pix_course",
+        "collecting_boleto_course",
         "post_sale"
       ].includes(convo.step)
     ) {
+      convo.salesLead = convo.salesLead || {}
+      convo.payment = "Boleto a vista"
+      convo.paymentTeaserShown = false
+      convo.awaitingPaymentProof = false
+      convo.salesLead.paymentMethod = "boleto_unico"
+      convo.salesLead.paymentChoice = "boleto_unico"
+      convo.salesLead.selectedPaymentMethod = "boleto_unico"
+      convo.salesLead.stage = "payment_deferral_day"
       convo.step = "payment_deferral_day"
+
       return { text: buildDeferredPaymentOfferMessage() }
     }
+
 
     const objectionReply = sales.getObjectionReply(text, convo.course)
     if (objectionReply && convo.step !== "post_sale") {
@@ -2541,7 +2572,16 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       }
 
       if (isCannotPayNowIntent(text)) {
+        convo.salesLead = convo.salesLead || {}
+        convo.payment = "Boleto a vista"
+        convo.paymentTeaserShown = false
+        convo.awaitingPaymentProof = false
+        convo.salesLead.paymentMethod = "boleto_unico"
+        convo.salesLead.paymentChoice = "boleto_unico"
+        convo.salesLead.selectedPaymentMethod = "boleto_unico"
+        convo.salesLead.stage = "payment_deferral_day"
         convo.step = "payment_deferral_day"
+
         return { text: buildDeferredPaymentOfferMessage() }
       }
 
@@ -2583,10 +2623,17 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
         }
       }
 
+      convo.salesLead = convo.salesLead || {}
       convo.deferredPaymentDay = String(preferredDay)
       convo.dueDay = preferredDay
       convo.payment = "Boleto a vista"
+      convo.awaitingPaymentProof = false
+      convo.paymentTeaserShown = false
       convo.phone = convo.phone || extractPhoneFromWhatsApp(phone) || ""
+      convo.salesLead.paymentMethod = "boleto_unico"
+      convo.salesLead.paymentChoice = "boleto_unico"
+      convo.salesLead.selectedPaymentMethod = "boleto_unico"
+      convo.salesLead.stage = "payment_deferral_day"
 
       if (!String(convo.course || "").trim()) {
         convo.step = "collecting_boleto_course"
@@ -2594,7 +2641,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
           text: `Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Para eu gerar seu carnê único à vista, me confirme primeiro o curso que você quer fazer.`
+Para eu gerar seu *boleto único*, me confirme primeiro o curso que você quer fazer.`
         }
       }
 
@@ -2610,7 +2657,7 @@ Para eu gerar seu carnê único à vista, me confirme primeiro o curso que você
         text: `Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Agora vou só pegar seus dados para gerar o carnê único à vista.
+Agora vou só pegar seus dados para gerar o *boleto único*.
 
 ${nextData.prompt}`
       }
@@ -2643,7 +2690,7 @@ ${nextData.prompt}`
 
       if (!boletoCourseInfo?.title) {
         return {
-          text: "Perfeito 😊 Para emitir seu carnê único, me informe o nome do curso."
+          text: "Perfeito 😊 Para emitir seu *boleto único*, me informe o nome do curso."
         }
       }
 
@@ -2672,7 +2719,7 @@ ${nextData.prompt}`
       }
 
       if (convo.payment === "Boleto a vista") {
-        return { text: "Perfeito 😊 Agora me envie seu CPF com 11 números para concluir o carnê único." }
+        return { text: "Perfeito 😊 Agora me envie seu CPF com 11 números para concluir o *boleto único*." }
       }
 
       return { text: sales.askCPF() }
@@ -2796,12 +2843,6 @@ ${nextData.prompt}`
 
       convo.state = normalizeUF(text)
 
-      if (convo.salesLead?.paymentMethod === "pix") {
-        convo.salesLead.stage = "awaiting_pix_payment"
-        await sendText(phone, buildPixPaymentMessage(convo))
-        return
-      }
-
       if (convo.payment === "Carnê") {
         if (convo.deferredPaymentDay && !convo.dueDay) {
           convo.dueDay = Number(convo.deferredPaymentDay)
@@ -2816,6 +2857,14 @@ ${nextData.prompt}`
       }
 
       if (convo.payment === "Boleto a vista") {
+        convo.salesLead = convo.salesLead || {}
+        convo.awaitingPaymentProof = false
+        convo.paymentTeaserShown = false
+        convo.salesLead.paymentMethod = "boleto_unico"
+        convo.salesLead.paymentChoice = "boleto_unico"
+        convo.salesLead.selectedPaymentMethod = "boleto_unico"
+        convo.salesLead.stage = "deferred_boleto_ready"
+
         if (convo.deferredPaymentDay && !convo.dueDay) {
           convo.dueDay = Number(convo.deferredPaymentDay)
         }
@@ -2826,6 +2875,12 @@ ${nextData.prompt}`
 
         convo.step = "collecting_due_day"
         return { text: sales.askDueDay() }
+      }
+
+      if (convo.salesLead?.paymentMethod === "pix") {
+        convo.salesLead.stage = "awaiting_pix_payment"
+        await sendText(phone, buildPixPaymentMessage(convo))
+        return
       }
 
       convo.step = "post_sale"
@@ -2896,3 +2951,8 @@ const app = createApp({
 app.listen(PORT || 3000, () => {
   console.log(`Servidor rodando na porta ${PORT || 3000}`)
 })
+
+
+
+
+
