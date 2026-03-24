@@ -1,7 +1,7 @@
 require("dotenv").config()
 
-const fs = require("fs")
-const path = require("path")
+const fs = require("node:fs")
+const path = require("node:path")
 
 const {
   PORT,
@@ -55,12 +55,42 @@ if (!COURSE_SITE_KNOWLEDGE.length) {
   console.log(`Base de cursos carregada do documento: ${COURSE_SITE_KNOWLEDGE.length} cursos.`)
 }
 
-const DEFAULT_PAYMENT_PLAN = {
-  installments: 12,
-  installmentValue: 80
-}
+const PAYMENT_OPTIONS = Object.freeze({
+  carne: {
+    key: "carne",
+    label: "Carnê",
+    conversationLabel: "Carnê",
+    total: 1140,
+    installments: 12,
+    installmentValue: 95,
+    aliases: ["1", "carne", "carnê"]
+  },
+  cartao: {
+    key: "cartao",
+    label: "Cartão",
+    conversationLabel: "Cartão",
+    total: 780,
+    installments: 12,
+    installmentValue: 65,
+    aliases: ["2", "cartao", "cartão", "credito", "crédito", "debito", "débito"]
+  },
+  pix: {
+    key: "pix",
+    label: "À vista / Pix",
+    conversationLabel: "PIX",
+    total: 550,
+    installments: 1,
+    installmentValue: 550,
+    aliases: ["3", "pix", "a vista", "à vista", "avista"]
+  }
+})
 
-const DEFAULT_PIX_CASH_VALUE = 550
+const PIX_RECEIVER = Object.freeze({
+  key: "22211962/000122",
+  name: "ALEXANDER PHILADELPHO BEZERRA"
+})
+
+const DEFAULT_PIX_CASH_VALUE = PAYMENT_OPTIONS.pix.total
 
 const INTERNAL_LEAD_NOTIFY_PHONE =
   CONFIG_INTERNAL_LEAD_NOTIFY_PHONE ||
@@ -69,12 +99,25 @@ const INTERNAL_LEAD_NOTIFY_PHONE =
 
 const INTERNAL_LEAD_FALLBACK_FILE = path.join(process.cwd(), "internal-lead-queue.json")
 
+function reply(text, extra = {}) {
+  return { text, ...extra }
+}
+
+function ensureSalesLead(convo) {
+  convo.salesLead = convo.salesLead || {}
+  return convo.salesLead
+}
+
 function responseToBuffer(data) {
   if (!data) return Buffer.alloc(0)
 
   if (Buffer.isBuffer(data)) return data
   if (data instanceof ArrayBuffer) return Buffer.from(data)
-  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer)
+
+  if (ArrayBuffer.isView(data)) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+  }
+
   if (typeof data === "string") return Buffer.from(data, "utf8")
 
   try {
@@ -88,6 +131,7 @@ function isPdfHttpResponse(resp) {
   const contentType = String(resp?.headers?.["content-type"] || "").toLowerCase()
   const buffer = responseToBuffer(resp?.data)
   const startsWithPdf = buffer.slice(0, 4).toString("utf8") === "%PDF"
+
   return contentType.includes("application/pdf") || startsWithPdf
 }
 
@@ -99,8 +143,29 @@ function normalizeLoose(value) {
   return normalize(String(value || "")).replace(/\s+/g, " ").trim()
 }
 
+function normalizeFlowText(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 function uniqueItems(items = []) {
   return [...new Set(items.filter(Boolean))]
+}
+
+function formatMoneyBR(value = 0) {
+  return Number(value || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  })
+}
+
+function formatMoney(value) {
+  const n = Number(value || 0)
+  return n.toFixed(2).replace(".", ",")
 }
 
 function getDurationByWorkloadHours(hours) {
@@ -120,10 +185,10 @@ function extractCourseLabel(value = "") {
   if (typeof value === "object") {
     return String(
       value.title ||
-      value.name ||
-      value.nome ||
-      value.nomeCurso ||
-      ""
+        value.name ||
+        value.nome ||
+        value.nomeCurso ||
+        ""
     ).trim()
   }
 
@@ -158,24 +223,41 @@ function normalizeCourseInfoCandidate(candidate) {
   return buildFallbackCourseInfoByName(label)
 }
 
+function getPaymentOption(key = "") {
+  return PAYMENT_OPTIONS[key] || null
+}
+
+function detectPaymentMethod(text = "", options = {}) {
+  const { allowNumeric = true } = options
+  const t = normalizeFlowText(text)
+
+  if (!t) return ""
+
+  for (const option of Object.values(PAYMENT_OPTIONS)) {
+    for (const alias of option.aliases) {
+      if (!allowNumeric && /^\d+$/.test(alias)) continue
+      if (t === alias || t.includes(alias)) {
+        return option.key
+      }
+    }
+  }
+
+  return ""
+}
+
+function detectPaymentSelection(text = "", options = {}) {
+  const method = detectPaymentMethod(text, options)
+  return getPaymentOption(method)?.conversationLabel || ""
+}
+
 function getReadableSalesLeadPaymentMethod(value = "") {
-  const normalized = normalizeFlowText(value)
-
-  if (normalized === "carne") return "Carnê"
-  if (normalized === "cartao") return "Cartão"
-  if (normalized === "pix") return "À vista / Pix"
-
-  return String(value || "").trim() || "não informado"
+  const method = detectPaymentMethod(value)
+  return getPaymentOption(method)?.label || String(value || "").trim() || "não informado"
 }
 
 function mapSalesLeadPaymentToConversationPayment(value = "") {
-  const normalized = normalizeFlowText(value)
-
-  if (normalized === "carne") return "Carnê"
-  if (normalized === "cartao") return "Cartão"
-  if (normalized === "pix") return "PIX"
-
-  return ""
+  const method = detectPaymentMethod(value)
+  return getPaymentOption(method)?.conversationLabel || ""
 }
 
 function buildFallbackCourseInfoByName(courseName = "") {
@@ -203,7 +285,22 @@ function buildFallbackCourseInfoByName(courseName = "") {
 }
 
 function getPaymentPlan(_courseName = "") {
-  return DEFAULT_PAYMENT_PLAN
+  return {
+    installments: PAYMENT_OPTIONS.carne.installments,
+    installmentValue: PAYMENT_OPTIONS.carne.installmentValue
+  }
+}
+
+function buildPaymentSummaryLine() {
+  const carne = PAYMENT_OPTIONS.carne
+  const cartao = PAYMENT_OPTIONS.cartao
+  const pix = PAYMENT_OPTIONS.pix
+
+  return [
+    `- 📘 *Carnê:* ${carne.installments}x de ${formatMoneyBR(carne.installmentValue)} (total ${formatMoneyBR(carne.total)})`,
+    `- 💳 *Cartão:* ${cartao.installments}x de ${formatMoneyBR(cartao.installmentValue)} (total ${formatMoneyBR(cartao.total)})`,
+    `- 💵 *À vista / Pix:* ${formatMoneyBR(pix.total)}`
+  ].join("\n")
 }
 
 function isPaymentGuidanceQuestion(text) {
@@ -220,14 +317,6 @@ function isPaymentGuidanceQuestion(text) {
     t.includes("explica o pagamento") ||
     t.includes("como funciona o pagamento")
   )
-}
-
-function normalizeFlowText(value = "") {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
 }
 
 function wantsPaymentDetails(text = "") {
@@ -257,49 +346,6 @@ function wantsPaymentDetails(text = "") {
     t.includes("opções de pagamento") ||
     t.includes("opcoes de pagamento")
   )
-}
-
-function detectPaymentMethod(text = "") {
-  const t = normalizeFlowText(text)
-
-  if (
-    t === "1" ||
-    t === "carne" ||
-    t === "carnê" ||
-    t.includes("carnê") ||
-    t.includes("carne")
-  ) {
-    return "carne"
-  }
-
-  if (
-    t === "2" ||
-    t === "cartao" ||
-    t === "cartão" ||
-    t.includes("cartao") ||
-    t.includes("cartão") ||
-    t.includes("credito") ||
-    t.includes("crédito") ||
-    t.includes("debito") ||
-    t.includes("débito")
-  ) {
-    return "cartao"
-  }
-
-  if (
-    t === "3" ||
-    t === "pix" ||
-    t === "a vista" ||
-    t === "à vista" ||
-    t.includes("pix") ||
-    t.includes("a vista") ||
-    t.includes("à vista") ||
-    t.includes("avista")
-  ) {
-    return "pix"
-  }
-
-  return ""
 }
 
 function wantsStartNow(text = "") {
@@ -350,7 +396,7 @@ function buildPaymentIntroMessage() {
 
 O curso é totalmente gratuito.
 
-Você paga apenas a *taxa única do material didático*, e temos 3 formas de pagamento.
+Você paga apenas a *taxa única do material didático*.
 
 Quer que eu te mostre os valores certinhos?`
 }
@@ -362,9 +408,7 @@ O curso é totalmente gratuito.
 Existe apenas a taxa única do material didático.
 
 *VALOR DO MATERIAL DIDÁTICO:*
-- 📘 *Carnê:* R$ 1.140,00 em 12 vezes de R$ 95,00
-- 💳 *Cartão:* R$ 780,00 em 12 vezes de R$ 65,00
-- 💵 *À vista ou Pix:* R$ 550,00
+${buildPaymentSummaryLine()}
 
 Qual opção fica melhor para você?
 
@@ -374,39 +418,27 @@ Qual opção fica melhor para você?
 }
 
 function buildPaymentMethodReply(method) {
-  if (method === "carne") {
-    return `Perfeito 😊
-
-No *carnê*, a taxa do material didático fica em:
-
-*12 vezes de R$ 95,00*
-Total: *R$ 1.140,00*
-
-Se quiser, já posso te explicar agora como funciona a inscrição.`
-  }
-
-  if (method === "cartao") {
-    return `Perfeito 😊
-
-No *cartão*, a taxa do material didático fica em:
-
-*12 vezes de R$ 65,00*
-Total: *R$ 780,00*
-
-Se quiser, já posso te explicar agora como funciona a inscrição.`
-  }
+  const option = getPaymentOption(method)
+  if (!option) return buildPaymentChoiceMessage()
 
   if (method === "pix") {
     return `Perfeito 😊
 
-No *Pix / à vista*, a taxa do material didático fica em:
+No *${option.label}*, a taxa do material didático fica em:
 
-*R$ 550,00*
+*${formatMoneyBR(option.total)}*
 
 Se quiser, já posso te explicar agora como funciona a inscrição.`
   }
 
-  return buildPaymentChoiceMessage()
+  return `Perfeito 😊
+
+No *${option.label}*, a taxa do material didático fica em:
+
+*${option.installments} vezes de ${formatMoneyBR(option.installmentValue)}*
+Total: *${formatMoneyBR(option.total)}*
+
+Se quiser, já posso te explicar agora como funciona a inscrição.`
 }
 
 function buildPaymentHelpMessage() {
@@ -445,13 +477,6 @@ Me envie, por favor:
 Pode mandar tudo junto, uma informação em cada linha.
 
 *Forma de pagamento escolhida:* ${paymentLabel}`
-}
-
-function formatMoneyBR(value = 0) {
-  return Number(value || 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL"
-  })
 }
 
 function toTitleCaseName(value = "") {
@@ -535,7 +560,7 @@ function parseEnrollmentBundle(text, currentCourse = "") {
 }
 
 function mergeEnrollmentData(convo, incoming) {
-  convo.salesLead = convo.salesLead || {}
+  ensureSalesLead(convo)
   convo.salesLead.enrollment = convo.salesLead.enrollment || {}
 
   const target = convo.salesLead.enrollment
@@ -598,7 +623,7 @@ Se quiser corrigir algo, me mande apenas o campo certo.`
 }
 
 function applyEnrollmentToConversation(convo, sourcePhone = "") {
-  convo.salesLead = convo.salesLead || {}
+  ensureSalesLead(convo)
   convo.salesLead.enrollment = convo.salesLead.enrollment || {}
 
   const enrollment = convo.salesLead.enrollment || {}
@@ -629,9 +654,9 @@ function applyEnrollmentToConversation(convo, sourcePhone = "") {
 
   const mappedPayment = mapSalesLeadPaymentToConversationPayment(
     convo.salesLead.paymentMethod ||
-    convo.salesLead.paymentChoice ||
-    convo.salesLead.selectedPaymentMethod ||
-    convo.payment
+      convo.salesLead.paymentChoice ||
+      convo.salesLead.selectedPaymentMethod ||
+      convo.payment
   )
 
   if (mappedPayment && !convo.payment) {
@@ -644,9 +669,9 @@ async function continueAfterEnrollmentConfirmation(convo, sourcePhone = "") {
 
   const selectedPaymentKey = normalizeFlowText(
     convo.salesLead.paymentMethod ||
-    convo.salesLead.paymentChoice ||
-    convo.salesLead.selectedPaymentMethod ||
-    ""
+      convo.salesLead.paymentChoice ||
+      convo.salesLead.selectedPaymentMethod ||
+      ""
   )
 
   convo.salesLead.stage = ""
@@ -655,15 +680,13 @@ async function continueAfterEnrollmentConfirmation(convo, sourcePhone = "") {
 
   if (nextData) {
     convo.step = nextData.step
-    return {
-      text: `Perfeito 😊
+    return reply(`Perfeito 😊
 
 Dados principais confirmados.
 
 Agora vou só te pedir os dados finais para concluir sua inscrição.
 
-${nextData.prompt}`
-    }
+${nextData.prompt}`)
   }
 
   if (selectedPaymentKey === "pix" || convo.payment === "PIX") {
@@ -672,9 +695,7 @@ ${nextData.prompt}`
     convo.salesLead.stage = "awaiting_pix_payment"
     convo.step = "payment_intro"
 
-    return {
-      text: buildPixPaymentMessage(convo)
-    }
+    return reply(buildPixPaymentMessage(convo))
   }
 
   if (selectedPaymentKey === "cartao" || convo.payment === "Cartão") {
@@ -682,9 +703,7 @@ ${nextData.prompt}`
     convo.step = "post_sale"
     await notifyInternalLead(convo, sourcePhone)
 
-    return {
-      text: buildCardMessage(convo.course)
-    }
+    return reply(buildCardMessage(convo.course))
   }
 
   if (selectedPaymentKey === "carne" || convo.payment === "Carnê") {
@@ -699,15 +718,11 @@ ${nextData.prompt}`
     }
 
     convo.step = "collecting_due_day"
-    return {
-      text: sales.askDueDay()
-    }
+    return reply(sales.askDueDay())
   }
 
   convo.step = "payment_choice"
-  return {
-    text: buildPaymentChoiceMessage()
-  }
+  return reply(buildPaymentChoiceMessage())
 }
 
 function detectCantPayNow(text = "") {
@@ -797,10 +812,10 @@ Sua inscrição do curso *${selectedCourse}* foi organizada.
 
 Para concluir agora, o pagamento via *Pix* fica em:
 
-*R$ 550,00*
+*${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}*
 
-*Chave Pix (CNPJ):* 22211962/000122
-*Nome:* ALEXANDER PHILADELPHO BEZERRA
+*Chave Pix (CNPJ):* ${PIX_RECEIVER.key}
+*Nome:* ${PIX_RECEIVER.name}
 
 Depois que fizer o pagamento, me envie o comprovante por aqui.
 
@@ -830,27 +845,27 @@ Vencimento previsto: *${dueDateBR}*`
 function buildDeferredBoletoCreatedMessage(amount, dueDateBR, result = {}) {
   const lines = []
 
-  lines.push(`Perfeito 😊`)
-  lines.push(``)
-  lines.push(`Seu boleto foi organizado para o próximo mês.`)
-  lines.push(``)
+  lines.push("Perfeito 😊")
+  lines.push("")
+  lines.push("Seu boleto foi organizado para o próximo mês.")
+  lines.push("")
   lines.push(`*Valor:* ${formatMoneyBR(amount)}`)
   lines.push(`*Vencimento:* ${dueDateBR}`)
 
   if (result?.linhaDigitavel) {
-    lines.push(``)
-    lines.push(`*Linha digitável:*`)
+    lines.push("")
+    lines.push("*Linha digitável:*")
     lines.push(String(result.linhaDigitavel))
   }
 
   if (result?.pdfUrl) {
-    lines.push(``)
-    lines.push(`*Link do boleto:*`)
+    lines.push("")
+    lines.push("*Link do boleto:*")
     lines.push(String(result.pdfUrl))
   }
 
-  lines.push(``)
-  lines.push(`Qualquer dúvida, sigo com você por aqui 😊`)
+  lines.push("")
+  lines.push("Qualquer dúvida, sigo com você por aqui 😊")
 
   return lines.join("\n")
 }
@@ -923,136 +938,6 @@ Podemos sim deixar para o próximo mês.
 Se ficar melhor para você, eu posso organizar um carnê único à vista para a data que você preferir, assim você consegue se planejar com calma.
 
 Qual dia fica melhor para você: 5, 10, 15, 20 ou outro?`
-}
-
-function detectPaymentSelection(text = "", options = {}) {
-  const { allowNumeric = false } = options
-  const raw = String(text || "").trim().toLowerCase()
-
-  if (!raw) return ""
-
-  if (
-    (allowNumeric && raw === "1") ||
-    /\bcarn[eê]\b/.test(raw) ||
-    raw.includes("quero carne") ||
-    raw.includes("quero carnê") ||
-    raw.includes("eu quero carne") ||
-    raw.includes("eu quero carnê") ||
-    raw.includes("prefiro carne") ||
-    raw.includes("prefiro carnê")
-  ) {
-    return "Carnê"
-  }
-
-  if (
-    (allowNumeric && raw === "2") ||
-    raw.includes("cartao") ||
-    raw.includes("cartão") ||
-    raw.includes("quero cartao") ||
-    raw.includes("quero cartão") ||
-    raw.includes("prefiro cartao") ||
-    raw.includes("prefiro cartão")
-  ) {
-    return "Cartão"
-  }
-
-  if (
-    (allowNumeric && raw === "3") ||
-    /\bpix\b/.test(raw) ||
-    raw.includes("quero pix") ||
-    raw.includes("prefiro pix")
-  ) {
-    return "PIX"
-  }
-
-  return ""
-}
-
-async function continueFromSelectedPayment(convo, phone, payment) {
-  convo.payment = payment
-  convo.paymentTeaserShown = false
-  convo.phone = extractPhoneFromWhatsApp(phone) || convo.phone || ""
-
-  if (payment === "PIX") {
-    const needsCourse = !String(convo.course || "").trim()
-
-    if (needsCourse) {
-      convo.step = "collecting_pix_course"
-      return {
-        text: `Perfeito 😊 Vamos seguir na opção PIX à vista.
-Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
-
-Para finalizar no PIX, eu preciso só destes dados:
-- Curso
-- Nome completo
-- CPF
-
-Me envie o nome do curso, por favor.`
-      }
-    }
-
-    if (!String(convo.name || "").trim()) {
-      convo.step = "collecting_name"
-      return {
-        text: `Perfeito 😊 Vamos seguir na opção PIX à vista.
-Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
-
-Me envie seu nome completo, por favor.`
-      }
-    }
-
-    if (!String(convo.cpf || "").trim()) {
-      convo.step = "collecting_cpf"
-      return {
-        text: "Perfeito 😊 Agora me envie seu CPF com 11 números para eu te passar a chave PIX."
-      }
-    }
-
-    convo.step = "post_sale"
-    return { text: buildPixMessage() }
-  }
-
-  if (payment === "Cartão") {
-    const nextData = getNextEnrollmentDataPrompt(convo)
-
-    if (nextData) {
-      convo.step = nextData.step
-      return {
-        text: `Perfeito 😊 Vamos seguir na opção cartão.
-
-Para deixar tudo encaminhado, preciso de alguns dados de cadastro.
-
-${nextData.prompt}`
-      }
-    }
-
-    convo.step = "post_sale"
-    return { text: buildCardMessage(convo.course) }
-  }
-
-  const nextData = getNextEnrollmentDataPrompt(convo)
-
-  if (nextData) {
-    convo.step = nextData.step
-    return {
-      text: `Perfeito 😊 Vamos seguir com o carnê.
-
-Essa costuma ser a opção que muita gente escolhe porque fica mais leve para começar.
-
-${nextData.prompt}`
-    }
-  }
-
-  if (convo.dueDay || convo.deferredPaymentDay) {
-    return await finalizeCarneEnrollment(convo, phone)
-  }
-
-  convo.step = "collecting_due_day"
-  return {
-    text: `Perfeito 😊 Vamos seguir com o carnê.
-
-${sales.askDueDay()}`
-  }
 }
 
 function findSiteCourseKnowledge(text, currentCourse = "") {
@@ -1195,11 +1080,6 @@ function mapExperienceReply(text = "") {
   return String(text || "").trim()
 }
 
-function formatMoney(value) {
-  const n = Number(value || 0)
-  return n.toFixed(2).replace(".", ",")
-}
-
 function buildCourseSalesSummary(courseName = "", courseInfo = null, compact = false) {
   const selectedCourse = courseInfo || findSiteCourseKnowledge(courseName, courseName)
   const flowCourse = sales.findCourse(courseName)
@@ -1252,7 +1132,6 @@ function buildCourseSalesSummary(courseName = "", courseInfo = null, compact = f
 function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {}) {
   const { compactCourseExplanation = true } = options
   const courseLabel = courseName || courseInfo?.title || ""
-  const plan = getPaymentPlan(courseName)
   const courseSummary = buildCourseSalesSummary(courseName, courseInfo, compactCourseExplanation)
   const freeLine = courseLabel
     ? `${courseLabel} é 100% gratuito, sem mensalidade.`
@@ -1261,21 +1140,27 @@ function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {
   return `Ótima pergunta 😊
 ${courseSummary}
 ${freeLine}
-Taxa única do material: Carnê ${plan.installments}x de R$ ${formatMoney(plan.installmentValue)} | Cartão | PIX à vista de R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
-Se quiser, já me responde: 1 (Carnê), 2 (Cartão) ou 3 (PIX).`
+
+*Taxa única do material didático:*
+${buildPaymentSummaryLine()}
+
+Se quiser, já me responde:
+1 - Carnê
+2 - Cartão
+3 - PIX.`
 }
 
 function buildPixMessage() {
   return `Perfeito 😊
 
 Seus dados foram registrados na opção PIX à vista.
-Valor do PIX à vista: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
+Valor do PIX à vista: ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}.
 
 Para pagamento, seguem os dados:
 
 *PIX:*
-*CNPJ:* 22211962/000122
-*NOME:* ALEXANDER PHILADELPHO BEZERRA
+*CNPJ:* ${PIX_RECEIVER.key}
+*NOME:* ${PIX_RECEIVER.name}
 
 Assim que realizar o pagamento, me envie o comprovante por aqui para darmos continuidade.`
 }
@@ -1554,7 +1439,7 @@ async function finalizeCarneEnrollment(convo, sourcePhone = "") {
 
   if (!dueDayNumber || dueDayNumber < 1 || dueDayNumber > 28) {
     convo.step = "collecting_due_day"
-    return { text: sales.askDueDay() }
+    return reply(sales.askDueDay())
   }
 
   convo.dueDay = dueDayNumber
@@ -1584,12 +1469,10 @@ async function finalizeCarneEnrollment(convo, sourcePhone = "") {
     await notifyInternalLead(convo, sourcePhone)
     convo.step = "offer_transition"
 
-    return {
-      text: `Perfeito 😊
+    return reply(`Perfeito 😊
 
 Tive uma instabilidade para emitir o carnê automaticamente agora, mas seus dados já ficaram registrados.
-Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
-    }
+Nossa equipe vai acompanhar e concluir a emissão com prioridade.`)
   }
 
   convo.step = "post_sale"
@@ -1601,35 +1484,33 @@ Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
   await notifyInternalLead(convo, sourcePhone)
 
   if (created?.error) {
-    return {
-      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do carnê.
+    return reply(`Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do carnê.
 
 Motivo: ${created.error}
 
-Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do carnê.`
-    }
+Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do carnê.`)
   }
 
   if (created?.carnePendente || !created?.secondVia?.parcela) {
-    return {
-      text: `Perfeito 😊
+    return reply(`Perfeito 😊
 
 Sua matrícula foi criada, mas o carnê ainda está sendo processado pela plataforma.
-Assim que as parcelas estiverem disponíveis, a equipe poderá seguir com o envio.`
-    }
+Assim que as parcelas estiverem disponíveis, a equipe poderá seguir com o envio.`)
   }
 
   const pdfPayload = await buildPdfPayloadFromSecondVia(created.secondVia, "boleto")
 
-  return {
-    text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.
+  return reply(
+    `Perfeito 😊 Sua matrícula foi registrada com sucesso.
 
 ${buildSecondViaText(created.secondVia)}`,
-    documentBuffer: pdfPayload?.buffer || null,
-    filename: pdfPayload?.filename || "boleto.pdf",
-    mimeType: pdfPayload?.mimeType || "application/pdf",
-    caption: "Segue o PDF do seu boleto."
-  }
+    {
+      documentBuffer: pdfPayload?.buffer || null,
+      filename: pdfPayload?.filename || "boleto.pdf",
+      mimeType: pdfPayload?.mimeType || "application/pdf",
+      caption: "Segue o PDF do seu boleto."
+    }
+  )
 }
 
 async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
@@ -1637,10 +1518,10 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
 
   if (!dueDayNumber || dueDayNumber < 1 || dueDayNumber > 28) {
     convo.step = "collecting_due_day"
-    return { text: sales.askDueDay() }
+    return reply(sales.askDueDay())
   }
 
-  convo.salesLead = convo.salesLead || {}
+  ensureSalesLead(convo)
   convo.dueDay = dueDayNumber
   convo.payment = "Boleto a vista"
   convo.phone = convo.phone || extractPhoneFromWhatsApp(sourcePhone) || ""
@@ -1654,13 +1535,11 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
   const nextData = getNextEnrollmentDataPrompt(convo)
   if (nextData) {
     convo.step = nextData.step
-    return {
-      text: `Perfeito 😊
+    return reply(`Perfeito 😊
 
 Para emitir seu *boleto único*, preciso concluir alguns dados de cadastro.
 
-${nextData.prompt}`
-    }
+${nextData.prompt}`)
   }
 
   await notifyInternalLead(convo, sourcePhone, { force: true })
@@ -1695,12 +1574,10 @@ ${nextData.prompt}`
     convo.step = "post_sale"
     convo.paymentTeaserShown = false
 
-    return {
-      text: `Perfeito 😊
+    return reply(`Perfeito 😊
 
 Tive uma instabilidade para emitir o *boleto único* automaticamente agora, mas seus dados já ficaram registrados.
-Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
-    }
+Nossa equipe vai acompanhar e concluir a emissão com prioridade.`)
   }
 
   convo.step = "post_sale"
@@ -1713,37 +1590,34 @@ Nossa equipe vai acompanhar e concluir a emissão com prioridade.`
   await notifyInternalLead(convo, sourcePhone, { force: true })
 
   if (created?.error) {
-    return {
-      text: `Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do *boleto único*.
+    return reply(`Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do *boleto único*.
 
 Motivo: ${created.error}
 
-Se quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final da emissão.`
-    }
+Se quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final da emissão.`)
   }
 
   if (created?.carnePendente || !created?.secondVia?.parcela) {
-    return {
-      text: `Perfeito 😊
+    return reply(`Perfeito 😊
 
 Sua matrícula foi criada, mas o *boleto único* ainda está sendo processado pela plataforma.
-Assim que a emissão for concluída, a equipe poderá seguir com o envio.`
-    }
+Assim que a emissão for concluída, a equipe poderá seguir com o envio.`)
   }
 
   const pdfPayload = await buildPdfPayloadFromSecondVia(created.secondVia, "boleto")
 
-  return {
-    text: `Perfeito 😊 Sua matrícula foi registrada com sucesso.
+  return reply(
+    `Perfeito 😊 Sua matrícula foi registrada com sucesso.
 
 ${buildSecondViaText(created.secondVia)}`,
-    documentBuffer: pdfPayload?.buffer || null,
-    filename: pdfPayload?.filename || "boleto.pdf",
-    mimeType: pdfPayload?.mimeType || "application/pdf",
-    caption: "Segue o PDF do seu boleto único."
-  }
+    {
+      documentBuffer: pdfPayload?.buffer || null,
+      filename: pdfPayload?.filename || "boleto.pdf",
+      mimeType: pdfPayload?.mimeType || "application/pdf",
+      caption: "Segue o PDF do seu boleto único."
+    }
+  )
 }
-
 
 function isCourseDetailsQuestion(text) {
   const t = normalizeLoose(text)
@@ -1998,59 +1872,119 @@ async function fallbackAI(text, convo, action = "") {
   })
 }
 
+async function continueFromSelectedPayment(convo, phone, payment) {
+  convo.payment = payment
+  convo.paymentTeaserShown = false
+  convo.phone = extractPhoneFromWhatsApp(phone) || convo.phone || ""
+
+  if (payment === "PIX") {
+    const needsCourse = !String(convo.course || "").trim()
+
+    if (needsCourse) {
+      convo.step = "collecting_pix_course"
+      return reply(`Perfeito 😊 Vamos seguir na opção PIX à vista.
+Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
+
+Para finalizar no PIX, eu preciso só destes dados:
+- Curso
+- Nome completo
+- CPF
+
+Me envie o nome do curso, por favor.`)
+    }
+
+    if (!String(convo.name || "").trim()) {
+      convo.step = "collecting_name"
+      return reply(`Perfeito 😊 Vamos seguir na opção PIX à vista.
+Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
+
+Me envie seu nome completo, por favor.`)
+    }
+
+    if (!String(convo.cpf || "").trim()) {
+      convo.step = "collecting_cpf"
+      return reply("Perfeito 😊 Agora me envie seu CPF com 11 números para eu te passar a chave PIX.")
+    }
+
+    convo.step = "post_sale"
+    return reply(buildPixMessage())
+  }
+
+  if (payment === "Cartão") {
+    const nextData = getNextEnrollmentDataPrompt(convo)
+
+    if (nextData) {
+      convo.step = nextData.step
+      return reply(`Perfeito 😊 Vamos seguir na opção cartão.
+
+Para deixar tudo encaminhado, preciso de alguns dados de cadastro.
+
+${nextData.prompt}`)
+    }
+
+    convo.step = "post_sale"
+    return reply(buildCardMessage(convo.course))
+  }
+
+  const nextData = getNextEnrollmentDataPrompt(convo)
+
+  if (nextData) {
+    convo.step = nextData.step
+    return reply(`Perfeito 😊 Vamos seguir com o carnê.
+
+Essa costuma ser a opção que muita gente escolhe porque fica mais leve para começar.
+
+${nextData.prompt}`)
+  }
+
+  if (convo.dueDay || convo.deferredPaymentDay) {
+    return await finalizeCarneEnrollment(convo, phone)
+  }
+
+  convo.step = "collecting_due_day"
+  return reply(`Perfeito 😊 Vamos seguir com o carnê.
+
+${sales.askDueDay()}`)
+}
+
 async function processMessage(phone, text) {
   try {
     const convo = getConversation(phone)
     const cleanText = normalizeFlowText(text || "")
 
-    convo.salesLead = convo.salesLead || {}
+    ensureSalesLead(convo)
 
     const currentStage = convo.salesLead.stage || ""
     const chosenPaymentMethod = detectPaymentMethod(cleanText)
 
-    /*
-      1) ESTÁGIO: O BOT ACABOU DE OFERECER MOSTRAR OS VALORES
-    */
     if (currentStage === "payment_intro") {
       if (isSimplePositive(cleanText) || wantsPaymentDetails(cleanText)) {
         convo.salesLead.stage = "awaiting_payment_method"
-        await sendText(phone, buildPaymentChoiceMessage())
-        return
+        return reply(buildPaymentChoiceMessage())
       }
     }
 
-    /*
-      2) ESTÁGIO: ESPERANDO A ESCOLHA DA FORMA DE PAGAMENTO
-    */
     if (currentStage === "awaiting_payment_method") {
       if (!chosenPaymentMethod) {
-        await sendText(phone, buildPaymentHelpMessage())
-        return
+        return reply(buildPaymentHelpMessage())
       }
 
       convo.salesLead.paymentMethod = chosenPaymentMethod
       convo.salesLead.stage = "payment_method_selected"
 
-      await sendText(phone, buildPaymentMethodReply(chosenPaymentMethod))
-      return
+      return reply(buildPaymentMethodReply(chosenPaymentMethod))
     }
 
-    /*
-      3) ESTÁGIO: CLIENTE JÁ ESCOLHEU A FORMA DE PAGAMENTO
-    */
     if (currentStage === "payment_method_selected") {
       if (chosenPaymentMethod) {
         convo.salesLead.paymentMethod = chosenPaymentMethod
-        await sendText(phone, buildPaymentMethodReply(chosenPaymentMethod))
-        return
+        return reply(buildPaymentMethodReply(chosenPaymentMethod))
       }
 
       if (wantsStartNow(cleanText) || isSimplePositive(cleanText)) {
         convo.salesLead.stage = "enrollment_explanation"
 
-        await sendText(
-          phone,
-          `Perfeito 😊
+        return reply(`Perfeito 😊
 
 Para começar, o processo é bem simples.
 
@@ -2058,36 +1992,22 @@ Você me envia os dados necessários para a inscrição,
 eu organizo tudo com você por aqui
 e depois seguimos com a forma de pagamento escolhida.
 
-Podemos continuar agora mesmo.`
-        )
-        return
+Podemos continuar agora mesmo.`)
       }
     }
 
-    /*
-      4) ESTÁGIO: O BOT JÁ EXPLICOU A INSCRIÇÃO E AGORA ESPERA UM "SIM"
-    */
     if (currentStage === "enrollment_explanation") {
       if (wantsStartNow(cleanText) || isSimplePositive(cleanText)) {
         convo.salesLead.stage = "collecting_enrollment"
-
-        await sendText(phone, buildEnrollmentStartMessage(convo))
-        return
+        return reply(buildEnrollmentStartMessage(convo))
       }
     }
 
-    /*
-      5) SE O CLIENTE PEDIR PAGAMENTO EM QUALQUER MOMENTO
-    */
     if (wantsPaymentDetails(cleanText)) {
       convo.salesLead.stage = "awaiting_payment_method"
-      await sendText(phone, buildPaymentChoiceMessage())
-      return
+      return reply(buildPaymentChoiceMessage())
     }
 
-    /*
-      PIX JÁ FOI OFERECIDO E AGORA O BOT ESPERA A DECISÃO
-    */
     if (currentStage === "awaiting_pix_payment") {
       if (detectCantPayNow(cleanText)) {
         const dueDateBR = getNextMonthDueDateBR(convo.salesLead.dueDay || 10)
@@ -2095,47 +2015,34 @@ Podemos continuar agora mesmo.`
         convo.salesLead.stage = "awaiting_deferred_boleto_amount"
         convo.salesLead.deferredDueDateBR = dueDateBR
 
-        await sendText(phone, buildDeferredBoletoAskAmountMessage(dueDateBR))
-        return
+        return reply(buildDeferredBoletoAskAmountMessage(dueDateBR))
       }
 
       if (detectPixNow(cleanText)) {
-        await sendText(
-          phone,
-          `Perfeito 😊
+        return reply(`Perfeito 😊
 
 Pode fazer o Pix usando estes dados:
 
-*Valor:* R$ 550,00
-*Chave Pix (CNPJ):* 22211962/000122
-*Nome:* ALEXANDER PHILADELPHO BEZERRA
+*Valor:* ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}
+*Chave Pix (CNPJ):* ${PIX_RECEIVER.key}
+*Nome:* ${PIX_RECEIVER.name}
 
-Depois me envie o comprovante por aqui.`
-        )
-        return
+Depois me envie o comprovante por aqui.`)
       }
     }
 
-    /*
-      CLIENTE ESCOLHEU DEIXAR PARA O PRÓXIMO MÊS
-      AGORA O BOT ESPERA O VALOR
-    */
     if (currentStage === "awaiting_deferred_boleto_amount") {
       const desiredAmount = extractDesiredAmount(text)
 
       if (!desiredAmount) {
-        await sendText(
-          phone,
-          `Sem problema 😊
+        return reply(`Sem problema 😊
 
 Me fala só o valor que você quer colocar no boleto do próximo mês.
 
 Exemplo:
 *95*
 ou
-*R$ 95,00*`
-        )
-        return
+*R$ 95,00*`)
       }
 
       const dueDateBR =
@@ -2154,41 +2061,25 @@ ou
 
       if (result?.ok) {
         convo.salesLead.stage = "deferred_boleto_created"
-
-        await sendText(
-          phone,
-          buildDeferredBoletoCreatedMessage(desiredAmount, dueDateBR, result)
-        )
-        return
+        return reply(buildDeferredBoletoCreatedMessage(desiredAmount, dueDateBR, result))
       }
 
       convo.salesLead.stage = "deferred_boleto_requested"
 
-      await sendText(
-        phone,
-        `Perfeito 😊
+      return reply(`Perfeito 😊
 
 Anotei aqui um *boleto único para o próximo mês* no valor de *${formatMoneyBR(desiredAmount)}*, com vencimento em *${dueDateBR}*.
 
-Assim que a emissão estiver concluída, ele é enviado por aqui.`
-      )
-      return
+Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     }
 
-    /*
-      TRAVA DE MATRÍCULA
-      ISSO EVITA O BOT VOLTAR PARA O FLUXO COMERCIAL
-      QUANDO O ALUNO MANDA O PACOTE DE DADOS
-    */
     if (convo.salesLead?.stage === "collecting_enrollment") {
       const parsed = parseEnrollmentBundle(text, convo.salesLead?.course || convo.course || "")
       const enrollment = mergeEnrollmentData(convo, parsed)
       const missing = getMissingEnrollmentFields(enrollment)
 
       if (missing.length) {
-        return {
-          text: buildMissingEnrollmentMessage(enrollment, missing)
-        }
+        return reply(buildMissingEnrollmentMessage(enrollment, missing))
       }
 
       convo.salesLead.fullName = enrollment.fullName
@@ -2201,14 +2092,12 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
 
       const paymentMethod = getReadableSalesLeadPaymentMethod(
         convo.salesLead.paymentMethod ||
-        convo.salesLead.paymentChoice ||
-        convo.salesLead.selectedPaymentMethod ||
-        "À vista / Pix"
+          convo.salesLead.paymentChoice ||
+          convo.salesLead.selectedPaymentMethod ||
+          "À vista / Pix"
       )
 
-      return {
-        text: buildEnrollmentConfirmation(enrollment, paymentMethod)
-      }
+      return reply(buildEnrollmentConfirmation(enrollment, paymentMethod))
     }
 
     if (convo.salesLead?.stage === "awaiting_enrollment_confirmation") {
@@ -2233,14 +2122,12 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
 
       const paymentMethod = getReadableSalesLeadPaymentMethod(
         convo.salesLead.paymentMethod ||
-        convo.salesLead.paymentChoice ||
-        convo.salesLead.selectedPaymentMethod ||
-        "À vista / Pix"
+          convo.salesLead.paymentChoice ||
+          convo.salesLead.selectedPaymentMethod ||
+          "À vista / Pix"
       )
 
-      return {
-        text: buildEnrollmentConfirmation(enrollment, paymentMethod)
-      }
+      return reply(buildEnrollmentConfirmation(enrollment, paymentMethod))
     }
 
     const normalizedText = normalize(text || "")
@@ -2269,17 +2156,17 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
 
     if (wantsReset(text)) {
       resetConversation(convo)
-      return { text: buildMenuMessage() }
+      return reply(buildMenuMessage())
     }
 
     if (!normalizedText) {
-      return { text: buildMenuMessage() }
+      return reply(buildMenuMessage())
     }
 
     if (convo.paymentTeaserShown && wantsPaymentDetails(text)) {
       convo.paymentTeaserShown = false
       convo.step = "payment_choice"
-      return { text: buildPaymentChoiceMessage(convo.course) }
+      return reply(buildPaymentChoiceMessage())
     }
 
     if (convo.step === "menu") {
@@ -2287,21 +2174,19 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
         convo.path = "existing_student"
         convo.step = "existing_student_cpf"
         convo.paymentTeaserShown = false
-        return {
-          text: "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
-        }
+        return reply("Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via.")
       }
 
       if (raw === "2" || raw === "3") {
         convo.path = "new_enrollment"
         convo.step = "course_selection"
         convo.paymentTeaserShown = false
-        return { text: buildCourseListMessage() }
+        return reply(buildCourseListMessage())
       }
     }
 
     if (sales.isGreeting(text) && convo.step === "menu") {
-      return { text: buildMenuMessage() }
+      return reply(buildMenuMessage())
     }
 
     if (sales.isExistingStudentIntent(text)) {
@@ -2309,14 +2194,12 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       convo.step = "existing_student_cpf"
       convo.paymentTeaserShown = false
 
-      return {
-        text: "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
-      }
+      return reply("Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via.")
     }
 
     if (convo.step === "existing_student_cpf") {
       if (!isCPF(text)) {
-        return { text: "Me envie seu CPF com 11 números para eu localizar seu cadastro, por favor." }
+        return reply("Me envie seu CPF com 11 números para eu localizar seu cadastro, por favor.")
       }
 
       convo.cpf = text
@@ -2326,27 +2209,26 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
 
       const pdfPayload = await buildPdfPayloadFromSecondVia(secondVia, "carne")
 
-      return {
-        text: buildSecondViaText(secondVia),
+      return reply(buildSecondViaText(secondVia), {
         documentBuffer: pdfPayload?.buffer || null,
         filename: pdfPayload?.filename || "carne.pdf",
         mimeType: pdfPayload?.mimeType || "application/pdf",
         caption: "Segue a sua segunda via em PDF."
-      }
+      })
     }
 
     if (sales.isNewEnrollmentIntent(text)) {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
-      return { text: buildCourseListMessage() }
+      return reply(buildCourseListMessage())
     }
 
     if (sales.isCourseListIntent(text) && !convo.course) {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
-      return { text: buildCourseListMessage() }
+      return reply(buildCourseListMessage())
     }
 
     if (detectedCourse?.name) {
@@ -2360,18 +2242,18 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       if (isCourseDetailsQuestion(text) && courseInfo) {
         convo.step = "diagnosis_goal"
         convo.paymentTeaserShown = false
-        return { text: buildSelectedCourseAnswer(text, courseInfo) }
+        return reply(buildSelectedCourseAnswer(text, courseInfo))
       }
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
-        return { text: buildPriceAnswerMessage(convo.course, courseInfo) }
+        return reply(buildPriceAnswerMessage(convo.course, courseInfo))
       }
 
       convo.step = "diagnosis_goal"
       convo.paymentTeaserShown = false
-      return { text: buildEnhancedCoursePresentation(detectedCourse.name, courseInfo) }
+      return reply(buildEnhancedCoursePresentation(detectedCourse.name, courseInfo))
     }
 
     if (!detectedCourse && courseInfoFromText && convo.step === "course_selection") {
@@ -2381,22 +2263,22 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       if (isCourseDetailsQuestion(text)) {
         convo.step = "diagnosis_goal"
         convo.paymentTeaserShown = false
-        return { text: buildSelectedCourseAnswer(text, courseInfoFromText) }
+        return reply(buildSelectedCourseAnswer(text, courseInfoFromText))
       }
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
-        return { text: buildPriceAnswerMessage(courseInfoFromText.title, courseInfoFromText) }
+        return reply(buildPriceAnswerMessage(courseInfoFromText.title, courseInfoFromText))
       }
 
       convo.step = "diagnosis_goal"
       convo.paymentTeaserShown = false
-      return { text: buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText) }
+      return reply(buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText))
     }
 
     if (isPriceQuestion && !convo.course) {
-      return { text: buildPriceAnswerMessage("", courseInfoFromText) }
+      return reply(buildPriceAnswerMessage("", courseInfoFromText))
     }
 
     if (
@@ -2410,9 +2292,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
 
       convo.step = "payment_intro"
       convo.paymentTeaserShown = false
-      return {
-        text: buildPriceAnswerMessage(convo.course, selectedCourseInfo)
-      }
+      return reply(buildPriceAnswerMessage(convo.course, selectedCourseInfo))
     }
 
     if (convo.course && isCourseDetailsQuestion(text)) {
@@ -2421,7 +2301,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
         buildFallbackCourseInfoByName(convo.course)
 
       if (courseInfo) {
-        return { text: buildSelectedCourseAnswer(text, courseInfo) }
+        return reply(buildSelectedCourseAnswer(text, courseInfo))
       }
     }
 
@@ -2449,7 +2329,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
         "post_sale"
       ].includes(convo.step)
     ) {
-      convo.salesLead = convo.salesLead || {}
+      ensureSalesLead(convo)
       convo.payment = "Boleto a vista"
       convo.paymentTeaserShown = false
       convo.awaitingPaymentProof = false
@@ -2459,81 +2339,80 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
       convo.salesLead.stage = "payment_deferral_day"
       convo.step = "payment_deferral_day"
 
-      return { text: buildDeferredPaymentOfferMessage() }
+      return reply(buildDeferredPaymentOfferMessage())
     }
-
 
     const objectionReply = sales.getObjectionReply(text, convo.course)
     if (objectionReply && convo.step !== "post_sale") {
-      return { text: objectionReply }
+      return reply(objectionReply)
     }
 
     if (convo.step === "course_selection") {
       if (raw === "1") {
-        return { text: "Ótimo 😊 Para emprego rápido, alguns cursos que costumam chamar atenção são Administração, Operador de Caixa e Recepcionista Hospitalar.\n\nQual deles mais combina com você?" }
+        return reply("Ótimo 😊 Para emprego rápido, alguns cursos que costumam chamar atenção são Administração, Operador de Caixa e Recepcionista Hospitalar.\n\nQual deles mais combina com você?")
       }
 
       if (raw === "2") {
-        return { text: "Perfeito 😊 Na área da saúde, alguns cursos que costumam chamar bastante atenção são Agente de Saúde, Enfermagem e Farmácia.\n\nQual deles você quer entender melhor?" }
+        return reply("Perfeito 😊 Na área da saúde, alguns cursos que costumam chamar bastante atenção são Agente de Saúde, Enfermagem e Farmácia.\n\nQual deles você quer entender melhor?")
       }
 
       if (raw === "3") {
-        return { text: "Boa escolha 😊 Para administrativo / escritório, eu posso te indicar Administração, Contabilidade e Recursos Humanos.\n\nQual desses te interessou mais?" }
+        return reply("Boa escolha 😊 Para administrativo / escritório, eu posso te indicar Administração, Contabilidade e Recursos Humanos.\n\nQual desses te interessou mais?")
       }
 
       if (raw === "4") {
-        return { text: "Legal 😊 Em beleza / estética, os mais procurados costumam ser Barbeiro, Cabeleireiro e Massoterapia.\n\nQual deles você quer conhecer melhor?" }
+        return reply("Legal 😊 Em beleza / estética, os mais procurados costumam ser Barbeiro, Cabeleireiro e Massoterapia.\n\nQual deles você quer conhecer melhor?")
       }
 
       if (raw === "5") {
-        return { text: "Perfeito 😊 Em tecnologia / internet, os que mais costumam chamar atenção são Informática, Designer Gráfico e Marketing Digital.\n\nQual deles você quer ver primeiro?" }
+        return reply("Perfeito 😊 Em tecnologia / internet, os que mais costumam chamar atenção são Informática, Designer Gráfico e Marketing Digital.\n\nQual deles você quer ver primeiro?")
       }
 
       if (raw === "6") {
-        return { text: "Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te explico melhor." }
+        return reply("Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te explico melhor.")
       }
 
       if (courseInfoFromText) {
         convo.course = courseInfoFromText.title
         convo.step = "diagnosis_goal"
         convo.paymentTeaserShown = false
-        return { text: buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText) }
+        return reply(buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText))
       }
 
       if (isLowContextReply(text)) {
-        return { text: buildCourseListMessage() }
+        return reply(buildCourseListMessage())
       }
 
-      return { text: "Me manda o nome do curso ou o número da opção que combina mais com o que você procura 😊" }
+      return reply("Me manda o nome do curso ou o número da opção que combina mais com o que você procura 😊")
     }
 
     if (convo.step === "diagnosis_goal") {
       if (isLowContextReply(text)) {
-        return { text: buildGoalClarification(convo.course) }
+        return reply(buildGoalClarification(convo.course))
       }
 
       convo.goal = mapGoalReply(text)
       convo.step = "diagnosis_experience"
-      return { text: buildExperienceClarification(convo.course) }
+      return reply(buildExperienceClarification(convo.course))
     }
 
     if (convo.step === "diagnosis_experience") {
       if (isLowContextReply(text)) {
-        return { text: buildExperienceClarification(convo.course) }
+        return reply(buildExperienceClarification(convo.course))
       }
 
       convo.experience = mapExperienceReply(text)
       convo.step = "offer_transition"
-      return { text: sales.buildValueConnection(convo) }
+      return reply(sales.buildValueConnection(convo))
     }
 
     if (convo.step === "offer_transition") {
       if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
-        convo.salesLead = convo.salesLead || {}
+        ensureSalesLead(convo)
         convo.salesLead.stage = "payment_intro"
-        return { text: buildPaymentIntroMessage(convo.course) }
+        return reply(buildPaymentIntroMessage(convo.course))
       }
 
       if (isPriceQuestion) {
@@ -2543,36 +2422,32 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
 
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
-        return {
-          text: buildPriceAnswerMessage(convo.course, selectedCourseInfo)
-        }
+        return reply(buildPriceAnswerMessage(convo.course, selectedCourseInfo))
       }
 
       if (convo.course && isCourseDetailsQuestion(text)) {
         const courseInfo = findSiteCourseKnowledge(text, convo.course)
         if (courseInfo) {
-          return { text: buildSelectedCourseAnswer(text, courseInfo) }
+          return reply(buildSelectedCourseAnswer(text, courseInfo))
         }
       }
 
       const aiReply = await fallbackAI(text, convo, "responder_duvida_pre_matricula")
       if (aiReply) {
-        return { text: aiReply }
+        return reply(aiReply)
       }
 
-      return {
-        text: "Sem problema 😊 Posso te explicar melhor como funciona o curso ou, se preferir, já te passo os valores."
-      }
+      return reply("Sem problema 😊 Posso te explicar melhor como funciona o curso ou, se preferir, já te passo os valores.")
     }
 
     if (convo.step === "payment_intro") {
       if (wantsPaymentDetails(text) || isPaymentGuidanceQuestion(text)) {
         convo.step = "payment_choice"
-        return { text: buildPaymentChoiceMessage(convo.course) }
+        return reply(buildPaymentChoiceMessage(convo.course))
       }
 
       if (isCannotPayNowIntent(text)) {
-        convo.salesLead = convo.salesLead || {}
+        ensureSalesLead(convo)
         convo.payment = "Boleto a vista"
         convo.paymentTeaserShown = false
         convo.awaitingPaymentProof = false
@@ -2582,7 +2457,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
         convo.salesLead.stage = "payment_deferral_day"
         convo.step = "payment_deferral_day"
 
-        return { text: buildDeferredPaymentOfferMessage() }
+        return reply(buildDeferredPaymentOfferMessage())
       }
 
       if (convo.course && isCourseDetailsQuestion(text)) {
@@ -2591,18 +2466,16 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
           buildFallbackCourseInfoByName(convo.course)
 
         if (courseInfo) {
-          return { text: buildSelectedCourseAnswer(text, courseInfo) }
+          return reply(buildSelectedCourseAnswer(text, courseInfo))
         }
       }
 
-      return {
-        text: "Sem problema 😊 Me fala só se você quer ver as opções de pagamento ou entender melhor o curso primeiro."
-      }
+      return reply("Sem problema 😊 Me fala só se você quer ver as opções de pagamento ou entender melhor o curso primeiro.")
     }
 
     if (convo.step === "payment_choice") {
       if (isPaymentGuidanceQuestion(text)) {
-        return { text: buildPaymentHelpMessage(convo.course) }
+        return reply(buildPaymentHelpMessage(convo.course))
       }
 
       const selectedPayment = detectPaymentSelection(text, { allowNumeric: true })
@@ -2611,19 +2484,17 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
         return await continueFromSelectedPayment(convo, phone, selectedPayment)
       }
 
-      return { text: buildPaymentChoiceMessage(convo.course) }
+      return reply(buildPaymentChoiceMessage(convo.course))
     }
 
     if (convo.step === "payment_deferral_day") {
       const preferredDay = detectPreferredFutureDay(text)
 
       if (!preferredDay) {
-        return {
-          text: "Sem problema 😊 Me diz só qual dia você prefere no próximo mês entre 1 e 28 (ex.: 5, 10, 15, 20 ou outro dia)."
-        }
+        return reply("Sem problema 😊 Me diz só qual dia você prefere no próximo mês entre 1 e 28 (ex.: 5, 10, 15, 20 ou outro dia).")
       }
 
-      convo.salesLead = convo.salesLead || {}
+      ensureSalesLead(convo)
       convo.deferredPaymentDay = String(preferredDay)
       convo.dueDay = preferredDay
       convo.payment = "Boleto a vista"
@@ -2637,12 +2508,10 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`
 
       if (!String(convo.course || "").trim()) {
         convo.step = "collecting_boleto_course"
-        return {
-          text: `Perfeito 😊
+        return reply(`Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Para eu gerar seu *boleto único*, me confirme primeiro o curso que você quer fazer.`
-        }
+Para eu gerar seu *boleto único*, me confirme primeiro o curso que você quer fazer.`)
       }
 
       const nextData = getNextEnrollmentDataPrompt(convo)
@@ -2653,14 +2522,12 @@ Para eu gerar seu *boleto único*, me confirme primeiro o curso que você quer f
 
       convo.step = nextData.step
 
-      return {
-        text: `Perfeito 😊
+      return reply(`Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
 Agora vou só pegar seus dados para gerar o *boleto único*.
 
-${nextData.prompt}`
-      }
+${nextData.prompt}`)
     }
 
     if (convo.step === "collecting_pix_course") {
@@ -2669,18 +2536,14 @@ ${nextData.prompt}`
         buildFallbackCourseInfoByName(text)
 
       if (!pixCourseInfo?.title) {
-        return {
-          text: "Perfeito 😊 Para seguir no PIX, me informe o nome do curso exatamente como você deseja na matrícula."
-        }
+        return reply("Perfeito 😊 Para seguir no PIX, me informe o nome do curso exatamente como você deseja na matrícula.")
       }
 
       convo.course = pixCourseInfo.title
       convo.step = "collecting_name"
       await notifyInternalLead(convo, phone)
 
-      return {
-        text: `Perfeito 😊 Curso ${convo.course} selecionado. Agora me envie seu nome completo, por favor.`
-      }
+      return reply(`Perfeito 😊 Curso ${convo.course} selecionado. Agora me envie seu nome completo, por favor.`)
     }
 
     if (convo.step === "collecting_boleto_course") {
@@ -2689,9 +2552,7 @@ ${nextData.prompt}`
         buildFallbackCourseInfoByName(text)
 
       if (!boletoCourseInfo?.title) {
-        return {
-          text: "Perfeito 😊 Para emitir seu *boleto único*, me informe o nome do curso."
-        }
+        return reply("Perfeito 😊 Para emitir seu *boleto único*, me informe o nome do curso.")
       }
 
       convo.course = boletoCourseInfo.title
@@ -2702,12 +2563,12 @@ ${nextData.prompt}`
       }
 
       convo.step = nextData.step
-      return { text: `Perfeito 😊 Curso ${convo.course} confirmado.\n\n${nextData.prompt}` }
+      return reply(`Perfeito 😊 Curso ${convo.course} confirmado.\n\n${nextData.prompt}`)
     }
 
     if (convo.step === "collecting_name") {
       if (!String(text || "").trim()) {
-        return { text: "Me envie seu nome completo, por favor." }
+        return reply("Me envie seu nome completo, por favor.")
       }
 
       convo.name = String(text).trim()
@@ -2715,19 +2576,19 @@ ${nextData.prompt}`
       await notifyInternalLead(convo, phone)
 
       if (convo.payment === "PIX") {
-        return { text: "Perfeito 😊 Agora me envie seu CPF com 11 números para eu te passar a chave PIX." }
+        return reply("Perfeito 😊 Agora me envie seu CPF com 11 números para eu te passar a chave PIX.")
       }
 
       if (convo.payment === "Boleto a vista") {
-        return { text: "Perfeito 😊 Agora me envie seu CPF com 11 números para concluir o *boleto único*." }
+        return reply("Perfeito 😊 Agora me envie seu CPF com 11 números para concluir o *boleto único*.")
       }
 
-      return { text: sales.askCPF() }
+      return reply(sales.askCPF())
     }
 
     if (convo.step === "collecting_cpf") {
       if (!isCPF(text)) {
-        return { text: "O CPF que você enviou parece inválido. Me manda apenas os 11 números, por favor." }
+        return reply("O CPF que você enviou parece inválido. Me manda apenas os 11 números, por favor.")
       }
 
       convo.cpf = text
@@ -2736,109 +2597,104 @@ ${nextData.prompt}`
       if (convo.payment === "PIX") {
         convo.step = "post_sale"
         await notifyInternalLead(convo, phone)
-        return { text: buildPixMessage() }
-      }
-
-      if (convo.payment === "Boleto a vista") {
-        convo.step = "collecting_birth"
-        return { text: sales.askBirthDate() }
+        return reply(buildPixMessage())
       }
 
       convo.step = "collecting_birth"
-      return { text: sales.askBirthDate() }
+      return reply(sales.askBirthDate())
     }
 
     if (convo.step === "collecting_birth") {
       if (!isDateBR(text)) {
-        return { text: "Me envie sua data de nascimento no formato DD/MM/AAAA, por favor." }
+        return reply("Me envie sua data de nascimento no formato DD/MM/AAAA, por favor.")
       }
 
       convo.birthDate = text
       convo.step = "collecting_email"
-      return { text: "Perfeito 😊 Agora me envie seu melhor e-mail." }
+      return reply("Perfeito 😊 Agora me envie seu melhor e-mail.")
     }
 
     if (convo.step === "collecting_email") {
       if (!isEmailAddress(text)) {
-        return { text: "Me envie um e-mail válido, por favor. Exemplo: nome@dominio.com" }
+        return reply("Me envie um e-mail válido, por favor. Exemplo: nome@dominio.com")
       }
 
       convo.email = String(text || "").trim().toLowerCase()
       convo.step = "collecting_gender"
-      return { text: sales.askGender() }
+      return reply(sales.askGender())
     }
 
     if (convo.step === "collecting_gender") {
       const gender = detectGender(text)
 
       if (!gender) {
-        return { text: "Me responda com M para masculino ou F para feminino." }
+        return reply("Me responda com M para masculino ou F para feminino.")
       }
 
       convo.gender = gender
       convo.step = "collecting_cep"
-      return { text: sales.askCEP() }
+      return reply(sales.askCEP())
     }
 
     if (convo.step === "collecting_cep") {
       if (!isCEP(text)) {
-        return { text: "Me envie seu CEP com 8 números, por favor." }
+        return reply("Me envie seu CEP com 8 números, por favor.")
       }
 
       convo.cep = text
       convo.step = "collecting_street"
-      return { text: sales.askStreet() }
+      return reply(sales.askStreet())
     }
 
     if (convo.step === "collecting_street") {
       if (!String(text || "").trim()) {
-        return { text: "Me envie o logradouro, por favor." }
+        return reply("Me envie o logradouro, por favor.")
       }
 
       convo.street = String(text).trim()
       convo.step = "collecting_number"
-      return { text: sales.askNumber() }
+      return reply(sales.askNumber())
     }
 
     if (convo.step === "collecting_number") {
       if (!String(text || "").trim()) {
-        return { text: "Me envie o número do endereço, por favor." }
+        return reply("Me envie o número do endereço, por favor.")
       }
 
       convo.number = String(text).trim()
       convo.step = "collecting_complement"
-      return { text: sales.askComplement() }
+      return reply(sales.askComplement())
     }
 
     if (convo.step === "collecting_complement") {
       convo.complement = /sem complemento/i.test(text) ? "" : String(text || "").trim()
       convo.step = "collecting_neighborhood"
-      return { text: sales.askNeighborhood() }
+      return reply(sales.askNeighborhood())
     }
 
     if (convo.step === "collecting_neighborhood") {
       if (!String(text || "").trim()) {
-        return { text: "Me envie seu bairro, por favor." }
+        return reply("Me envie seu bairro, por favor.")
       }
 
       convo.neighborhood = String(text).trim()
       convo.step = "collecting_city"
-      return { text: sales.askCity() }
+      return reply(sales.askCity())
     }
 
     if (convo.step === "collecting_city") {
       if (!String(text || "").trim()) {
-        return { text: "Me envie sua cidade, por favor." }
+        return reply("Me envie sua cidade, por favor.")
       }
 
       convo.city = String(text).trim()
       convo.step = "collecting_state"
-      return { text: sales.askState() }
+      return reply(sales.askState())
     }
 
     if (convo.step === "collecting_state") {
       if (!isUF(text)) {
-        return { text: "Me envie apenas a sigla do estado, por favor. Exemplo: SP." }
+        return reply("Me envie apenas a sigla do estado, por favor. Exemplo: SP.")
       }
 
       convo.state = normalizeUF(text)
@@ -2853,11 +2709,11 @@ ${nextData.prompt}`
         }
 
         convo.step = "collecting_due_day"
-        return { text: sales.askDueDay() }
+        return reply(sales.askDueDay())
       }
 
       if (convo.payment === "Boleto a vista") {
-        convo.salesLead = convo.salesLead || {}
+        ensureSalesLead(convo)
         convo.awaitingPaymentProof = false
         convo.paymentTeaserShown = false
         convo.salesLead.paymentMethod = "boleto_unico"
@@ -2874,30 +2730,29 @@ ${nextData.prompt}`
         }
 
         convo.step = "collecting_due_day"
-        return { text: sales.askDueDay() }
+        return reply(sales.askDueDay())
       }
 
       if (convo.salesLead?.paymentMethod === "pix") {
         convo.salesLead.stage = "awaiting_pix_payment"
-        await sendText(phone, buildPixPaymentMessage(convo))
-        return
+        return reply(buildPixPaymentMessage(convo))
       }
 
       convo.step = "post_sale"
       await notifyInternalLead(convo, phone)
 
       if (convo.payment === "PIX") {
-        return { text: buildPixMessage() }
+        return reply(buildPixMessage())
       }
 
-      return { text: buildCardMessage(convo.course) }
+      return reply(buildCardMessage(convo.course))
     }
 
     if (convo.step === "collecting_due_day") {
       const dueDay = detectDueDay(text)
 
       if (!dueDay) {
-        return { text: "Me informe um dia de vencimento entre 1 e 28, por favor." }
+        return reply("Me informe um dia de vencimento entre 1 e 28, por favor.")
       }
 
       convo.dueDay = dueDay
@@ -2912,21 +2767,21 @@ ${nextData.prompt}`
     if (convo.step === "post_sale") {
       const aiReply = await fallbackAI(text, convo, "pos_venda_humano")
       if (aiReply) {
-        return { text: aiReply }
+        return reply(aiReply)
       }
 
-      return { text: buildPostSaleReply(text, convo) }
+      return reply(buildPostSaleReply(text, convo))
     }
 
     const aiReply = await fallbackAI(text, convo, "resposta_geral")
     if (aiReply) {
-      return { text: aiReply }
+      return reply(aiReply)
     }
 
-    return { text: buildMenuMessage() }
+    return reply(buildMenuMessage())
   } catch (error) {
     console.error("Erro no processamento da mensagem:", error)
-    return { text: "Tive um pequeno problema aqui. Pode me enviar novamente sua mensagem?" }
+    return reply("Tive um pequeno problema aqui. Pode me enviar novamente sua mensagem?")
   }
 }
 
@@ -2951,8 +2806,3 @@ const app = createApp({
 app.listen(PORT || 3000, () => {
   console.log(`Servidor rodando na porta ${PORT || 3000}`)
 })
-
-
-
-
-
