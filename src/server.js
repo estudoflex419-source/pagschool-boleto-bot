@@ -55,6 +55,18 @@ if (!COURSE_SITE_KNOWLEDGE.length) {
   console.log(`Base de cursos carregada do documento: ${COURSE_SITE_KNOWLEDGE.length} cursos.`)
 }
 
+const COURSE_CATEGORY_LABELS = Object.freeze({
+  saude: "Saúde",
+  administrativo: "Administrativo / Escritório",
+  beleza: "Beleza / Estética",
+  tecnologia: "Tecnologia / Internet",
+  idiomas: "Idiomas",
+  juridico: "Jurídico / Concursos",
+  educacao: "Educação",
+  industrial: "Industrial / Operacional",
+  geral: "Outros"
+})
+
 const PAYMENT_OPTIONS = Object.freeze({
   carne: {
     key: "carne",
@@ -232,6 +244,179 @@ function normalizeCourseInfoCandidate(candidate) {
   }
 
   return buildFallbackCourseInfoByName(label)
+}
+
+function getCourseSearchText(course = {}) {
+  return normalizeLoose([
+    course.title,
+    course.summary,
+    course.description,
+    course.market,
+    Array.isArray(course.aliases) ? course.aliases.join(" ") : "",
+    Array.isArray(course.learns) ? course.learns.join(" ") : ""
+  ].join(" "))
+}
+
+function inferCourseCategory(course = {}) {
+  const text = getCourseSearchText(course)
+
+  if (
+    /saude|enfermagem|farmacia|agente de saude|agente comunitario|cuidador|hospital|recepcionista hospitalar|coleta|analises clinicas|analise clinica|primeiros socorros|radiologia|nutricao|nutrição|fisioterapia/.test(text)
+  ) {
+    return "saude"
+  }
+
+  if (
+    /administracao|administração|contabilidade|recursos humanos|rh|departamento pessoal|dp|secretariado|auxiliar administrativo|assistente administrativo|financeiro|escritorio|escritório|atendimento|telemarketing|operador de caixa/.test(text)
+  ) {
+    return "administrativo"
+  }
+
+  if (
+    /barbeiro|cabeleireiro|maquiagem|maquiador|estetica|estética|massoterapia|designer de sobrancelhas|sobrancelha|manicure|pedicure/.test(text)
+  ) {
+    return "beleza"
+  }
+
+  if (
+    /informatica|informática|designer grafico|designer gráfico|marketing digital|excel|pacote office|programacao|programação|tecnologia|internet|redes|manutencao de computador|manutenção de computador/.test(text)
+  ) {
+    return "tecnologia"
+  }
+
+  if (/ingles|inglês|espanhol|idioma|idiomas/.test(text)) {
+    return "idiomas"
+  }
+
+  if (
+    /juridico|jurídico|concursos|policia|polícia|agente penitenciario|agente penitenciário|investigacao|investigação/.test(text)
+  ) {
+    return "juridico"
+  }
+
+  if (
+    /educacao|educação|creche|auxiliar de classe|monitor escolar|pedagogia/.test(text)
+  ) {
+    return "educacao"
+  }
+
+  if (
+    /eletrica|elétrica|mecanica|mecânica|solda|soldador|logistica|logística|almoxarifado|operacional|industrial|construcao civil|construção civil/.test(text)
+  ) {
+    return "industrial"
+  }
+
+  return "geral"
+}
+
+function buildGroupedCourseCatalog() {
+  const grouped = {
+    saude: [],
+    administrativo: [],
+    beleza: [],
+    tecnologia: [],
+    idiomas: [],
+    juridico: [],
+    educacao: [],
+    industrial: [],
+    geral: []
+  }
+
+  for (const course of COURSE_SITE_KNOWLEDGE) {
+    const key = inferCourseCategory(course)
+    grouped[key].push(course)
+  }
+
+  for (const key of Object.keys(grouped)) {
+    grouped[key].sort((a, b) =>
+      String(a.title || "").localeCompare(String(b.title || ""), "pt-BR")
+    )
+  }
+
+  return grouped
+}
+
+const GROUPED_COURSES = buildGroupedCourseCatalog()
+
+function getCoursesByCategory(categoryKey = "") {
+  return GROUPED_COURSES[categoryKey] || []
+}
+
+function buildCourseTitlesList(courses = [], limit = 12) {
+  const selected = courses.slice(0, limit)
+  if (!selected.length) return "Nenhum curso encontrado nesta área no momento."
+  return selected.map((course, index) => `${index + 1}. ${course.title}`).join("\n")
+}
+
+function buildGroupedCourseCatalogMessage() {
+  const orderedKeys = [
+    "saude",
+    "administrativo",
+    "beleza",
+    "tecnologia",
+    "idiomas",
+    "juridico",
+    "educacao",
+    "industrial",
+    "geral"
+  ]
+
+  const blocks = []
+
+  for (const key of orderedKeys) {
+    const items = getCoursesByCategory(key)
+    if (!items.length) continue
+
+    blocks.push(`*${COURSE_CATEGORY_LABELS[key]}*`)
+    blocks.push(buildCourseTitlesList(items, 20))
+    blocks.push("")
+  }
+
+  return `Perfeito 😊
+
+Aqui estão os cursos separados por área:
+
+${blocks.join("\n").trim()}
+
+Se quiser, me mande *o nome do curso* que eu te mostro os detalhes completos.`
+}
+
+function buildCategoryCourseSuggestionMessage(categoryKey = "") {
+  const label = COURSE_CATEGORY_LABELS[categoryKey] || "Cursos"
+  const items = getCoursesByCategory(categoryKey)
+
+  if (!items.length) {
+    return `Perfeito 😊
+
+No momento eu não encontrei cursos cadastrados nessa área na base.
+
+Se quiser, me manda o nome do curso que você tem em mente e eu verifico para você.`
+  }
+
+  return `Perfeito 😊
+
+Na área de *${label}*, encontrei estes cursos na base:
+
+${buildCourseTitlesList(items, 15)}
+
+Me manda o *nome do curso* que você quer ver e eu te passo os detalhes completos.`
+}
+
+function wantsGroupedCourseCatalog(text = "") {
+  const t = normalizeLoose(text)
+
+  return [
+    "quais cursos",
+    "lista de cursos",
+    "ver cursos",
+    "mostrar cursos",
+    "quero ver os cursos",
+    "catalogo de cursos",
+    "catálogo de cursos",
+    "cursos disponiveis",
+    "cursos disponíveis",
+    "todos os cursos"
+  ].some(term => t.includes(term))
 }
 
 function getPaymentOption(key = "") {
@@ -546,120 +731,71 @@ Se faltar algo, eu te aviso sem problema.
 *Forma de pagamento escolhida:* ${paymentLabel}`
 }
 
-function toTitleCaseName(value = "") {
-  return String(value)
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ")
-}
-
-function splitIncomingLines(text = "") {
-  return String(text)
-    .split(/\r?\n/)
-    .map(s => s.trim())
-    .filter(Boolean)
-}
-
-function parseEnrollmentBundle(text, currentCourse = "") {
-  const lines = splitIncomingLines(text)
-
-  const parsed = {
-    fullName: "",
-    cpf: "",
-    birthDate: "",
-    cep: "",
-    houseNumber: "",
-    course: extractCourseLabel(currentCourse) || ""
+function buildFullCourseDetailsMessage(courseInfo) {
+  if (!courseInfo) {
+    return "No momento eu não encontrei os detalhes desse curso na base."
   }
 
-  for (const line of lines) {
-    const digits = line.replace(/\D/g, "")
+  const lines = []
+  const title = courseInfo.title || "Curso"
 
-    if (!parsed.cpf && digits.length === 11) {
-      parsed.cpf = digits
-      continue
-    }
+  lines.push(`Perfeito 😊 Aqui estão os detalhes completos de *${title}*:`)
+  lines.push("")
 
-    if (!parsed.birthDate && /^\d{2}\/\d{2}\/\d{4}$/.test(line)) {
-      parsed.birthDate = line
-      continue
-    }
-
-    if (!parsed.cep && digits.length === 8) {
-      parsed.cep = digits
-      continue
-    }
-
-    const detectedCourseRaw =
-      typeof findCourseInText === "function" ? findCourseInText(line) : ""
-    const detectedCourse = extractCourseLabel(detectedCourseRaw)
-
-    if (!parsed.course && detectedCourse) {
-      parsed.course = detectedCourse
-      continue
-    }
-
-    if (
-      !parsed.houseNumber &&
-      /^\d{1,6}$/.test(digits) &&
-      digits !== parsed.cep &&
-      digits !== parsed.cpf
-    ) {
-      parsed.houseNumber = digits
-      continue
-    }
-
-    if (!parsed.fullName && /[a-zA-ZÀ-ÿ]/.test(line) && !detectedCourse) {
-      parsed.fullName = toTitleCaseName(line)
-    }
+  if (courseInfo.summary) {
+    lines.push(`*Resumo:* ${String(courseInfo.summary).trim()}`)
+    lines.push("")
   }
 
-  if (!parsed.course && typeof findCourseInText === "function") {
-    const wholeTextCourseRaw = findCourseInText(text)
-    const wholeTextCourse = extractCourseLabel(wholeTextCourseRaw)
-    if (wholeTextCourse) parsed.course = wholeTextCourse
+  if (courseInfo.description) {
+    lines.push(`*Descrição:* ${String(courseInfo.description).trim()}`)
+    lines.push("")
   }
 
-  return parsed
-}
+  if (courseInfo.workload) {
+    lines.push(`*Carga horária:* ${courseInfo.workload}`)
+  }
 
-function mergeEnrollmentData(convo, incoming) {
-  ensureSalesLead(convo)
-  convo.salesLead.enrollment = convo.salesLead.enrollment || {}
+  if (courseInfo.duration) {
+    lines.push(`*Duração média:* ${courseInfo.duration}`)
+  }
 
-  const target = convo.salesLead.enrollment
+  if (courseInfo.salary) {
+    lines.push(`*Média salarial informada:* ${courseInfo.salary}`)
+  }
 
-  for (const [key, value] of Object.entries(incoming || {})) {
-    if (value) {
-      target[key] = key === "course" ? extractCourseLabel(value) : value
+  if (courseInfo.market) {
+    lines.push(`*Mercado de trabalho:* ${courseInfo.market}`)
+  }
+
+  if (
+    courseInfo.workload ||
+    courseInfo.duration ||
+    courseInfo.salary ||
+    courseInfo.market
+  ) {
+    lines.push("")
+  }
+
+  if (Array.isArray(courseInfo.learns) && courseInfo.learns.length) {
+    lines.push("*Conteúdo / o que você vai aprender:*")
+    for (const item of uniqueItems(courseInfo.learns).slice(0, 30)) {
+      lines.push(`- ${item}`)
     }
+    lines.push("")
   }
 
-  if (convo.salesLead.course && !target.course) {
-    target.course = extractCourseLabel(convo.salesLead.course)
+  if (courseInfo.differentials) {
+    lines.push(`*Diferenciais:* ${String(courseInfo.differentials).trim()}`)
+    lines.push("")
   }
 
-  if (convo.course && !target.course) {
-    target.course = extractCourseLabel(convo.course)
-  }
+  lines.push("Se quiser, eu também posso te mostrar:")
+  lines.push("1 - valores")
+  lines.push("2 - como funciona a matrícula")
+  lines.push("3 - se esse curso combina com seu objetivo")
 
-  return target
-}
-
-function getMissingEnrollmentFields(data = {}) {
-  const missing = []
-
-  if (!data.fullName) missing.push("nome completo")
-  if (!data.cpf || String(data.cpf).replace(/\D/g, "").length !== 11) missing.push("CPF")
-  if (!data.birthDate || !/^\d{2}\/\d{2}\/\d{4}$/.test(data.birthDate)) missing.push("data de nascimento")
-  if (!data.cep || String(data.cep).replace(/\D/g, "").length !== 8) missing.push("CEP")
-  if (!data.houseNumber) missing.push("número da casa")
-  if (!data.course) missing.push("curso escolhido")
-
-  return missing
+  return lines.join("\n").trim()
 }
 
 function buildMissingEnrollmentMessage(_data, missing) {
@@ -1048,19 +1184,16 @@ Exemplo: *quero um curso para trabalhar mais rápido*.`
 function buildCourseListMessage() {
   return `Perfeito 😊
 
-Pra eu te indicar algo que faça sentido de verdade, me fala seu objetivo principal:
+Pra eu te indicar melhor, posso separar por área:
 
-1 - Conseguir emprego mais rápido
-2 - Área da saúde
-3 - Administrativo / escritório
-4 - Beleza / estética
-5 - Tecnologia / internet
+1 - Saúde
+2 - Administrativo / escritório
+3 - Beleza / estética
+4 - Tecnologia / internet
+5 - Ver todos os cursos separados
 6 - Já tenho um curso em mente
 
-Se preferir, pode me mandar direto algo como:
-- *quero um curso na área da saúde*
-- *quero trabalhar com atendimento*
-- *quero curso de informática*`
+Pode me responder com o número ou me mandar direto o nome do curso.`
 }
 
 function isLowContextReply(text = "") {
@@ -1295,12 +1428,6 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
 
   if (normalizedCourseInfo?.summary) {
     parts.push(String(normalizedCourseInfo.summary).trim().replace(/\.$/, "") + ".")
-  } else {
-    parts.push("É uma formação prática, com certificado, pensada para quem quer aprender e se posicionar melhor no mercado.")
-  }
-
-  if (normalizedCourseInfo?.learns?.length) {
-    parts.push(`Você vai ter contato com temas como *${normalizedCourseInfo.learns.slice(0, 4).join(", ")}*.`)
   }
 
   if (normalizedCourseInfo?.workload) {
@@ -1308,101 +1435,17 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
     parts.push(`A carga horária informada é de *${normalizedCourseInfo.workload}*${durationPart}.`)
   }
 
-  parts.push("Antes de eu te indicar o melhor caminho, me diz: o que mais pesa para você hoje — emprego mais rápido, melhorar currículo ou mudar de área?")
+  if (normalizedCourseInfo?.market) {
+    parts.push(`Mercado de trabalho: ${normalizedCourseInfo.market}.`)
+  }
+
+  parts.push("Se quiser, eu posso te mostrar todos os detalhes completos desse curso ou te ajudar a ver os valores.")
 
   return parts.join("\n\n")
 }
 
-function buildSelectedCourseAnswer(text, courseInfo) {
-  const t = normalizeLoose(text)
-  const lines = []
-
-  lines.push(`Claro 😊 Sobre *${courseInfo.title}*:`)
-
-  if (
-    t.includes("carga horaria") ||
-    t.includes("carga horária") ||
-    t.includes("quantas horas") ||
-    t.includes("quanto tempo") ||
-    t.includes("tempo de curso") ||
-    t.includes("quantos meses") ||
-    t.includes("dura quanto") ||
-    t.includes("duracao") ||
-    t.includes("duração")
-  ) {
-    if (courseInfo.workload) {
-      lines.push(`- Carga horária: ${courseInfo.workload}`)
-      if (courseInfo.duration) {
-        lines.push(`- Duração média: ${courseInfo.duration}`)
-      }
-    } else {
-      lines.push("- A carga horária não está informada no documento para este curso.")
-    }
-  }
-
-  if (
-    t.includes("media salarial") ||
-    t.includes("média salarial") ||
-    t.includes("salario") ||
-    t.includes("salário")
-  ) {
-    if (courseInfo.salary) {
-      lines.push(`- Média salarial informada: ${courseInfo.salary}`)
-    } else {
-      lines.push("- No momento eu não tenho uma média salarial confirmada no documento para este curso.")
-    }
-  }
-
-  if (
-    t.includes("conteudo") ||
-    t.includes("conteúdo") ||
-    t.includes("o que aprende") ||
-    t.includes("oque aprende") ||
-    t.includes("o que vou aprender") ||
-    t.includes("o que cai") ||
-    t.includes("oq cai")
-  ) {
-    if (courseInfo.learns?.length) {
-      lines.push(`- Conteúdo: ${uniqueItems(courseInfo.learns || []).slice(0, 10).join(", ")}`)
-    } else {
-      lines.push("- O conteúdo programático detalhado não está disponível no documento para este curso.")
-    }
-  }
-
-  if (
-    t.includes("mercado") ||
-    t.includes("atuar") ||
-    t.includes("trabalha onde") ||
-    t.includes("area de atuacao") ||
-    t.includes("área de atuação")
-  ) {
-    if (courseInfo.market) {
-      lines.push(`- Mercado de trabalho: ${courseInfo.market}`)
-    } else {
-      lines.push("- O documento não detalha um mercado específico para este curso.")
-    }
-  }
-
-  if (t.includes("certificado")) {
-    lines.push("- A formação ajuda no fortalecimento do currículo e comprovação de capacitação.")
-  }
-
-  if (t.includes("estagio") || t.includes("estágio")) {
-    lines.push("- A carta de estágio pode ajudar na busca por oportunidade prática, e o local do estágio fica por conta do aluno.")
-  }
-
-  if (t.includes("como funciona")) {
-    lines.push("- A plataforma fica disponível 24h, e você pode estudar no seu ritmo.")
-  }
-
-  if (lines.length === 1) {
-    lines.push(buildCourseHighlights(courseInfo))
-  }
-
-  lines.push("")
-  lines.push("Se quiser, eu também posso te dizer se esse curso combina com o que você está buscando hoje.")
-
-  return lines.join("\n")
+function buildSelectedCourseAnswer(_text, courseInfo) {
+  return buildFullCourseDetailsMessage(courseInfo)
 }
 
 function buildConsultativeOfferTransition(convo = {}) {
@@ -2057,7 +2100,9 @@ function isCourseDetailsQuestion(text) {
     "estágio",
     "carta de estagio",
     "carta de estágio",
-    "como funciona"
+    "como funciona",
+    "detalhes do curso",
+    "me fala do curso"
   ].some(term => t.includes(term))
 }
 
@@ -2468,6 +2513,13 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       return reply(buildCourseListMessage())
     }
 
+    if (wantsGroupedCourseCatalog(text) && !convo.course) {
+      convo.path = "new_enrollment"
+      convo.step = "course_selection"
+      convo.paymentTeaserShown = false
+      return reply(buildGroupedCourseCatalogMessage())
+    }
+
     if (detectedCourse?.name) {
       const courseInfo =
         findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name) ||
@@ -2475,12 +2527,6 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
-
-      if (isCourseDetailsQuestion(text) && courseInfo) {
-        convo.step = "diagnosis_goal"
-        convo.paymentTeaserShown = false
-        return reply(buildSelectedCourseAnswer(text, courseInfo))
-      }
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
@@ -2490,28 +2536,21 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
       convo.step = "diagnosis_goal"
       convo.paymentTeaserShown = false
-      return reply(buildEnhancedCoursePresentation(detectedCourse.name, courseInfo))
+      return reply(buildFullCourseDetailsMessage(courseInfo))
     }
 
     if (!detectedCourse && courseInfoFromText && convo.step === "course_selection") {
       convo.path = "new_enrollment"
       convo.course = courseInfoFromText.title
-
-      if (isCourseDetailsQuestion(text)) {
-        convo.step = "diagnosis_goal"
-        convo.paymentTeaserShown = false
-        return reply(buildSelectedCourseAnswer(text, courseInfoFromText))
-      }
+      convo.step = "diagnosis_goal"
+      convo.paymentTeaserShown = false
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
-        convo.paymentTeaserShown = false
         return reply(buildPriceAnswerMessage(courseInfoFromText.title, courseInfoFromText))
       }
 
-      convo.step = "diagnosis_goal"
-      convo.paymentTeaserShown = false
-      return reply(buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText))
+      return reply(buildFullCourseDetailsMessage(courseInfoFromText))
     }
 
     if (isPriceQuestion && !convo.course) {
@@ -2538,7 +2577,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         buildFallbackCourseInfoByName(convo.course)
 
       if (courseInfo) {
-        return reply(buildSelectedCourseAnswer(text, courseInfo))
+        return reply(buildFullCourseDetailsMessage(courseInfo))
       }
     }
 
@@ -2586,44 +2625,79 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
     if (convo.step === "course_selection") {
       if (raw === "1") {
-        return reply("Ótimo 😊 Para quem quer emprego mais rápido, alguns cursos que costumam fazer sentido são Administração, Operador de Caixa e Recepcionista Hospitalar.\n\nSe quiser, eu posso te explicar qual deles combina mais com o seu perfil.")
+        return reply(buildCategoryCourseSuggestionMessage("saude"))
       }
 
       if (raw === "2") {
-        return reply("Perfeito 😊 Na área da saúde, algumas opções que costumam chamar atenção são Agente de Saúde, Enfermagem e Farmácia.\n\nQual dessas áreas mais combina com você?")
+        return reply(buildCategoryCourseSuggestionMessage("administrativo"))
       }
 
       if (raw === "3") {
-        return reply("Boa escolha 😊 Para administrativo / escritório, eu posso te indicar Administração, Contabilidade e Recursos Humanos.\n\nQual desses você quer entender melhor?")
+        return reply(buildCategoryCourseSuggestionMessage("beleza"))
       }
 
       if (raw === "4") {
-        return reply("Legal 😊 Em beleza / estética, opções comuns são Barbeiro, Cabeleireiro e Massoterapia.\n\nQual deles te chamou mais atenção?")
+        return reply(buildCategoryCourseSuggestionMessage("tecnologia"))
       }
 
       if (raw === "5") {
-        return reply("Perfeito 😊 Em tecnologia / internet, algumas opções são Informática, Designer Gráfico e Marketing Digital.\n\nQual deles você quer ver primeiro?")
+        return reply(buildGroupedCourseCatalogMessage())
       }
 
       if (raw === "6") {
-        return reply("Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te explico se ele combina com o que você quer hoje.")
+        return reply("Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te mostro todos os detalhes.")
+      }
+
+      if (wantsGroupedCourseCatalog(text)) {
+        return reply(buildGroupedCourseCatalogMessage())
       }
 
       if (courseInfoFromText) {
         convo.course = courseInfoFromText.title
         convo.step = "diagnosis_goal"
         convo.paymentTeaserShown = false
-        return reply(buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText))
+        return reply(buildFullCourseDetailsMessage(courseInfoFromText))
       }
 
       if (isLowContextReply(text)) {
         return reply(buildCourseListMessage())
       }
 
-      return reply("Me manda o nome do curso ou o número da opção que combina mais com o que você procura 😊")
+      return reply("Me manda o nome do curso ou o número da área que você quer ver 😊")
     }
 
     if (convo.step === "diagnosis_goal") {
+      if (raw === "1") {
+        convo.step = "payment_intro"
+        convo.paymentTeaserShown = false
+        ensureSalesLead(convo)
+        convo.salesLead.stage = "payment_intro"
+        return reply(buildPaymentIntroMessage())
+      }
+
+      if (raw === "2") {
+        const courseInfo =
+          findSiteCourseKnowledge(convo.course, convo.course) ||
+          buildFallbackCourseInfoByName(convo.course)
+
+        if (courseInfo) {
+          return reply(buildFullCourseDetailsMessage(courseInfo))
+        }
+      }
+
+      if (raw === "3") {
+        convo.salesLead.stage = "enrollment_explanation"
+        return reply(`Perfeito 😊
+
+Para começar, o processo é simples.
+
+Você me envia os dados necessários para a inscrição,
+eu organizo tudo com você por aqui
+e depois seguimos com a forma de pagamento escolhida.
+
+Podemos continuar agora mesmo.`)
+      }
+
       if (isLowContextReply(text)) {
         return reply(buildGoalClarification(convo.course))
       }
@@ -2649,7 +2723,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.paymentTeaserShown = false
         ensureSalesLead(convo)
         convo.salesLead.stage = "payment_intro"
-        return reply(buildPaymentIntroMessage(convo.course))
+        return reply(buildPaymentIntroMessage())
       }
 
       if (raw === "2") {
@@ -2658,7 +2732,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
           buildFallbackCourseInfoByName(convo.course)
 
         if (courseInfo) {
-          return reply(buildSelectedCourseAnswer("o que vou aprender como funciona carga horária", courseInfo))
+          return reply(buildFullCourseDetailsMessage(courseInfo))
         }
       }
 
@@ -2680,7 +2754,7 @@ Podemos continuar agora mesmo.`)
         convo.paymentTeaserShown = false
         ensureSalesLead(convo)
         convo.salesLead.stage = "payment_intro"
-        return reply(buildPaymentIntroMessage(convo.course))
+        return reply(buildPaymentIntroMessage())
       }
 
       if (isPriceQuestion) {
@@ -2696,7 +2770,7 @@ Podemos continuar agora mesmo.`)
       if (convo.course && isCourseDetailsQuestion(text)) {
         const courseInfo = findSiteCourseKnowledge(text, convo.course)
         if (courseInfo) {
-          return reply(buildSelectedCourseAnswer(text, courseInfo))
+          return reply(buildFullCourseDetailsMessage(courseInfo))
         }
       }
 
@@ -2711,7 +2785,7 @@ Podemos continuar agora mesmo.`)
     if (convo.step === "payment_intro") {
       if (wantsPaymentDetails(text) || isPaymentGuidanceQuestion(text)) {
         convo.step = "payment_choice"
-        return reply(buildPaymentChoiceMessage(convo.course))
+        return reply(buildPaymentChoiceMessage())
       }
 
       if (isCannotPayNowIntent(text)) {
@@ -2734,7 +2808,7 @@ Podemos continuar agora mesmo.`)
           buildFallbackCourseInfoByName(convo.course)
 
         if (courseInfo) {
-          return reply(buildSelectedCourseAnswer(text, courseInfo))
+          return reply(buildFullCourseDetailsMessage(courseInfo))
         }
       }
 
@@ -2752,7 +2826,7 @@ Podemos continuar agora mesmo.`)
         return await continueFromSelectedPayment(convo, phone, selectedPayment)
       }
 
-      return reply(buildPaymentChoiceMessage(convo.course))
+      return reply(buildPaymentChoiceMessage())
     }
 
     if (convo.step === "payment_deferral_day") {
