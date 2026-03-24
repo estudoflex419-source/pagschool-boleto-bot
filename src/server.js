@@ -168,6 +168,17 @@ function formatMoney(value) {
   return n.toFixed(2).replace(".", ",")
 }
 
+function getFirstName(value = "") {
+  const clean = String(value || "").trim()
+  if (!clean) return ""
+  return clean.split(/\s+/)[0]
+}
+
+function buildHumanPrefix(convo = {}) {
+  const firstName = getFirstName(convo.name)
+  return firstName ? `${firstName}, ` : ""
+}
+
 function getDurationByWorkloadHours(hours) {
   if (hours === 96) return "6 meses"
   if (hours === 180) return "8 meses"
@@ -303,6 +314,23 @@ function buildPaymentSummaryLine() {
   ].join("\n")
 }
 
+function wantsHumanSupport(text = "") {
+  const t = normalizeLoose(text)
+
+  return [
+    "atendente",
+    "humano",
+    "pessoa",
+    "consultor",
+    "consultora",
+    "suporte humano",
+    "falar com atendente",
+    "quero falar com atendente",
+    "quero falar com uma pessoa",
+    "me chama um atendente"
+  ].some(term => t.includes(term))
+}
+
 function isPaymentGuidanceQuestion(text) {
   const t = normalizeLoose(text)
 
@@ -391,6 +419,21 @@ function isSimplePositive(text = "") {
   )
 }
 
+function buildHumanSupportMessage(convo = {}) {
+  const prefix = buildHumanPrefix(convo)
+
+  return `Perfeito 😊
+
+${prefix}já deixei seu atendimento sinalizado para acompanhamento humano.
+
+Enquanto isso, se quiser agilizar, você pode me mandar aqui:
+- seu nome
+- curso de interesse
+- dúvida principal
+
+Assim a equipe já pega seu caso com mais contexto.`
+}
+
 function buildPaymentIntroMessage() {
   return `Perfeito 😊
 
@@ -398,7 +441,7 @@ O curso é totalmente gratuito.
 
 Você paga apenas a *taxa única do material didático*.
 
-Quer que eu te mostre os valores certinhos?`
+Se quiser, eu posso te mostrar os valores certinhos e também te explicar qual opção costuma fazer mais sentido para o seu caso.`
 }
 
 function buildPaymentChoiceMessage() {
@@ -410,11 +453,13 @@ Existe apenas a taxa única do material didático.
 *VALOR DO MATERIAL DIDÁTICO:*
 ${buildPaymentSummaryLine()}
 
-Qual opção fica melhor para você?
+Qual opção você quer analisar melhor?
 
 1 - Carnê
 2 - Cartão
-3 - À vista / Pix`
+3 - À vista / Pix
+
+Se quiser, eu também posso te dizer qual costuma compensar mais conforme seu objetivo.`
 }
 
 function buildPaymentMethodReply(method) {
@@ -427,6 +472,21 @@ function buildPaymentMethodReply(method) {
 No *${option.label}*, a taxa do material didático fica em:
 
 *${formatMoneyBR(option.total)}*
+
+Essa é a opção com o *menor valor total*.
+
+Se quiser, já posso te explicar agora como funciona a inscrição.`
+  }
+
+  if (method === "cartao") {
+    return `Perfeito 😊
+
+No *${option.label}*, a taxa do material didático fica em:
+
+*${option.installments} vezes de ${formatMoneyBR(option.installmentValue)}*
+Total: *${formatMoneyBR(option.total)}*
+
+Essa costuma ser uma boa opção para quem quer *parcela menor*.
 
 Se quiser, já posso te explicar agora como funciona a inscrição.`
   }
@@ -442,15 +502,21 @@ Se quiser, já posso te explicar agora como funciona a inscrição.`
 }
 
 function buildPaymentHelpMessage() {
-  return `Sem problema 😊
+  return `Claro 😊
 
-Hoje temos estas opções para a taxa do material didático:
+Hoje funciona assim para a taxa do material didático:
 
+${buildPaymentSummaryLine()}
+
+De forma simples:
+- *Pix* → menor valor total
+- *Cartão* → parcelamento com parcela menor
+- *Carnê* → opção para quem prefere seguir no formato carnê
+
+Se quiser, me responde só com:
 1 - Carnê
 2 - Cartão
-3 - À vista / Pix
-
-Me fala qual você prefere, que eu te explico certinho.`
+3 - Pix`
 }
 
 function buildEnrollmentStartMessage(convo = {}) {
@@ -463,7 +529,7 @@ function buildEnrollmentStartMessage(convo = {}) {
 
   return `Perfeito 😊
 
-Então vamos iniciar sua inscrição.
+Vamos iniciar sua inscrição.
 
 Me envie, por favor:
 
@@ -475,6 +541,7 @@ Me envie, por favor:
 - Curso escolhido
 
 Pode mandar tudo junto, uma informação em cada linha.
+Se faltar algo, eu te aviso sem problema.
 
 *Forma de pagamento escolhida:* ${paymentLabel}`
 }
@@ -598,17 +665,18 @@ function getMissingEnrollmentFields(data = {}) {
 function buildMissingEnrollmentMessage(_data, missing) {
   return `Perfeito 😊
 
-Recebi uma parte dos seus dados, mas ainda faltam:
+Já recebi uma parte dos seus dados, mas ainda faltam:
 
 - ${missing.join("\n- ")}
 
-Pode me mandar só o que falta.`
+Pode me mandar só o que falta.
+Se preferir, eu vou validando com você passo a passo.`
 }
 
 function buildEnrollmentConfirmation(data, paymentMethod = "") {
   return `Perfeito 😊
 
-Recebi seus dados da inscrição:
+Recebi estes dados da sua inscrição:
 
 - Nome: ${data.fullName}
 - CPF: ${data.cpf}
@@ -619,7 +687,9 @@ Recebi seus dados da inscrição:
 - Forma de pagamento: ${paymentMethod || "não informado"}
 
 Se estiver tudo certo, responda *CONFIRMAR*.
-Se quiser corrigir algo, me mande apenas o campo certo.`
+Se quiser corrigir algo, pode mandar por exemplo:
+- *CPF 12345678900*
+- *curso Administração*`
 }
 
 function applyEnrollmentToConversation(convo, sourcePhone = "") {
@@ -808,7 +878,7 @@ function buildPixPaymentMessage(convo = {}) {
 
   return `Perfeito 😊
 
-Sua inscrição do curso *${selectedCourse}* foi organizada.
+Sua inscrição do curso *${selectedCourse}* já ficou encaminhada.
 
 Para concluir agora, o pagamento via *Pix* fica em:
 
@@ -819,12 +889,11 @@ Para concluir agora, o pagamento via *Pix* fica em:
 
 Depois que fizer o pagamento, me envie o comprovante por aqui.
 
-Caso você não consiga fazer agora, me fala algo como:
-*não consigo agora*
-ou
-*quero para o próximo mês*
+Se hoje não der para pagar, me fala algo como:
+- *não consigo agora*
+- *quero para o próximo mês*
 
-que eu sigo com a opção de boleto para o próximo mês.`
+que eu sigo com você na opção para o próximo mês.`
 }
 
 function buildDeferredBoletoAskAmountMessage(dueDateBR) {
@@ -966,17 +1035,20 @@ function buildInstitutionalTrustBlock() {
 function buildMenuMessage() {
   return `Oi 😊 Seja bem-vindo(a) à Estudo Flex.
 
-Eu posso te ajudar de 3 formas:
+Posso te ajudar de 3 formas:
 
-1 - Já sou aluno(a)
+1 - Já sou aluno(a) e preciso de suporte / segunda via
 2 - Quero fazer uma nova matrícula
-3 - Quero conhecer os cursos
+3 - Quero descobrir qual curso combina mais comigo
 
-Pode me responder só com o número.`
+Se preferir, também pode me responder em frase.
+Exemplo: *quero um curso para trabalhar mais rápido*.`
 }
 
 function buildCourseListMessage() {
-  return `Perfeito 😊 Pra eu te indicar melhor, me fala seu objetivo principal:
+  return `Perfeito 😊
+
+Pra eu te indicar algo que faça sentido de verdade, me fala seu objetivo principal:
 
 1 - Conseguir emprego mais rápido
 2 - Área da saúde
@@ -985,7 +1057,10 @@ function buildCourseListMessage() {
 5 - Tecnologia / internet
 6 - Já tenho um curso em mente
 
-Se preferir, também pode me mandar direto o nome do curso.`
+Se preferir, pode me mandar direto algo como:
+- *quero um curso na área da saúde*
+- *quero trabalhar com atendimento*
+- *quero curso de informática*`
 }
 
 function isLowContextReply(text = "") {
@@ -1014,7 +1089,16 @@ function isLowContextReply(text = "") {
 
 function buildGoalClarification(courseName = "") {
   const label = String(courseName || "esse curso").trim()
-  return `Perfeito 😊 Pra eu te orientar melhor no ${label}, me diz em uma frase seu objetivo principal (ex.: emprego mais rápido, mudar de área ou melhorar currículo).`
+
+  return `Perfeito 😊 Pra eu te orientar melhor no *${label}*, me diz o que é mais importante para você agora:
+
+- conseguir emprego mais rápido
+- melhorar currículo
+- mudar de área
+- começar do zero
+- aumentar renda
+
+Pode me responder do seu jeito mesmo.`
 }
 
 function mapGoalReply(text = "") {
@@ -1025,18 +1109,28 @@ function mapGoalReply(text = "") {
     t.includes("emprego") ||
     t.includes("trabalho") ||
     t.includes("oportunidade") ||
+    t.includes("vaga") ||
     t.includes("curriculo") ||
     t.includes("currículo")
   ) {
-    return "quero me preparar melhor para oportunidades de trabalho"
+    return "buscar oportunidades de trabalho e fortalecer o currículo"
   }
 
-  if (t.includes("renda")) {
-    return "quero melhorar minha renda com uma nova qualificação"
+  if (
+    t.includes("renda") ||
+    t.includes("ganhar mais") ||
+    t.includes("dinheiro") ||
+    t.includes("extra")
+  ) {
+    return "melhorar a renda com uma nova qualificação"
   }
 
   if (t.includes("mudar de area") || t.includes("mudar de área")) {
-    return "quero mudar de área com mais segurança"
+    return "mudar de área com mais segurança"
+  }
+
+  if (t.includes("começar") || t.includes("comecar") || t.includes("zero")) {
+    return "começar do zero em uma nova área"
   }
 
   return String(text || "").trim()
@@ -1046,10 +1140,10 @@ function buildExperienceClarification(courseName = "") {
   const c = normalizeLoose(courseName)
 
   if (c.includes("ingles") || c.includes("inglês")) {
-    return "Entendi 😊 Você está começando do zero no inglês ou já tem alguma base?"
+    return "Entendi 😊 No inglês, você está começando do zero ou já tem alguma base? Isso me ajuda a te orientar melhor."
   }
 
-  return "Entendi 😊 Você está começando do zero ou já teve algum contato com essa área?"
+  return "Entendi 😊 Você está começando do zero ou já teve algum contato com essa área? Isso me ajuda a te orientar sem te enrolar."
 }
 
 function mapExperienceReply(text = "") {
@@ -1060,6 +1154,8 @@ function mapExperienceReply(text = "") {
     t.includes("zero") ||
     t.includes("nenhuma") ||
     t.includes("nunca") ||
+    t.includes("nao tenho") ||
+    t.includes("não tenho") ||
     t.includes("nao") ||
     t.includes("não")
   ) {
@@ -1072,7 +1168,8 @@ function mapExperienceReply(text = "") {
     t.includes("tenho") ||
     t.includes("trabalho") ||
     t.includes("experiencia") ||
-    t.includes("experiência")
+    t.includes("experiência") ||
+    t.includes("contato")
   ) {
     return "já teve contato com a área"
   }
@@ -1129,48 +1226,279 @@ function buildCourseSalesSummary(courseName = "", courseInfo = null, compact = f
   return "Os cursos da Estudo Flex são EAD, com certificado e foco prático para estudar no próprio ritmo."
 }
 
+function buildCourseHighlights(courseInfo) {
+  if (!courseInfo) return ""
+
+  const lines = []
+
+  if (courseInfo.summary) {
+    const summary = String(courseInfo.summary).trim().replace(/\.$/, "")
+    lines.push(`${summary.charAt(0).toUpperCase()}${summary.slice(1)}.`)
+  } else if (courseInfo.description) {
+    const firstLine = String(courseInfo.description)
+      .split(/\r?\n/)
+      .map(item => item.trim())
+      .find(Boolean)
+
+    if (firstLine) {
+      lines.push(firstLine.replace(/\.$/, "") + ".")
+    }
+  }
+
+  if (courseInfo.workload) {
+    const duration = courseInfo.duration ? ` Duração média: ${courseInfo.duration}.` : ""
+    lines.push(`Carga horária: ${courseInfo.workload}.${duration}`)
+  } else {
+    lines.push("Carga horária: não informada no documento.")
+  }
+
+  if (courseInfo.salary) {
+    lines.push(`Média salarial informada no documento: ${courseInfo.salary}.`)
+  } else {
+    lines.push("Média salarial: não informada no documento para este curso.")
+  }
+
+  if (courseInfo.learns?.length) {
+    lines.push(`Conteúdo programático: ${courseInfo.learns.slice(0, 8).join(", ")}.`)
+  } else {
+    lines.push("Conteúdo programático: não detalhado no documento para este curso.")
+  }
+
+  if (courseInfo.market) {
+    lines.push(`Mercado de trabalho: ${courseInfo.market}.`)
+  } else {
+    lines.push("Mercado de trabalho: não descrito de forma específica no documento para este curso.")
+  }
+
+  if (courseInfo.differentials) {
+    const differentialLine = String(courseInfo.differentials)
+      .split(/\r?\n/)
+      .map(item => item.trim())
+      .find(Boolean)
+
+    if (differentialLine) {
+      lines.push(`Diferencial: ${differentialLine.replace(/\.$/, "")}.`)
+    }
+  }
+
+  lines.push("Também fortalece o currículo e ajuda quem quer se posicionar melhor no mercado.")
+
+  return lines.join("\n")
+}
+
+function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
+  const normalizedCourseInfo = courseInfo || buildFallbackCourseInfoByName(selectedCourseName)
+  const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
+  const parts = []
+
+  parts.push(`Perfeito 😊 *${displayName}* pode ser uma boa opção para o seu momento.`)
+
+  if (normalizedCourseInfo?.summary) {
+    parts.push(String(normalizedCourseInfo.summary).trim().replace(/\.$/, "") + ".")
+  } else {
+    parts.push("É uma formação prática, com certificado, pensada para quem quer aprender e se posicionar melhor no mercado.")
+  }
+
+  if (normalizedCourseInfo?.learns?.length) {
+    parts.push(`Você vai ter contato com temas como *${normalizedCourseInfo.learns.slice(0, 4).join(", ")}*.`)
+  }
+
+  if (normalizedCourseInfo?.workload) {
+    const durationPart = normalizedCourseInfo.duration ? ` e duração média de *${normalizedCourseInfo.duration}*` : ""
+    parts.push(`A carga horária informada é de *${normalizedCourseInfo.workload}*${durationPart}.`)
+  }
+
+  parts.push("Antes de eu te indicar o melhor caminho, me diz: o que mais pesa para você hoje — emprego mais rápido, melhorar currículo ou mudar de área?")
+
+  return parts.join("\n\n")
+}
+
+function buildSelectedCourseAnswer(text, courseInfo) {
+  const t = normalizeLoose(text)
+  const lines = []
+
+  lines.push(`Claro 😊 Sobre *${courseInfo.title}*:`)
+
+  if (
+    t.includes("carga horaria") ||
+    t.includes("carga horária") ||
+    t.includes("quantas horas") ||
+    t.includes("quanto tempo") ||
+    t.includes("tempo de curso") ||
+    t.includes("quantos meses") ||
+    t.includes("dura quanto") ||
+    t.includes("duracao") ||
+    t.includes("duração")
+  ) {
+    if (courseInfo.workload) {
+      lines.push(`- Carga horária: ${courseInfo.workload}`)
+      if (courseInfo.duration) {
+        lines.push(`- Duração média: ${courseInfo.duration}`)
+      }
+    } else {
+      lines.push("- A carga horária não está informada no documento para este curso.")
+    }
+  }
+
+  if (
+    t.includes("media salarial") ||
+    t.includes("média salarial") ||
+    t.includes("salario") ||
+    t.includes("salário")
+  ) {
+    if (courseInfo.salary) {
+      lines.push(`- Média salarial informada: ${courseInfo.salary}`)
+    } else {
+      lines.push("- No momento eu não tenho uma média salarial confirmada no documento para este curso.")
+    }
+  }
+
+  if (
+    t.includes("conteudo") ||
+    t.includes("conteúdo") ||
+    t.includes("o que aprende") ||
+    t.includes("oque aprende") ||
+    t.includes("o que vou aprender") ||
+    t.includes("o que cai") ||
+    t.includes("oq cai")
+  ) {
+    if (courseInfo.learns?.length) {
+      lines.push(`- Conteúdo: ${uniqueItems(courseInfo.learns || []).slice(0, 10).join(", ")}`)
+    } else {
+      lines.push("- O conteúdo programático detalhado não está disponível no documento para este curso.")
+    }
+  }
+
+  if (
+    t.includes("mercado") ||
+    t.includes("atuar") ||
+    t.includes("trabalha onde") ||
+    t.includes("area de atuacao") ||
+    t.includes("área de atuação")
+  ) {
+    if (courseInfo.market) {
+      lines.push(`- Mercado de trabalho: ${courseInfo.market}`)
+    } else {
+      lines.push("- O documento não detalha um mercado específico para este curso.")
+    }
+  }
+
+  if (t.includes("certificado")) {
+    lines.push("- A formação ajuda no fortalecimento do currículo e comprovação de capacitação.")
+  }
+
+  if (t.includes("estagio") || t.includes("estágio")) {
+    lines.push("- A carta de estágio pode ajudar na busca por oportunidade prática, e o local do estágio fica por conta do aluno.")
+  }
+
+  if (t.includes("como funciona")) {
+    lines.push("- A plataforma fica disponível 24h, e você pode estudar no seu ritmo.")
+  }
+
+  if (lines.length === 1) {
+    lines.push(buildCourseHighlights(courseInfo))
+  }
+
+  lines.push("")
+  lines.push("Se quiser, eu também posso te dizer se esse curso combina com o que você está buscando hoje.")
+
+  return lines.join("\n")
+}
+
+function buildConsultativeOfferTransition(convo = {}) {
+  const prefix = buildHumanPrefix(convo)
+  const courseName = convo.course || "esse curso"
+  const goal = String(convo.goal || "").trim()
+  const experience = String(convo.experience || "").trim()
+  const courseInfo =
+    findSiteCourseKnowledge(courseName, courseName) ||
+    buildFallbackCourseInfoByName(courseName)
+
+  const parts = []
+
+  parts.push(`Perfeito 😊 ${prefix}pelo que você me contou, *${courseName}* faz sentido para o seu momento.`)
+
+  if (goal) {
+    parts.push(`Ele pode te ajudar principalmente em: *${goal}*.`)
+  }
+
+  if (experience) {
+    if (experience === "começando do zero") {
+      parts.push("E como você está começando do zero, o ideal é pegar uma formação com linguagem mais acessível e foco prático.")
+    } else {
+      parts.push("Como você já teve contato com a área, a tendência é aproveitar melhor o conteúdo e fortalecer ainda mais seu perfil.")
+    }
+  }
+
+  if (courseInfo?.summary) {
+    parts.push(String(courseInfo.summary).trim().replace(/\.$/, "") + ".")
+  } else {
+    parts.push("É uma formação EAD com certificado, pensada para quem quer estudar no próprio ritmo.")
+  }
+
+  if (courseInfo?.workload) {
+    const duration = courseInfo.duration ? ` e duração média de ${courseInfo.duration}` : ""
+    parts.push(`A carga horária informada é de ${courseInfo.workload}${duration}.`)
+  }
+
+  parts.push(`Se você quiser, agora eu posso seguir de 3 formas:
+1 - te mostrar os valores
+2 - te explicar melhor o que você vai aprender
+3 - já te orientar para começar a matrícula`)
+
+  return parts.join("\n\n")
+}
+
 function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {}) {
   const { compactCourseExplanation = true } = options
   const courseLabel = courseName || courseInfo?.title || ""
   const courseSummary = buildCourseSalesSummary(courseName, courseInfo, compactCourseExplanation)
   const freeLine = courseLabel
-    ? `${courseLabel} é 100% gratuito, sem mensalidade.`
-    : "Os cursos são 100% gratuitos, sem mensalidade."
+    ? `${courseLabel} é *100% gratuito*, sem mensalidade.`
+    : "Os cursos são *100% gratuitos*, sem mensalidade."
 
   return `Ótima pergunta 😊
+
 ${courseSummary}
 ${freeLine}
 
-*Taxa única do material didático:*
+Você paga apenas a *taxa única do material didático*:
+
 ${buildPaymentSummaryLine()}
 
-Se quiser, já me responde:
+Se quiser, eu posso seguir de 2 formas:
+- te indicar a opção que mais compensa
+- ou já iniciar sua matrícula
+
+Também pode me responder direto com:
 1 - Carnê
 2 - Cartão
-3 - PIX.`
+3 - Pix`
 }
 
 function buildPixMessage() {
   return `Perfeito 😊
 
-Seus dados foram registrados na opção PIX à vista.
-Valor do PIX à vista: ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}.
+Seus dados foram registrados na opção *PIX à vista*.
+Valor: *${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}*
 
-Para pagamento, seguem os dados:
+Para pagamento:
 
-*PIX:*
+*PIX*
 *CNPJ:* ${PIX_RECEIVER.key}
 *NOME:* ${PIX_RECEIVER.name}
 
-Assim que realizar o pagamento, me envie o comprovante por aqui para darmos continuidade.`
+Assim que realizar o pagamento, me envie o comprovante por aqui para eu deixar o andamento mais rápido.`
 }
 
 function buildCardMessage(course) {
   return `Perfeito 😊
 
-Seus dados foram registrados para ${course || "o curso"} na opção cartão.
+Seus dados foram registrados para *${course || "o curso"}* na opção *cartão*.
 
-Agora nossa equipe vai seguir com as próximas orientações para finalizar a melhor condição de pagamento com você pelos canais oficiais.`
+Agora nossa equipe vai seguir com as próximas orientações para finalizar a melhor condição de pagamento com você pelos canais oficiais.
+
+Se quiser, enquanto isso eu ainda posso tirar dúvidas sobre curso, acesso ou matrícula.`
 }
 
 function buildPostSaleReply(text, convo) {
@@ -1186,7 +1514,7 @@ function buildPostSaleReply(text, convo) {
     if (convo.payment === "PIX") {
       return `Perfeito 😊
 
-Assim que o pagamento via PIX for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
+Assim que o pagamento via PIX for confirmado, a equipe segue com a liberação do seu acesso à plataforma.
 
 Se você já pagou, pode me enviar o comprovante por aqui.`
     }
@@ -1194,22 +1522,22 @@ Se você já pagou, pode me enviar o comprovante por aqui.`
     if (convo.payment === "Carnê") {
       return `Perfeito 😊
 
-Assim que o pagamento do carnê for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
+Assim que o pagamento do carnê for confirmado, a equipe segue com a liberação do seu acesso à plataforma.
 
-Se quiser, eu continuo te ajudando por aqui.`
+Se quiser, eu sigo com você por aqui.`
     }
 
     if (convo.payment === "Boleto a vista") {
       return `Perfeito 😊
 
-Assim que o pagamento do carnê único for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
+Assim que o pagamento do boleto único for confirmado, a equipe segue com a liberação do seu acesso à plataforma.
 
 Se você já pagou, pode me enviar o comprovante por aqui.`
     }
 
     return `Perfeito 😊
 
-Assim que o pagamento for confirmado, nossa equipe segue com a liberação do seu acesso à plataforma.
+Assim que o pagamento for confirmado, a equipe segue com a liberação do seu acesso à plataforma.
 
 Se precisar, eu continuo te ajudando por aqui.`
   }
@@ -1225,19 +1553,26 @@ Se precisar, eu continuo te ajudando por aqui.`
     return `Perfeito 😊
 
 Você pode iniciar assim que o pagamento for confirmado e o acesso for liberado na plataforma.
+
 Depois disso, já consegue estudar no mesmo dia, no seu ritmo.`
   }
 
   if (t.includes("comprovante")) {
     return `Perfeito 😊
 
-Pode me enviar o comprovante por aqui mesmo que isso ajuda a equipe a dar andamento mais rápido.`
+Pode me enviar o comprovante por aqui mesmo.
+Isso ajuda a equipe a dar andamento mais rápido.`
   }
 
   return `Perfeito 😊
 
-Sua solicitação já ficou registrada.
-Se surgir qualquer dúvida, pode me chamar por aqui.`
+Seu atendimento já ficou registrado.
+
+Se você quiser, eu ainda posso te ajudar com:
+- acesso à plataforma
+- comprovante
+- andamento da matrícula
+- dúvidas sobre o curso`
 }
 
 function buildInternalLeadNotificationText(convo = {}) {
@@ -1256,6 +1591,23 @@ function buildInternalLeadNotificationText(convo = {}) {
     `Forma de pagamento: ${payment}`,
     `Dia de pagamento: ${day}`,
     `Telefone do aluno: ${String(convo.phone || "").trim() || "não informado"}`
+  ].join("\n")
+}
+
+function buildHumanSupportNotificationText(convo = {}, sourcePhone = "", reason = "") {
+  const phone =
+    String(convo.phone || "").trim() ||
+    String(extractPhoneFromWhatsApp(sourcePhone) || "").trim() ||
+    "não informado"
+
+  return [
+    "Solicitação de atendimento humano",
+    `Nome: ${String(convo.name || "").trim() || "não informado"}`,
+    `Telefone: ${phone}`,
+    `Curso: ${String(convo.course || "").trim() || "não informado"}`,
+    `Etapa atual: ${String(convo.step || "").trim() || "não informado"}`,
+    `Pagamento: ${String(convo.payment || "").trim() || "não informado"}`,
+    `Mensagem do aluno: ${String(reason || "").trim() || "não informado"}`
   ].join("\n")
 }
 
@@ -1291,6 +1643,54 @@ function enqueueInternalLeadFallback(convo = {}, sourcePhone = "", reason = "") 
     fs.writeFileSync(INTERNAL_LEAD_FALLBACK_FILE, JSON.stringify(current, null, 2), "utf8")
   } catch (error) {
     console.error("Falha ao salvar fila local de leads internos:", error?.message || error)
+  }
+}
+
+async function notifyHumanSupportRequest(convo = {}, sourcePhone = "", reason = "") {
+  const phone =
+    String(convo.phone || "").trim() ||
+    String(extractPhoneFromWhatsApp(sourcePhone) || "").trim()
+
+  const notifyKey = [
+    "human_support",
+    phone,
+    String(reason || "").trim().slice(0, 80),
+    String(convo.step || "").trim()
+  ].join("|").toLowerCase()
+
+  if (convo.humanSupportNotifyKey && convo.humanSupportNotifyKey === notifyKey) {
+    return false
+  }
+
+  try {
+    await sendText(
+      INTERNAL_LEAD_NOTIFY_PHONE,
+      buildHumanSupportNotificationText(
+        {
+          ...convo,
+          phone
+        },
+        sourcePhone,
+        reason
+      )
+    )
+
+    convo.humanSupportNotifyKey = notifyKey
+    convo.humanSupportRequestedAt = new Date().toISOString()
+    convo.phone = phone || convo.phone || ""
+    return true
+  } catch (error) {
+    console.error("Falha ao enviar solicitação de atendimento humano:", error?.message || error)
+    enqueueInternalLeadFallback(
+      {
+        ...convo,
+        phone,
+        payment: convo.payment || "atendimento_humano"
+      },
+      sourcePhone,
+      String(error?.message || error)
+    )
+    return false
   }
 }
 
@@ -1661,179 +2061,6 @@ function isCourseDetailsQuestion(text) {
   ].some(term => t.includes(term))
 }
 
-function buildCourseHighlights(courseInfo) {
-  if (!courseInfo) return ""
-
-  const lines = []
-
-  if (courseInfo.summary) {
-    const summary = String(courseInfo.summary).trim().replace(/\.$/, "")
-    lines.push(`${summary.charAt(0).toUpperCase()}${summary.slice(1)}.`)
-  } else if (courseInfo.description) {
-    const firstLine = String(courseInfo.description)
-      .split(/\r?\n/)
-      .map(item => item.trim())
-      .find(Boolean)
-
-    if (firstLine) {
-      lines.push(firstLine.replace(/\.$/, "") + ".")
-    }
-  }
-
-  if (courseInfo.workload) {
-    const duration = courseInfo.duration ? ` Duração média: ${courseInfo.duration}.` : ""
-    lines.push(`Carga horária: ${courseInfo.workload}.${duration}`)
-  } else {
-    lines.push("Carga horária: não informada no documento.")
-  }
-
-  if (courseInfo.salary) {
-    lines.push(`Média salarial informada no documento: ${courseInfo.salary}.`)
-  } else {
-    lines.push("Média salarial: não informada no documento para este curso.")
-  }
-
-  if (courseInfo.learns?.length) {
-    lines.push(`Conteúdo programático: ${courseInfo.learns.slice(0, 8).join(", ")}.`)
-  } else {
-    lines.push("Conteúdo programático: não detalhado no documento para este curso.")
-  }
-
-  if (courseInfo.market) {
-    lines.push(`Mercado de trabalho: ${courseInfo.market}.`)
-  } else {
-    lines.push("Mercado de trabalho: não descrito de forma específica no documento para este curso.")
-  }
-
-  if (courseInfo.differentials) {
-    const differentialLine = String(courseInfo.differentials)
-      .split(/\r?\n/)
-      .map(item => item.trim())
-      .find(Boolean)
-
-    if (differentialLine) {
-      lines.push(`Diferencial: ${differentialLine.replace(/\.$/, "")}.`)
-    }
-  }
-
-  lines.push("Também fortalece o currículo e ajuda quem quer se posicionar melhor no mercado.")
-
-  return lines.join("\n")
-}
-
-function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
-  const normalizedCourseInfo = courseInfo || buildFallbackCourseInfoByName(selectedCourseName)
-  const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
-  const parts = []
-
-  parts.push(`Perfeito 😊 ${displayName} pode ser uma boa opção para o seu momento.`)
-
-  if (normalizedCourseInfo?.summary) {
-    parts.push(String(normalizedCourseInfo.summary).trim().replace(/\.$/, "") + ".")
-  } else {
-    parts.push("É uma formação prática, com certificado, pensada para quem quer aprender e se posicionar melhor no mercado.")
-  }
-
-  if (normalizedCourseInfo?.learns?.length) {
-    parts.push(`Você vai aprender temas como ${normalizedCourseInfo.learns.slice(0, 3).join(", ")}.`)
-  }
-
-  parts.push(`Hoje, com ${displayName}, o que mais pesa para você: conseguir emprego mais rápido, melhorar currículo ou mudar de área?`)
-
-  return parts.join("\n\n")
-}
-
-function buildSelectedCourseAnswer(text, courseInfo) {
-  const t = normalizeLoose(text)
-  const lines = []
-
-  lines.push(`Claro 😊 Sobre ${courseInfo.title}:`)
-
-  if (
-    t.includes("carga horaria") ||
-    t.includes("carga horária") ||
-    t.includes("quantas horas") ||
-    t.includes("quanto tempo") ||
-    t.includes("tempo de curso") ||
-    t.includes("quantos meses") ||
-    t.includes("dura quanto") ||
-    t.includes("duracao") ||
-    t.includes("duração")
-  ) {
-    if (courseInfo.workload) {
-      lines.push(`A carga horária informada é de ${courseInfo.workload}.`)
-      if (courseInfo.duration) {
-        lines.push(`Para essa carga horária, a duração média é de ${courseInfo.duration}.`)
-      }
-    } else {
-      lines.push("A carga horária não está informada no documento para este curso.")
-    }
-  }
-
-  if (
-    t.includes("media salarial") ||
-    t.includes("média salarial") ||
-    t.includes("salario") ||
-    t.includes("salário")
-  ) {
-    if (courseInfo.salary) {
-      lines.push(`A média salarial informada para esse curso é ${courseInfo.salary}.`)
-    } else {
-      lines.push("No momento eu não tenho uma média salarial pública confirmada para esse curso, mas posso te explicar melhor o que você aprende e onde pode atuar.")
-    }
-  }
-
-  if (
-    t.includes("conteudo") ||
-    t.includes("conteúdo") ||
-    t.includes("o que aprende") ||
-    t.includes("oque aprende") ||
-    t.includes("o que vou aprender") ||
-    t.includes("o que cai") ||
-    t.includes("oq cai")
-  ) {
-    if (courseInfo.learns?.length) {
-      lines.push(`Você vai estudar temas como ${uniqueItems(courseInfo.learns || []).slice(0, 12).join(", ")}.`)
-    } else {
-      lines.push("O conteúdo programático detalhado não está disponível no documento para este curso.")
-    }
-  }
-
-  if (
-    t.includes("mercado") ||
-    t.includes("atuar") ||
-    t.includes("trabalha onde") ||
-    t.includes("area de atuacao") ||
-    t.includes("área de atuação")
-  ) {
-    if (courseInfo.market) {
-      lines.push(`Depois da formação, você pode buscar oportunidades em ${courseInfo.market}.`)
-    } else {
-      lines.push("O documento não detalha um mercado de trabalho específico para este curso, mas posso te ajudar com os cursos mais alinhados ao seu objetivo.")
-    }
-  }
-
-  if (t.includes("certificado")) {
-    lines.push("Essa formação ajuda bastante no fortalecimento do currículo e na comprovação de capacitação.")
-  }
-
-  if (t.includes("estagio") || t.includes("estágio")) {
-    lines.push("A carta de estágio pode ajudar na busca por oportunidade prática na área, e o local do estágio fica por conta do aluno.")
-  }
-
-  if (t.includes("como funciona")) {
-    lines.push("A plataforma fica disponível 24 horas por dia, o aluno pode estudar no próprio ritmo e as aulas podem ter vídeos, textos, perguntas, atividades e avaliações.")
-  }
-
-  if (lines.length === 1) {
-    lines.push(buildCourseHighlights(courseInfo))
-  }
-
-  lines.push("Se quiser, eu também posso te mostrar como esse curso combina com o seu objetivo profissional.")
-
-  return lines.join("\n\n")
-}
-
 async function fallbackAI(text, convo, action = "") {
   const courseInfo = findSiteCourseKnowledge(text, convo.course)
   const promptKnowledge = buildPromptKnowledge({
@@ -1883,7 +2110,9 @@ async function continueFromSelectedPayment(convo, phone, payment) {
     if (needsCourse) {
       convo.step = "collecting_pix_course"
       return reply(`Perfeito 😊 Vamos seguir na opção PIX à vista.
-Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
+Valor: ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}.
+
+Essa é a opção com *menor valor total*.
 
 Para finalizar no PIX, eu preciso só destes dados:
 - Curso
@@ -1896,7 +2125,7 @@ Me envie o nome do curso, por favor.`)
     if (!String(convo.name || "").trim()) {
       convo.step = "collecting_name"
       return reply(`Perfeito 😊 Vamos seguir na opção PIX à vista.
-Valor: R$ ${formatMoney(DEFAULT_PIX_CASH_VALUE)}.
+Valor: ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}.
 
 Me envie seu nome completo, por favor.`)
     }
@@ -1916,6 +2145,8 @@ Me envie seu nome completo, por favor.`)
     if (nextData) {
       convo.step = nextData.step
       return reply(`Perfeito 😊 Vamos seguir na opção cartão.
+
+Essa costuma ser uma boa opção para quem quer *parcela menor*.
 
 Para deixar tudo encaminhado, preciso de alguns dados de cadastro.
 
@@ -1953,6 +2184,12 @@ async function processMessage(phone, text) {
     const cleanText = normalizeFlowText(text || "")
 
     ensureSalesLead(convo)
+
+    if (wantsHumanSupport(text)) {
+      convo.humanSupportRequested = true
+      await notifyHumanSupportRequest(convo, phone, text)
+      return reply(buildHumanSupportMessage(convo))
+    }
 
     const currentStage = convo.salesLead.stage || ""
     const chosenPaymentMethod = detectPaymentMethod(cleanText)
@@ -2349,27 +2586,27 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
     if (convo.step === "course_selection") {
       if (raw === "1") {
-        return reply("Ótimo 😊 Para emprego rápido, alguns cursos que costumam chamar atenção são Administração, Operador de Caixa e Recepcionista Hospitalar.\n\nQual deles mais combina com você?")
+        return reply("Ótimo 😊 Para quem quer emprego mais rápido, alguns cursos que costumam fazer sentido são Administração, Operador de Caixa e Recepcionista Hospitalar.\n\nSe quiser, eu posso te explicar qual deles combina mais com o seu perfil.")
       }
 
       if (raw === "2") {
-        return reply("Perfeito 😊 Na área da saúde, alguns cursos que costumam chamar bastante atenção são Agente de Saúde, Enfermagem e Farmácia.\n\nQual deles você quer entender melhor?")
+        return reply("Perfeito 😊 Na área da saúde, algumas opções que costumam chamar atenção são Agente de Saúde, Enfermagem e Farmácia.\n\nQual dessas áreas mais combina com você?")
       }
 
       if (raw === "3") {
-        return reply("Boa escolha 😊 Para administrativo / escritório, eu posso te indicar Administração, Contabilidade e Recursos Humanos.\n\nQual desses te interessou mais?")
+        return reply("Boa escolha 😊 Para administrativo / escritório, eu posso te indicar Administração, Contabilidade e Recursos Humanos.\n\nQual desses você quer entender melhor?")
       }
 
       if (raw === "4") {
-        return reply("Legal 😊 Em beleza / estética, os mais procurados costumam ser Barbeiro, Cabeleireiro e Massoterapia.\n\nQual deles você quer conhecer melhor?")
+        return reply("Legal 😊 Em beleza / estética, opções comuns são Barbeiro, Cabeleireiro e Massoterapia.\n\nQual deles te chamou mais atenção?")
       }
 
       if (raw === "5") {
-        return reply("Perfeito 😊 Em tecnologia / internet, os que mais costumam chamar atenção são Informática, Designer Gráfico e Marketing Digital.\n\nQual deles você quer ver primeiro?")
+        return reply("Perfeito 😊 Em tecnologia / internet, algumas opções são Informática, Designer Gráfico e Marketing Digital.\n\nQual deles você quer ver primeiro?")
       }
 
       if (raw === "6") {
-        return reply("Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te explico melhor.")
+        return reply("Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te explico se ele combina com o que você quer hoje.")
       }
 
       if (courseInfoFromText) {
@@ -2403,10 +2640,41 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
       convo.experience = mapExperienceReply(text)
       convo.step = "offer_transition"
-      return reply(sales.buildValueConnection(convo))
+      return reply(buildConsultativeOfferTransition(convo))
     }
 
     if (convo.step === "offer_transition") {
+      if (raw === "1") {
+        convo.step = "payment_intro"
+        convo.paymentTeaserShown = false
+        ensureSalesLead(convo)
+        convo.salesLead.stage = "payment_intro"
+        return reply(buildPaymentIntroMessage(convo.course))
+      }
+
+      if (raw === "2") {
+        const courseInfo =
+          findSiteCourseKnowledge(convo.course, convo.course) ||
+          buildFallbackCourseInfoByName(convo.course)
+
+        if (courseInfo) {
+          return reply(buildSelectedCourseAnswer("o que vou aprender como funciona carga horária", courseInfo))
+        }
+      }
+
+      if (raw === "3") {
+        convo.salesLead.stage = "enrollment_explanation"
+        return reply(`Perfeito 😊
+
+Para começar, o processo é simples.
+
+Você me envia os dados necessários para a inscrição,
+eu organizo tudo com você por aqui
+e depois seguimos com a forma de pagamento escolhida.
+
+Podemos continuar agora mesmo.`)
+      }
+
       if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
@@ -2437,7 +2705,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         return reply(aiReply)
       }
 
-      return reply("Sem problema 😊 Posso te explicar melhor como funciona o curso ou, se preferir, já te passo os valores.")
+      return reply("Sem problema 😊 Posso te mostrar os valores, te explicar melhor o conteúdo ou já te orientar para começar a matrícula.")
     }
 
     if (convo.step === "payment_intro") {
@@ -2475,7 +2743,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
     if (convo.step === "payment_choice") {
       if (isPaymentGuidanceQuestion(text)) {
-        return reply(buildPaymentHelpMessage(convo.course))
+        return reply(buildPaymentHelpMessage())
       }
 
       const selectedPayment = detectPaymentSelection(text, { allowNumeric: true })
