@@ -64,6 +64,9 @@ const COURSE_CATEGORY_LABELS = Object.freeze({
   juridico: "Jurídico / Concursos",
   educacao: "Educação",
   industrial: "Industrial / Operacional",
+  agro: "Agro / Máquinas / Campo",
+  logistica: "Logística / Portuário / Transporte",
+  gastronomia: "Gastronomia / Alimentação",
   geral: "Outros"
 })
 
@@ -252,8 +255,11 @@ function getCourseSearchText(course = {}) {
     course.summary,
     course.description,
     course.market,
+    course.salary,
+    course.prerequisites,
     Array.isArray(course.aliases) ? course.aliases.join(" ") : "",
-    Array.isArray(course.learns) ? course.learns.join(" ") : ""
+    Array.isArray(course.learns) ? course.learns.join(" ") : "",
+    Array.isArray(course.curiosities) ? course.curiosities.join(" ") : ""
   ].join(" "))
 }
 
@@ -261,49 +267,67 @@ function inferCourseCategory(course = {}) {
   const text = getCourseSearchText(course)
 
   if (
-    /saude|enfermagem|farmacia|agente de saude|agente comunitario|cuidador|hospital|recepcionista hospitalar|coleta|analises clinicas|analise clinica|primeiros socorros|radiologia|nutricao|nutrição|fisioterapia/.test(text)
+    /saude|saúde|enfermagem|farmacia|farmácia|agente de saude|agente de saúde|hospital|recepcionista hospitalar|odontologia|saude bucal|socorrista|analises clinicas|análises clínicas|auxiliar de nutricao|auxiliar de nutrição|instrumentacao cirurgica|instrumentação cirúrgica|auxiliar de farmacia|auxiliar de farmácia|cuidador de idosos|auxiliar de veterinario|auxiliar de veterinário|psicologia/.test(text)
   ) {
     return "saude"
   }
 
   if (
-    /administracao|administração|contabilidade|recursos humanos|rh|departamento pessoal|dp|secretariado|auxiliar administrativo|assistente administrativo|financeiro|escritorio|escritório|atendimento|telemarketing|operador de caixa/.test(text)
+    /administracao|administração|assistente administrativo|auxiliar administrativo|recursos humanos|rh|operador de caixa|contabilidade|marketing|marketing digital|jovem aprendiz|portaria|concurso publico|concurso público|recepcionista|assistente social|pedagogia/.test(text)
   ) {
     return "administrativo"
   }
 
   if (
-    /barbeiro|cabeleireiro|maquiagem|maquiador|estetica|estética|massoterapia|designer de sobrancelhas|sobrancelha|manicure|pedicure/.test(text)
+    /barbeiro|cabeleireiro|maquiagem|designer de unhas|designer de sobrancelhas|extensao de cilios|extensão de cílios|micropigmentacao|micropigmentação|depilacao|depilação|mega hair|massoterapeuta/.test(text)
   ) {
     return "beleza"
   }
 
   if (
-    /informatica|informática|designer grafico|designer gráfico|marketing digital|excel|pacote office|programacao|programação|tecnologia|internet|redes|manutencao de computador|manutenção de computador/.test(text)
+    /informatica|informática|inteligencia artificial|inteligência artificial|chatgpt|criacao de games|criação de games|robotica|robótica|designer grafico|designer gráfico|capcut|digital influencer|automacao industrial|automação industrial|tecnico em manutencao de celulares|técnico em manutenção de celulares|ingles profissionalizante|inglês profissionalizante|libras/.test(text)
   ) {
     return "tecnologia"
   }
 
-  if (/ingles|inglês|espanhol|idioma|idiomas/.test(text)) {
+  if (/ingles|inglês|libras/.test(text)) {
     return "idiomas"
   }
 
   if (
-    /juridico|jurídico|concursos|policia|polícia|agente penitenciario|agente penitenciário|investigacao|investigação/.test(text)
+    /seguranca desarmada|segurança desarmada|seguranca do trabalho|segurança do trabalho|preparatorio militar|preparatório militar|guarda vidas|guarda-vidas|necropsia|tanatopraxia/.test(text)
   ) {
     return "juridico"
   }
 
   if (
-    /educacao|educação|creche|auxiliar de classe|monitor escolar|pedagogia/.test(text)
+    /pedagogia|auxiliar de creche|educacao|educação/.test(text)
   ) {
     return "educacao"
   }
 
   if (
-    /eletrica|elétrica|mecanica|mecânica|solda|soldador|logistica|logística|almoxarifado|operacional|industrial|construcao civil|construção civil/.test(text)
+    /refrigeracao|refrigeração|geladeira|micro ondas|micro-ondas|maquina de lavar|máquina de lavar|fogao|fogão|topografia|auto eletrica|auto elétrica|eletrica|elétrica|energia fotovoltaica|construcao civil|construção civil|auxiliar de soldador|torneiro mecanico|torneiro mecânico|mecanico industrial|mecânico industrial/.test(text)
   ) {
     return "industrial"
+  }
+
+  if (
+    /trator|retroescavadeira|pa carregadeira|pá carregadeira|escavadeira|empilhadeira|pulverizador agricola|pulverizador agrícola|colheitadeira|forwarder|harvester|patrol|guindaste/.test(text)
+  ) {
+    return "agro"
+  }
+
+  if (
+    /logistica|logística|gestao portuaria|gestão portuária|vistoriador de conteiner|vistoriador de contêiner|conferente de cargas|operador de patio|operador de pátio|agente aeroportuario|agente aeroportuário|auxiliar de producao|auxiliar de produção|auxiliar de logistica|auxiliar de logística/.test(text)
+  ) {
+    return "logistica"
+  }
+
+  if (
+    /gastronomia|confeitaria/.test(text)
+  ) {
+    return "gastronomia"
   }
 
   return "geral"
@@ -319,6 +343,9 @@ function buildGroupedCourseCatalog() {
     juridico: [],
     educacao: [],
     industrial: [],
+    agro: [],
+    logistica: [],
+    gastronomia: [],
     geral: []
   }
 
@@ -342,7 +369,7 @@ function getCoursesByCategory(categoryKey = "") {
   return GROUPED_COURSES[categoryKey] || []
 }
 
-function buildCourseTitlesList(courses = [], limit = 12) {
+function buildCourseTitlesList(courses = [], limit = 20) {
   const selected = courses.slice(0, limit)
   if (!selected.length) return "Nenhum curso encontrado nesta área no momento."
   return selected.map((course, index) => `${index + 1}. ${course.title}`).join("\n")
@@ -358,6 +385,9 @@ function buildGroupedCourseCatalogMessage() {
     "juridico",
     "educacao",
     "industrial",
+    "agro",
+    "logistica",
+    "gastronomia",
     "geral"
   ]
 
@@ -378,7 +408,7 @@ Aqui estão os cursos separados por área:
 
 ${blocks.join("\n").trim()}
 
-Se quiser, me mande *o nome do curso* que eu te mostro os detalhes completos.`
+Me manda o *nome do curso* que eu te mostro os detalhes completos.`
 }
 
 function buildCategoryCourseSuggestionMessage(categoryKey = "") {
@@ -388,14 +418,14 @@ function buildCategoryCourseSuggestionMessage(categoryKey = "") {
   if (!items.length) {
     return `Perfeito 😊
 
-No momento eu não encontrei cursos cadastrados nessa área na base.
+No momento eu não encontrei cursos cadastrados nessa área.
 
-Se quiser, me manda o nome do curso que você tem em mente e eu verifico para você.`
+Me manda o nome do curso que você quer e eu verifico para você.`
   }
 
   return `Perfeito 😊
 
-Na área de *${label}*, encontrei estes cursos na base:
+Na área de *${label}*, encontrei estes cursos:
 
 ${buildCourseTitlesList(items, 15)}
 
@@ -742,16 +772,6 @@ function buildFullCourseDetailsMessage(courseInfo) {
   lines.push(`Perfeito 😊 Aqui estão os detalhes completos de *${title}*:`)
   lines.push("")
 
-  if (courseInfo.summary) {
-    lines.push(`*Resumo:* ${String(courseInfo.summary).trim()}`)
-    lines.push("")
-  }
-
-  if (courseInfo.description) {
-    lines.push(`*Descrição:* ${String(courseInfo.description).trim()}`)
-    lines.push("")
-  }
-
   if (courseInfo.workload) {
     lines.push(`*Carga horária:* ${courseInfo.workload}`)
   }
@@ -764,29 +784,47 @@ function buildFullCourseDetailsMessage(courseInfo) {
     lines.push(`*Média salarial informada:* ${courseInfo.salary}`)
   }
 
-  if (courseInfo.market) {
-    lines.push(`*Mercado de trabalho:* ${courseInfo.market}`)
+  if (courseInfo.prerequisites) {
+    lines.push(`*Pré-requisitos:* ${courseInfo.prerequisites}`)
   }
 
   if (
     courseInfo.workload ||
     courseInfo.duration ||
     courseInfo.salary ||
-    courseInfo.market
+    courseInfo.prerequisites
   ) {
     lines.push("")
   }
 
-  if (Array.isArray(courseInfo.learns) && courseInfo.learns.length) {
-    lines.push("*Conteúdo / o que você vai aprender:*")
-    for (const item of uniqueItems(courseInfo.learns).slice(0, 30)) {
+  if (courseInfo.summary) {
+    lines.push(`*Resumo:* ${String(courseInfo.summary).trim()}`)
+    lines.push("")
+  }
+
+  if (courseInfo.description) {
+    lines.push(`*Sobre o curso / profissão:* ${String(courseInfo.description).trim()}`)
+    lines.push("")
+  }
+
+  if (courseInfo.market) {
+    lines.push(`*Mercado de trabalho / área de atuação:* ${String(courseInfo.market).trim()}`)
+    lines.push("")
+  }
+
+  if (Array.isArray(courseInfo.curiosities) && courseInfo.curiosities.length) {
+    lines.push("*Curiosidades:*")
+    for (const item of uniqueItems(courseInfo.curiosities).slice(0, 10)) {
       lines.push(`- ${item}`)
     }
     lines.push("")
   }
 
-  if (courseInfo.differentials) {
-    lines.push(`*Diferenciais:* ${String(courseInfo.differentials).trim()}`)
+  if (Array.isArray(courseInfo.learns) && courseInfo.learns.length) {
+    lines.push("*Conteúdo programático:*")
+    for (const item of uniqueItems(courseInfo.learns).slice(0, 40)) {
+      lines.push(`- ${item}`)
+    }
     lines.push("")
   }
 
