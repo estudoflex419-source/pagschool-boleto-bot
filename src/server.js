@@ -253,13 +253,11 @@ function getCourseSearchText(course = {}) {
   return normalizeLoose([
     course.title,
     course.summary,
-    course.description,
-    course.market,
-    course.salary,
-    course.prerequisites,
     Array.isArray(course.aliases) ? course.aliases.join(" ") : "",
-    Array.isArray(course.learns) ? course.learns.join(" ") : "",
-    Array.isArray(course.curiosities) ? course.curiosities.join(" ") : ""
+    // Keep categorization stable: avoid free-text fields like description/market/learns
+    // that often mention other areas (e.g. "saude") and skew grouping.
+    course.salary,
+    course.prerequisites
   ].join(" "))
 }
 
@@ -267,7 +265,7 @@ function inferCourseCategory(course = {}) {
   const text = getCourseSearchText(course)
 
   if (
-    /saude|saúde|enfermagem|farmacia|farmácia|agente de saude|agente de saúde|hospital|recepcionista hospitalar|odontologia|saude bucal|socorrista|analises clinicas|análises clínicas|auxiliar de nutricao|auxiliar de nutrição|instrumentacao cirurgica|instrumentação cirúrgica|auxiliar de farmacia|auxiliar de farmácia|cuidador de idosos|auxiliar de veterinario|auxiliar de veterinário|psicologia/.test(text)
+    /saude|saúde|\boptica\b|enfermagem|farmacia|farmácia|agente de saude|agente de saúde|hospital|recepcionista hospitalar|odontologia|saude bucal|socorrista|analises clinicas|análises clínicas|auxiliar de nutricao|auxiliar de nutrição|instrumentacao cirurgica|instrumentação cirúrgica|auxiliar de farmacia|auxiliar de farmácia|cuidador de idosos|auxiliar de veterinario|auxiliar de veterinário|psicologia/.test(text)
   ) {
     return "saude"
   }
@@ -285,7 +283,7 @@ function inferCourseCategory(course = {}) {
   }
 
   if (
-    /informatica|informática|inteligencia artificial|inteligência artificial|chatgpt|criacao de games|criação de games|robotica|robótica|designer grafico|designer gráfico|capcut|digital influencer|automacao industrial|automação industrial|tecnico em manutencao de celulares|técnico em manutenção de celulares|ingles profissionalizante|inglês profissionalizante|libras/.test(text)
+    /informatica|informática|inteligencia artificial|inteligência artificial|chatgpt|criacao de games|criação de games|robotica|robótica|designer grafico|designer gráfico|capcut|digital influencer|automacao industrial|automação industrial|tecnico em manutencao de celulares|técnico em manutenção de celulares|trader de criptomoeda/.test(text)
   ) {
     return "tecnologia"
   }
