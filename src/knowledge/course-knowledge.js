@@ -67,6 +67,7 @@ function candidateKnowledgePaths() {
 
   return [
     envPath,
+    path.join(__dirname, "course-catalog-raw.txt"),
     path.resolve(__dirname, "..", "..", "..", "Curso Profissionalizante.txt"),
     path.resolve(__dirname, "..", "..", "..", "..", "Curso Profissionalizante.txt"),
     path.resolve(process.cwd(), "Curso Profissionalizante.txt"),
