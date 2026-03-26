@@ -1769,6 +1769,22 @@ function buildSelectedCourseAnswer(_text, courseInfo) {
   return buildFullCourseDetailsMessage(courseInfo)
 }
 
+function buildCourseFunctionalityMessage(courseName = "o curso") {
+  const safeCourseName = String(courseName || "").trim() || "o curso"
+
+  return `Perfeito 😊
+
+O ${safeCourseName} funciona de forma online, pela plataforma da escola.
+
+Depois da inscrição, você recebe seu usuário e senha para acessar as aulas e estudar no seu tempo, com total flexibilidade.
+
+Na plataforma, você encontra materiais como apostilas digitais, vídeo-aulas, atividades e avaliações, tudo pensado para ajudar no seu aprendizado de forma prática e acessível.
+
+Você pode acessar 24 horas por dia e organizar sua rotina de estudos da forma que ficar melhor para você.
+
+Se quiser, eu também posso te explicar o que você aprende nesse curso e como funciona a inscrição.`
+}
+
 function buildCourseDetailFollowUpMessage(text = "", courseInfo = null) {
   if (!courseInfo) {
     return "Perfeito 😊 Não encontrei os detalhes desse curso agora. Me confirma o nome certinho para eu te responder com precisão."
@@ -2511,9 +2527,25 @@ function isCourseDetailsQuestion(text) {
     "estágio",
     "carta de estagio",
     "carta de estágio",
-    "como funciona",
     "detalhes do curso",
     "me fala do curso"
+  ].some(term => t.includes(term))
+}
+
+function isCourseFunctionalityQuestion(text) {
+  const t = normalizeLoose(text)
+
+  return [
+    "como funciona",
+    "como funciona o curso",
+    "como e o curso",
+    "como sao as aulas",
+    "como eu estudo",
+    "como acessa",
+    "tem plataforma",
+    "e online",
+    "as aulas sao online",
+    "curso online"
   ].some(term => t.includes(term))
 }
 
@@ -3030,6 +3062,10 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       return reply(buildPriceAnswerMessage(convo.course, selectedCourseInfo))
     }
 
+    if (convo.course && isCourseFunctionalityQuestion(text)) {
+      return reply(buildCourseFunctionalityMessage(convo.course))
+    }
+
     if (convo.course && isCourseDetailsQuestion(text)) {
       const courseInfo =
         findSiteCourseKnowledge(text, convo.course) ||
@@ -3228,6 +3264,10 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         return reply(buildPriceAnswerMessage(convo.course, selectedCourseInfo))
       }
 
+      if (convo.course && isCourseFunctionalityQuestion(text)) {
+        return reply(buildCourseFunctionalityMessage(convo.course))
+      }
+
       if (convo.course && isCourseDetailsQuestion(text)) {
         const courseInfo = findSiteCourseKnowledge(text, convo.course)
         if (courseInfo) {
@@ -3261,6 +3301,10 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.step = "payment_deferral_day"
 
         return reply(buildDeferredPaymentOfferMessage())
+      }
+
+      if (convo.course && isCourseFunctionalityQuestion(text)) {
+        return reply(buildCourseFunctionalityMessage(convo.course))
       }
 
       if (convo.course && isCourseDetailsQuestion(text)) {
