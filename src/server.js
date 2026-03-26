@@ -24,6 +24,7 @@ const {
   normalize,
   isCPF,
   isDateBR,
+  normalizeDateBR,
   detectGender,
   isCEP,
   isUF,
@@ -949,8 +950,8 @@ function parseEnrollmentBundle(text = "", fallbackCourse = "") {
     }
 
     if (!parsed.birthDate && /(nascimento|data de nascimento|nasc)/.test(clean)) {
-      const match = line.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/)
-      parsed.birthDate = match ? match[0] : ""
+      const match = line.match(/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{4}\b|\b\d{8}\b/)
+      parsed.birthDate = normalizeDateBR(match ? match[0] : line)
       continue
     }
 
@@ -981,10 +982,10 @@ function parseEnrollmentBundle(text = "", fallbackCourse = "") {
   }
 
   if (!parsed.birthDate) {
-    const dateLine = unlabeledFields.find(line => /\b\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line))
+    const dateLine = unlabeledFields.find(line => /\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{4}\b|\b\d{8}\b/.test(line))
     if (dateLine) {
-      const match = dateLine.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/)
-      parsed.birthDate = match ? match[0] : ""
+      const match = dateLine.match(/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{4}\b|\b\d{8}\b/)
+      parsed.birthDate = normalizeDateBR(match ? match[0] : dateLine)
     }
   }
 
@@ -1032,7 +1033,7 @@ function mergeEnrollmentData(convo = {}, parsed = {}) {
   const merged = {
     fullName: String(parsed.fullName || previous.fullName || convo.name || "").trim(),
     cpf: onlyDigits(parsed.cpf || previous.cpf || convo.cpf || "").slice(0, 11),
-    birthDate: String(parsed.birthDate || previous.birthDate || convo.birthDate || "").trim(),
+    birthDate: normalizeDateBR(parsed.birthDate || previous.birthDate || convo.birthDate || ""),
     cep: onlyDigits(parsed.cep || previous.cep || convo.cep || "").slice(0, 8),
     houseNumber: String(parsed.houseNumber || previous.houseNumber || convo.number || "").trim(),
     course: String(parsed.course || previous.course || lead.course || convo.course || "").trim()
@@ -3395,7 +3396,7 @@ ${nextData.prompt}`)
         return reply("Me envie sua data de nascimento no formato DD/MM/AAAA, por favor.")
       }
 
-      convo.birthDate = text
+      convo.birthDate = normalizeDateBR(text)
       convo.step = "collecting_email"
       return reply("Perfeito 😊 Agora me envie seu melhor e-mail.")
     }
