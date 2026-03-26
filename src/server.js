@@ -858,6 +858,31 @@ function buildFullCourseDetailsMessage(courseInfo) {
   return lines.join("\n").trim()
 }
 
+function buildCourseQuickResumeMessage(courseInfo) {
+  if (!courseInfo) {
+    return "Perfeito 😊 Se quiser, me manda o nome do curso que eu te explico de forma resumida."
+  }
+
+  const title = courseInfo.title || "esse curso"
+  const summary = String(courseInfo.summary || "").trim()
+  const duration = courseInfo.duration ? `Duração média: ${courseInfo.duration}.` : ""
+  const workload = courseInfo.workload ? `Carga horária: ${courseInfo.workload}.` : ""
+
+  const parts = [`Perfeito 😊 Você escolheu *${title}*.`]
+
+  if (summary) {
+    parts.push(summary)
+  }
+
+  if (duration || workload) {
+    parts.push([duration, workload].filter(Boolean).join(" "))
+  }
+
+  parts.push("Se quiser, agora eu já te mostro *valores* ou te explico *como funciona a matrícula*.")
+
+  return parts.join("\n\n")
+}
+
 function buildMissingEnrollmentMessage(_data, missing) {
   return `Perfeito 😊
 
@@ -2218,6 +2243,27 @@ function isCourseDetailsQuestion(text) {
   ].some(term => t.includes(term))
 }
 
+function isEnrollmentHowToIntent(text) {
+  const t = normalizeLoose(text)
+
+  return [
+    "como me inscrevo",
+    "como faz para me inscrever",
+    "como faco para me inscrever",
+    "como faço para me inscrever",
+    "como me matriculo",
+    "como faco a matricula",
+    "como faço a matrícula",
+    "como funciona a matricula",
+    "como funciona a matrícula",
+    "quero me matricular",
+    "quero fazer matricula",
+    "quero fazer matrícula",
+    "como comeco",
+    "como começo"
+  ].some(term => t.includes(term))
+}
+
 async function fallbackAI(text, convo, action = "") {
   const courseInfo = findSiteCourseKnowledge(text, convo.course)
   const promptKnowledge = buildPromptKnowledge({
@@ -2647,6 +2693,12 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       const courseInfo =
         findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name) ||
         buildFallbackCourseInfoByName(detectedCourse.name)
+      const normalizedDetectedCourse = normalizeLoose(detectedCourse.name)
+      const normalizedCurrentCourse = normalizeLoose(convo.course)
+      const isSameSelectedCourse =
+        normalizedDetectedCourse &&
+        normalizedCurrentCourse &&
+        normalizedDetectedCourse === normalizedCurrentCourse
 
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
@@ -2655,6 +2707,13 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
         return reply(buildPriceAnswerMessage(convo.course, courseInfo))
+      }
+
+      if (
+        isSameSelectedCourse &&
+        ["diagnosis_goal", "diagnosis_experience", "offer_transition", "payment_intro", "payment_choice"].includes(convo.step)
+      ) {
+        return reply(buildCourseQuickResumeMessage(courseInfo))
       }
 
       convo.step = "diagnosis_goal"
@@ -2790,6 +2849,19 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     }
 
     if (convo.step === "diagnosis_goal") {
+      if (isEnrollmentHowToIntent(text)) {
+        convo.salesLead.stage = "enrollment_explanation"
+        return reply(`Perfeito 😊
+
+Para começar, o processo é simples.
+
+Você me envia os dados necessários para a inscrição,
+eu organizo tudo com você por aqui
+e depois seguimos com a forma de pagamento escolhida.
+
+Podemos continuar agora mesmo.`)
+      }
+
       if (raw === "1") {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
@@ -2841,6 +2913,19 @@ Podemos continuar agora mesmo.`)
     }
 
     if (convo.step === "offer_transition") {
+      if (isEnrollmentHowToIntent(text)) {
+        convo.salesLead.stage = "enrollment_explanation"
+        return reply(`Perfeito 😊
+
+Para começar, o processo é simples.
+
+Você me envia os dados necessários para a inscrição,
+eu organizo tudo com você por aqui
+e depois seguimos com a forma de pagamento escolhida.
+
+Podemos continuar agora mesmo.`)
+      }
+
       if (raw === "1") {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
