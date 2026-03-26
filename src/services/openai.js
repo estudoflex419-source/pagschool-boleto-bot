@@ -127,7 +127,12 @@ function buildResponseRulesBlock(responseRules = {}) {
     rules.push("- primeiro explique o valor profissional do curso; depois convide para avançar")
   }
 
+  if (responseRules?.alwaysLeadEnrollmentClose) {
+    rules.push("- sempre termine conduzindo para fechamento da matrícula com CTA objetivo")
+  }
+
   rules.push("- não use carga horária, média salarial ou mercado logo na primeira resposta, a menos que o cliente peça")
+  rules.push("- se o cliente pedir mais explicações, detalhe o conteúdo programático de forma prática")
   rules.push("- responda em no máximo 2 parágrafos curtos")
   rules.push("- evite listas longas")
   rules.push("- nunca repita a mesma ideia em frases diferentes")
@@ -197,7 +202,8 @@ function buildUserPrompt(text) {
 Responda de forma curta, humana e comercial.
 No máximo uma pergunta.
 Sem introdução técnica.
-Sem repetir o nome do curso várias vezes.`
+Sem repetir o nome do curso várias vezes.
+Sempre feche com um convite direto para matrícula.`
 }
 
 function extractTextFromResponse(data) {

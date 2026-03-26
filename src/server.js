@@ -850,10 +850,11 @@ function buildFullCourseDetailsMessage(courseInfo) {
     lines.push("")
   }
 
-  lines.push("Se quiser, eu também posso te mostrar:")
-  lines.push("1 - valores")
-  lines.push("2 - como funciona a matrícula")
-  lines.push("3 - se esse curso combina com seu objetivo")
+  lines.push("Se fizer sentido para você, já posso conduzir seu fechamento de matrícula agora mesmo.")
+  lines.push("Para avançar, me envie:")
+  lines.push("1 - forma de pagamento (PIX, boleto único ou cartão)")
+  lines.push("2 - nome completo")
+  lines.push("3 - CPF")
 
   return lines.join("\n").trim()
 }
@@ -2441,7 +2442,8 @@ async function fallbackAI(text, convo, action = "") {
     responseRules: {
       beHuman: true,
       avoidPaymentBeforeFinal: true,
-      prioritizeCourseExplanation: true
+      prioritizeCourseExplanation: true,
+      alwaysLeadEnrollmentClose: true
     }
   })
 }
