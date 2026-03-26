@@ -19,6 +19,7 @@ const {
 } = require("./services/pagschool")
 const { getConversation } = require("./crm/conversations")
 const sales = require("./sales/salesFlow")
+const fallbackSalesCourses = require("./sales/courses")
 const {
   normalize,
   isCPF,
@@ -47,7 +48,26 @@ const { createProcessedMessageStore } = require("./stores/processed-message-stor
 const conversationService = require("./domain/conversation/conversation-service")
 const { createDefaultConversation } = require("./domain/conversation/conversation-schema")
 
+function buildFallbackSiteCourseKnowledge() {
+  return fallbackSalesCourses
+    .map(course => {
+      if (!course || !course.name) return null
+
+      return {
+        title: String(course.name).trim(),
+        aliases: Array.isArray(course.aliases) ? course.aliases : [],
+        summary: String(course.shortDescription || "").trim(),
+        market: "",
+        program: []
+      }
+    })
+    .filter(Boolean)
+}
+
 const COURSE_SITE_KNOWLEDGE = getCourseCatalog().map(toServerCourseInfo)
+const ACTIVE_SITE_COURSE_KNOWLEDGE = COURSE_SITE_KNOWLEDGE.length
+  ? COURSE_SITE_KNOWLEDGE
+  : buildFallbackSiteCourseKnowledge()
 
 if (!COURSE_SITE_KNOWLEDGE.length) {
   console.warn("Base de cursos não carregada do documento. Usando fallback interno de cursos.")
@@ -347,7 +367,7 @@ function buildGroupedCourseCatalog() {
     geral: []
   }
 
-  for (const course of COURSE_SITE_KNOWLEDGE) {
+  for (const course of ACTIVE_SITE_COURSE_KNOWLEDGE) {
     const key = inferCourseCategory(course)
     grouped[key].push(course)
   }
