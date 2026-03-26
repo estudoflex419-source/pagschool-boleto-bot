@@ -708,7 +708,11 @@ No *${option.label}*, a taxa do material didático fica em:
 
 Essa é a opção com o *menor valor total*.
 
-Se quiser, já posso te explicar agora como funciona a inscrição.`
+Se você preferir, já pode pagar agora no Pix:
+*Chave (CNPJ):* ${PIX_RECEIVER.key}
+*Nome:* ${PIX_RECEIVER.name}
+
+Se hoje não der para pagar, eu te peço os dados e já organizo um *boleto único para o próximo mês* na data que você escolher.`
   }
 
   if (method === "cartao") {
@@ -1101,6 +1105,17 @@ ou
 *R$ 95,00*
 
 Vencimento previsto: *${dueDateBR}*`
+}
+
+function buildDeferredBoletoAskDueDayMessage() {
+  return `Sem problema 😊
+
+Se hoje não der para pagar no Pix, eu organizo um *boleto único para o próximo mês* para você.
+
+Me diga o dia de vencimento que prefere (entre 1 e 28).
+Exemplos: *5*, *10*, *15* ou *20*.
+
+Depois disso, eu confirmo os dados para emitir certinho.`
 }
 
 function buildDeferredBoletoCreatedMessage(amount, dueDateBR, result = {}) {
@@ -2389,12 +2404,8 @@ Podemos continuar agora mesmo.`)
 
     if (currentStage === "awaiting_pix_payment") {
       if (detectCantPayNow(cleanText)) {
-        const dueDateBR = getNextMonthDueDateBR(convo.salesLead.dueDay || 10)
-
-        convo.salesLead.stage = "awaiting_deferred_boleto_amount"
-        convo.salesLead.deferredDueDateBR = dueDateBR
-
-        return reply(buildDeferredBoletoAskAmountMessage(dueDateBR))
+        convo.salesLead.stage = "awaiting_deferred_boleto_due_day"
+        return reply(buildDeferredBoletoAskDueDayMessage())
       }
 
       if (detectPixNow(cleanText)) {
@@ -2408,6 +2419,21 @@ Pode fazer o Pix usando estes dados:
 
 Depois me envie o comprovante por aqui.`)
       }
+    }
+
+    if (currentStage === "awaiting_deferred_boleto_due_day") {
+      const preferredDay = detectPreferredFutureDay(text)
+
+      if (!preferredDay) {
+        return reply("Sem problema 😊 Me diz só um dia entre 1 e 28 para o vencimento do boleto único do próximo mês.")
+      }
+
+      const dueDateBR = getNextMonthDueDateBR(preferredDay)
+      convo.salesLead.dueDay = preferredDay
+      convo.salesLead.deferredDueDateBR = dueDateBR
+      convo.salesLead.stage = "awaiting_deferred_boleto_amount"
+
+      return reply(buildDeferredBoletoAskAmountMessage(dueDateBR))
     }
 
     if (currentStage === "awaiting_deferred_boleto_amount") {

@@ -921,7 +921,7 @@ Se você quiser, eu posso só te mostrar de forma bem direta como funciona ${cou
     return `Sem problema 😊
 Podemos sim deixar para o próximo mês.
 
-Se ficar melhor para você, eu posso organizar o boleto à vista para a data que você preferir, assim você consegue se planejar com calma.
+Se ficar melhor para você, eu posso organizar um *boleto único* para a data que você preferir, assim você consegue se planejar com calma.
 
 Qual dia fica melhor para você: 5, 10, 15, 20 ou outro?`
   }
