@@ -1207,6 +1207,8 @@ function buildInstitutionalTrustBlock() {
 function buildMenuMessage() {
   return `Oi 😊 Seja bem-vindo(a) à Estudo Flex.
 
+Eu sou a *LILO*, sua assistente virtual.
+
 Posso te ajudar de 3 formas:
 
 1 - Já sou aluno(a) e preciso de suporte / segunda via
@@ -1471,10 +1473,15 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
     parts.push(`A carga horária informada é de *${normalizedCourseInfo.workload}*${durationPart}.`)
   }
 
+  if (normalizedCourseInfo?.learns?.length) {
+    parts.push(`No conteúdo você vai ver, por exemplo: ${normalizedCourseInfo.learns.slice(0, 6).join(", ")}.`)
+  }
+
   if (normalizedCourseInfo?.market) {
     parts.push(`Mercado de trabalho: ${normalizedCourseInfo.market}.`)
   }
 
+  parts.push("Vantagens: curso EAD, certificado e flexibilidade para estudar no seu ritmo.")
   parts.push("Se quiser, eu posso te mostrar todos os detalhes completos desse curso ou te ajudar a ver os valores.")
 
   return parts.join("\n\n")
@@ -1859,10 +1866,40 @@ function buildSecondViaText(result) {
   }
 
   if (result.pdfUrl) {
+    lines.push(`Link de pagamento: ${result.pdfUrl}`)
     lines.push("Estou enviando o PDF logo abaixo.")
   }
 
   return lines.join("\n")
+}
+
+function humanizeEnrollmentIssue(errorText = "", fallbackLabel = "boleto") {
+  const message = String(errorText || "").trim()
+  if (!message) {
+    return `Tive uma instabilidade para emitir o *${fallbackLabel}* automaticamente agora.`
+  }
+
+  const normalized = normalizeLoose(message)
+
+  if (
+    normalized.includes("401") ||
+    normalized.includes("403") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("autentic")
+  ) {
+    return `Houve uma instabilidade de autenticação na integração do *${fallbackLabel}* neste momento.`
+  }
+
+  if (normalized.includes("timeout") || normalized.includes("timed out")) {
+    return `A integração do *${fallbackLabel}* demorou além do esperado agora.`
+  }
+
+  if (normalized.includes("404")) {
+    return `A rota de emissão do *${fallbackLabel}* ficou indisponível no provedor agora.`
+  }
+
+  return `Tive uma instabilidade para emitir o *${fallbackLabel}* automaticamente agora.`
 }
 
 function getNextEnrollmentDataPrompt(convo = {}) {
@@ -1963,9 +2000,11 @@ Nossa equipe vai acompanhar e concluir a emissão com prioridade.`)
   await notifyInternalLead(convo, sourcePhone)
 
   if (created?.error) {
+    const friendlyIssue = humanizeEnrollmentIssue(created.error, "carnê")
+
     return reply(`Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do carnê.
 
-Motivo: ${created.error}
+Motivo: ${friendlyIssue}
 
 Se quiser, eu já deixo a matrícula registrada e seguimos o ajuste final do carnê.`)
   }
@@ -2069,9 +2108,11 @@ Nossa equipe vai acompanhar e concluir a emissão com prioridade.`)
   await notifyInternalLead(convo, sourcePhone, { force: true })
 
   if (created?.error) {
+    const friendlyIssue = humanizeEnrollmentIssue(created.error, "boleto único")
+
     return reply(`Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do *boleto único*.
 
-Motivo: ${created.error}
+Motivo: ${friendlyIssue}
 
 Se quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final da emissão.`)
   }
