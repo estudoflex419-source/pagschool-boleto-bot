@@ -913,6 +913,150 @@ Se quiser corrigir algo, pode mandar por exemplo:
 - *curso Administração*`
 }
 
+function onlyDigits(value = "") {
+  return String(value || "").replace(/\D+/g, "")
+}
+
+function parseEnrollmentBundle(text = "", fallbackCourse = "") {
+  const rawText = String(text || "")
+  const normalized = normalizeFlowText(rawText)
+  const lines = rawText
+    .split(/\r?\n/)
+    .map(line => String(line || "").trim())
+    .filter(Boolean)
+
+  const parsed = {
+    fullName: "",
+    cpf: "",
+    birthDate: "",
+    cep: "",
+    houseNumber: "",
+    course: ""
+  }
+
+  for (const line of lines) {
+    const clean = normalizeFlowText(line)
+
+    if (!parsed.fullName && /^(nome|nome completo)\b/.test(clean)) {
+      parsed.fullName = line.replace(/^([^:]+:)\s*/i, "").trim()
+      continue
+    }
+
+    if (!parsed.cpf && /\bcpf\b/.test(clean)) {
+      parsed.cpf = onlyDigits(line).slice(0, 11)
+      continue
+    }
+
+    if (!parsed.birthDate && /(nascimento|data de nascimento|nasc)/.test(clean)) {
+      const match = line.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/)
+      parsed.birthDate = match ? match[0] : ""
+      continue
+    }
+
+    if (!parsed.cep && /\bcep\b/.test(clean)) {
+      parsed.cep = onlyDigits(line).slice(0, 8)
+      continue
+    }
+
+    if (!parsed.houseNumber && /(numero|número|n°|nº|casa|endereco|endereço)/.test(clean)) {
+      const match = line.match(/\b\d{1,6}\b/)
+      parsed.houseNumber = match ? match[0] : ""
+      continue
+    }
+
+    if (!parsed.course && /\bcurso\b/.test(clean)) {
+      parsed.course = line.replace(/^([^:]+:)\s*/i, "").replace(/^curso\s*/i, "").trim()
+    }
+  }
+
+  const unlabeledFields = lines.filter(line => {
+    const clean = normalizeFlowText(line)
+    return !/^(nome|nome completo|cpf|nascimento|data de nascimento|nasc|cep|numero|número|n°|nº|curso)\b/.test(clean)
+  })
+
+  if (!parsed.cpf) {
+    const cpfLine = unlabeledFields.find(line => onlyDigits(line).length === 11 && isCPF(onlyDigits(line)))
+    if (cpfLine) parsed.cpf = onlyDigits(cpfLine)
+  }
+
+  if (!parsed.birthDate) {
+    const dateLine = unlabeledFields.find(line => /\b\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line))
+    if (dateLine) {
+      const match = dateLine.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/)
+      parsed.birthDate = match ? match[0] : ""
+    }
+  }
+
+  if (!parsed.cep) {
+    const cepLine = unlabeledFields.find(line => onlyDigits(line).length === 8)
+    if (cepLine) parsed.cep = onlyDigits(cepLine)
+  }
+
+  if (!parsed.houseNumber) {
+    const numberLine = unlabeledFields.find(line => /^\d{1,6}$/.test(onlyDigits(line)))
+    if (numberLine) parsed.houseNumber = onlyDigits(numberLine)
+  }
+
+  if (!parsed.fullName) {
+    const nameLine = unlabeledFields.find(line => {
+      const clean = normalizeFlowText(line)
+      return /[a-z]/.test(clean) && !/\d/.test(clean) && clean.split(" ").length >= 2
+    })
+    if (nameLine) parsed.fullName = nameLine.trim()
+  }
+
+  if (!parsed.course) {
+    const courseLine = unlabeledFields.find(line => {
+      const clean = normalizeFlowText(line)
+      if (!/[a-z]/.test(clean)) return false
+      if (/\d/.test(clean)) return false
+      if (parsed.fullName && clean === normalizeFlowText(parsed.fullName)) return false
+      return Boolean(findSiteCourseKnowledge(line, fallbackCourse))
+    })
+    if (courseLine) parsed.course = courseLine.trim()
+  }
+
+  if (!parsed.course) {
+    const matched = findSiteCourseKnowledge(normalized, fallbackCourse)
+    if (matched?.title) parsed.course = matched.title
+  }
+
+  return parsed
+}
+
+function mergeEnrollmentData(convo = {}, parsed = {}) {
+  const lead = convo.salesLead || {}
+  const previous = lead.enrollment || {}
+
+  const merged = {
+    fullName: String(parsed.fullName || previous.fullName || convo.name || "").trim(),
+    cpf: onlyDigits(parsed.cpf || previous.cpf || convo.cpf || "").slice(0, 11),
+    birthDate: String(parsed.birthDate || previous.birthDate || convo.birthDate || "").trim(),
+    cep: onlyDigits(parsed.cep || previous.cep || convo.cep || "").slice(0, 8),
+    houseNumber: String(parsed.houseNumber || previous.houseNumber || convo.number || "").trim(),
+    course: String(parsed.course || previous.course || lead.course || convo.course || "").trim()
+  }
+
+  const matchedCourse = findSiteCourseKnowledge(merged.course, merged.course)
+  if (matchedCourse?.title) merged.course = matchedCourse.title
+
+  lead.enrollment = merged
+  return merged
+}
+
+function getMissingEnrollmentFields(data = {}) {
+  const missing = []
+
+  if (!String(data.fullName || "").trim()) missing.push("Nome completo")
+  if (!isCPF(data.cpf)) missing.push("CPF")
+  if (!isDateBR(data.birthDate)) missing.push("Data de nascimento")
+  if (!isCEP(data.cep)) missing.push("CEP")
+  if (!String(data.houseNumber || "").trim()) missing.push("Número da casa")
+  if (!extractCourseLabel(data.course)) missing.push("Curso escolhido")
+
+  return missing
+}
+
 function applyEnrollmentToConversation(convo, sourcePhone = "") {
   ensureSalesLead(convo)
   convo.salesLead.enrollment = convo.salesLead.enrollment || {}
