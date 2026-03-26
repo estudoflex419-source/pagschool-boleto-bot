@@ -1696,6 +1696,61 @@ function buildSelectedCourseAnswer(_text, courseInfo) {
   return buildFullCourseDetailsMessage(courseInfo)
 }
 
+function buildCourseDetailFollowUpMessage(text = "", courseInfo = null) {
+  if (!courseInfo) {
+    return "Perfeito 😊 Não encontrei os detalhes desse curso agora. Me confirma o nome certinho para eu te responder com precisão."
+  }
+
+  const question = normalizeLoose(text)
+  const title = courseInfo.title || "esse curso"
+  const learns = uniqueItems(courseInfo.learns || [])
+  const lines = []
+
+  lines.push(`Perfeito 😊 Sobre *${title}*, te explico de forma direta:`)
+  lines.push("")
+
+  if (question.includes("conteudo") || question.includes("conteúdo") || question.includes("program")) {
+    if (learns.length) {
+      lines.push("*Conteúdo programático (principais temas):*")
+      for (const item of learns.slice(0, 10)) {
+        lines.push(`- ${item}`)
+      }
+    } else {
+      lines.push("*Conteúdo programático:* o documento não traz a grade item a item, mas o foco é formação prática para atuação inicial na área.")
+      if (courseInfo.summary) {
+        lines.push(`Resumo do foco: ${String(courseInfo.summary).trim().replace(/\.$/, "")}.`)
+      }
+    }
+  } else if (
+    question.includes("carga horaria") ||
+    question.includes("carga horária") ||
+    question.includes("duracao") ||
+    question.includes("duração") ||
+    question.includes("tempo")
+  ) {
+    lines.push(`*Carga horária:* ${courseInfo.workload || "não informada no documento"}`)
+    if (courseInfo.duration) {
+      lines.push(`*Duração média:* ${courseInfo.duration}`)
+    }
+  } else if (question.includes("salario") || question.includes("salário") || question.includes("media salarial") || question.includes("média salarial")) {
+    lines.push(`*Média salarial informada:* ${courseInfo.salary || "não informada no documento para esse curso"}`)
+  } else if (question.includes("mercado") || question.includes("atuacao") || question.includes("atuação")) {
+    lines.push(`*Mercado de trabalho / atuação:* ${courseInfo.market || "não detalhado no documento para esse curso"}`)
+  } else {
+    return buildFullCourseDetailsMessage(courseInfo)
+  }
+
+  lines.push("")
+  lines.push("Se fizer sentido para você, já te levo para o fechamento agora.")
+  lines.push(`Taxa do material didático: ${buildPaymentSummaryLine()}`)
+  lines.push("Para avançar, me responde com:")
+  lines.push("1 - PIX")
+  lines.push("2 - boleto único")
+  lines.push("3 - cartão")
+
+  return lines.join("\n")
+}
+
 function buildConsultativeOfferTransition(convo = {}) {
   const prefix = buildHumanPrefix(convo)
   const courseName = convo.course || "esse curso"
@@ -2905,7 +2960,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         buildFallbackCourseInfoByName(convo.course)
 
       if (courseInfo) {
-        return reply(buildFullCourseDetailsMessage(courseInfo))
+        return reply(buildCourseDetailFollowUpMessage(text, courseInfo))
       }
     }
 
@@ -3124,7 +3179,7 @@ Podemos continuar agora mesmo.`)
       if (convo.course && isCourseDetailsQuestion(text)) {
         const courseInfo = findSiteCourseKnowledge(text, convo.course)
         if (courseInfo) {
-          return reply(buildFullCourseDetailsMessage(courseInfo))
+          return reply(buildCourseDetailFollowUpMessage(text, courseInfo))
         }
       }
 
@@ -3162,7 +3217,7 @@ Podemos continuar agora mesmo.`)
           buildFallbackCourseInfoByName(convo.course)
 
         if (courseInfo) {
-          return reply(buildFullCourseDetailsMessage(courseInfo))
+          return reply(buildCourseDetailFollowUpMessage(text, courseInfo))
         }
       }
 
