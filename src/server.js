@@ -1466,7 +1466,7 @@ function isLowContextReply(text = "") {
 function buildGoalClarification(courseName = "") {
   const label = String(courseName || "esse curso").trim()
 
-  return `Perfeito 😊 Pra eu te orientar melhor no *${label}*, me diz o que é mais importante para você agora:
+  return `Perfeito 😊 Pra eu te orientar melhor no *${label}*, me conta o que é mais importante para você agora:
 
 - conseguir emprego mais rápido
 - melhorar currículo
@@ -1519,7 +1519,34 @@ function buildExperienceClarification(courseName = "") {
     return "Entendi 😊 No inglês, você está começando do zero ou já tem alguma base? Isso me ajuda a te orientar melhor."
   }
 
-  return "Entendi 😊 Você está começando do zero ou já teve algum contato com essa área? Isso me ajuda a te orientar sem te enrolar."
+  return "Entendi 😊 Você está começando do zero ou já teve algum contato com essa área? Isso me ajuda a te orientar de forma mais assertiva."
+}
+
+function hasExplicitExperienceSignal(text = "") {
+  const t = normalizeLoose(text)
+  if (!t) return false
+
+  return [
+    "comecando do zero",
+    "comecar do zero",
+    "do zero",
+    "nunca trabalhei",
+    "nunca tive contato",
+    "sem experiencia",
+    "ja tenho base",
+    "ja tive contato",
+    "ja trabalho",
+    "tenho experiencia"
+  ].some((signal) => t.includes(signal))
+}
+
+function extractGoalAndExperience(text = "") {
+  const goal = mapGoalReply(text)
+  const experience = hasExplicitExperienceSignal(text)
+    ? mapExperienceReply(text)
+    : ""
+
+  return { goal, experience }
 }
 
 function mapExperienceReply(text = "") {
@@ -3098,7 +3125,15 @@ Podemos continuar agora mesmo.`)
         return reply(buildGoalClarification(convo.course))
       }
 
-      convo.goal = mapGoalReply(text)
+      const diagnosis = extractGoalAndExperience(text)
+      convo.goal = diagnosis.goal
+
+      if (diagnosis.experience) {
+        convo.experience = diagnosis.experience
+        convo.step = "offer_transition"
+        return reply(buildConsultativeOfferTransition(convo))
+      }
+
       convo.step = "diagnosis_experience"
       return reply(buildExperienceClarification(convo.course))
     }
