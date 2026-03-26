@@ -757,31 +757,31 @@ Se quiser, me responde só com:
 3 - Pix`
 }
 
-function buildEnrollmentStartMessage(convo = {}) {
-  const method = convo?.salesLead?.paymentMethod || ""
-
-  let paymentLabel = "não informado"
-  if (method === "carne") paymentLabel = "Carnê"
-  if (method === "cartao") paymentLabel = "Cartão"
-  if (method === "pix") paymentLabel = "À vista / Pix"
-
+function buildEnrollmentHowToMessage() {
   return `Perfeito 😊
 
-Vamos iniciar sua inscrição.
+Para começar, funciona assim:
 
-Me envie, por favor:
+1) eu te mostro as formas de pagamento da taxa única do material didático
+2) depois coletamos os dados da inscrição em etapas curtas
+3) no final eu te envio o resumo para você confirmar
 
+Se quiser, seguimos agora.`
+}
+
+function buildEnrollmentStartMessage(convo = {}) {
+  const courseLabel = extractCourseLabel(convo?.course || convo?.salesLead?.course || "")
+  const courseLine = courseLabel ? `Curso selecionado até aqui: *${courseLabel}*.` : ""
+
+  return `Ótimo, vamos iniciar sua inscrição 😊
+
+${courseLine}
+Primeiro eu vou validar os dados principais:
 - Nome completo
 - CPF
 - Data de nascimento
-- CEP
-- Número da casa
-- Curso escolhido
 
-Pode mandar tudo junto, uma informação em cada linha.
-Se faltar algo, eu te aviso sem problema.
-
-*Forma de pagamento escolhida:* ${paymentLabel}`
+Você pode enviar em linhas separadas.`
 }
 
 function buildFullCourseDetailsMessage(courseInfo) {
@@ -886,7 +886,7 @@ function buildCourseQuickResumeMessage(courseInfo) {
 }
 
 function buildMissingEnrollmentMessage(_data, missing) {
-  return `Perfeito 😊
+  return `Entendi 😊
 
 Já recebi uma parte dos seus dados, mas ainda faltam:
 
@@ -896,23 +896,48 @@ Pode me mandar só o que falta.
 Se preferir, eu vou validando com você passo a passo.`
 }
 
+function buildEnrollmentSecondStepMessage(enrollment = {}) {
+  const lines = [
+    "Dados principais recebidos ✅",
+    "Agora vamos para a segunda etapa da inscrição:",
+    "- CEP",
+    "- Número da casa",
+    "- Curso escolhido"
+  ]
+
+  const knownCourse = extractCourseLabel(enrollment.course)
+  if (knownCourse) {
+    lines.push("")
+    lines.push(`Curso registrado até aqui: *${knownCourse}*.`)
+    lines.push("Se estiver correto, pode enviar só CEP e número da casa.")
+  }
+
+  return lines.join("\n")
+}
+
 function buildEnrollmentConfirmation(data, paymentMethod = "") {
-  return `Perfeito 😊
+  const lines = [
+    "Perfeito, conferi os dados recebidos:",
+    "",
+    `- Nome: ${data.fullName}`,
+    `- CPF: ${data.cpf}`,
+    `- Data de nascimento: ${data.birthDate}`,
+    `- CEP: ${data.cep}`,
+    `- Número da casa: ${data.houseNumber}`,
+    `- Curso: ${extractCourseLabel(data.course)}`
+  ]
 
-Recebi estes dados da sua inscrição:
+  if (String(paymentMethod || "").trim()) {
+    lines.push(`- Forma de pagamento: ${paymentMethod}`)
+  }
 
-- Nome: ${data.fullName}
-- CPF: ${data.cpf}
-- Data de nascimento: ${data.birthDate}
-- CEP: ${data.cep}
-- Número da casa: ${data.houseNumber}
-- Curso: ${extractCourseLabel(data.course)}
-- Forma de pagamento: ${paymentMethod || "não informado"}
+  lines.push("")
+  lines.push("Se estiver tudo certo, responda *CONFIRMAR*.")
+  lines.push("Se quiser corrigir algo, pode mandar por exemplo:")
+  lines.push("- *CPF 12345678900*")
+  lines.push("- *curso Administração*")
 
-Se estiver tudo certo, responda *CONFIRMAR*.
-Se quiser corrigir algo, pode mandar por exemplo:
-- *CPF 12345678900*
-- *curso Administração*`
+  return lines.join("\n")
 }
 
 function onlyDigits(value = "") {
@@ -1052,6 +1077,26 @@ function getMissingEnrollmentFields(data = {}) {
   if (!String(data.fullName || "").trim()) missing.push("Nome completo")
   if (!isCPF(data.cpf)) missing.push("CPF")
   if (!isDateBR(data.birthDate)) missing.push("Data de nascimento")
+  if (!isCEP(data.cep)) missing.push("CEP")
+  if (!String(data.houseNumber || "").trim()) missing.push("Número da casa")
+  if (!extractCourseLabel(data.course)) missing.push("Curso escolhido")
+
+  return missing
+}
+
+function getMissingEnrollmentBasicFields(data = {}) {
+  const missing = []
+
+  if (!String(data.fullName || "").trim()) missing.push("Nome completo")
+  if (!isCPF(data.cpf)) missing.push("CPF")
+  if (!isDateBR(data.birthDate)) missing.push("Data de nascimento")
+
+  return missing
+}
+
+function getMissingEnrollmentFinalFields(data = {}) {
+  const missing = []
+
   if (!isCEP(data.cep)) missing.push("CEP")
   if (!String(data.houseNumber || "").trim()) missing.push("Número da casa")
   if (!extractCourseLabel(data.course)) missing.push("Curso escolhido")
@@ -1798,7 +1843,8 @@ function buildConsultativeOfferTransition(convo = {}) {
 
   if (experience) {
     if (experience === "começando do zero") {
-      parts.push("E como você está começando do zero, o ideal é pegar uma formação com linguagem mais acessível e foco prático.")
+      parts.push("E como você está começando do zero, essa formação ajuda porque traz linguagem acessível, foco prático e uma trilha pensada para quem está no início.")
+      parts.push("Você entende os fundamentos da área, a rotina da profissão e já ganha base para buscar oportunidade ou fortalecer o currículo.")
     } else {
       parts.push("Como você já teve contato com a área, a tendência é aproveitar melhor o conteúdo e fortalecer ainda mais seu perfil.")
     }
@@ -2653,15 +2699,7 @@ async function processMessage(phone, text) {
       if (wantsStartNow(cleanText) || isSimplePositive(cleanText)) {
         convo.salesLead.stage = "enrollment_explanation"
 
-        return reply(`Perfeito 😊
-
-Para começar, o processo é bem simples.
-
-Você me envia os dados necessários para a inscrição,
-eu organizo tudo com você por aqui
-e depois seguimos com a forma de pagamento escolhida.
-
-Podemos continuar agora mesmo.`)
+        return reply(buildEnrollmentHowToMessage())
       }
     }
 
@@ -2756,10 +2794,15 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     if (convo.salesLead?.stage === "collecting_enrollment") {
       const parsed = parseEnrollmentBundle(text, convo.salesLead?.course || convo.course || "")
       const enrollment = mergeEnrollmentData(convo, parsed)
-      const missing = getMissingEnrollmentFields(enrollment)
+      const missingBasic = getMissingEnrollmentBasicFields(enrollment)
 
-      if (missing.length) {
-        return reply(buildMissingEnrollmentMessage(enrollment, missing))
+      if (missingBasic.length) {
+        return reply(buildMissingEnrollmentMessage(enrollment, missingBasic))
+      }
+
+      const missingFinal = getMissingEnrollmentFinalFields(enrollment)
+      if (missingFinal.length) {
+        return reply(buildEnrollmentSecondStepMessage(enrollment))
       }
 
       convo.salesLead.fullName = enrollment.fullName
@@ -2799,6 +2842,11 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
       const parsed = parseEnrollmentBundle(text, convo.salesLead?.course || convo.course || "")
       const enrollment = mergeEnrollmentData(convo, parsed)
+      const missing = getMissingEnrollmentFields(enrollment)
+
+      if (missing.length) {
+        return reply(buildMissingEnrollmentMessage(enrollment, missing))
+      }
 
       const paymentMethod = getReadableSalesLeadPaymentMethod(
         convo.salesLead.paymentMethod ||
@@ -3080,15 +3128,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     if (convo.step === "diagnosis_goal") {
       if (isEnrollmentHowToIntent(text)) {
         convo.salesLead.stage = "enrollment_explanation"
-        return reply(`Perfeito 😊
-
-Para começar, o processo é simples.
-
-Você me envia os dados necessários para a inscrição,
-eu organizo tudo com você por aqui
-e depois seguimos com a forma de pagamento escolhida.
-
-Podemos continuar agora mesmo.`)
+        return reply(buildEnrollmentHowToMessage())
       }
 
       if (raw === "1") {
@@ -3111,15 +3151,7 @@ Podemos continuar agora mesmo.`)
 
       if (raw === "3") {
         convo.salesLead.stage = "enrollment_explanation"
-        return reply(`Perfeito 😊
-
-Para começar, o processo é simples.
-
-Você me envia os dados necessários para a inscrição,
-eu organizo tudo com você por aqui
-e depois seguimos com a forma de pagamento escolhida.
-
-Podemos continuar agora mesmo.`)
+        return reply(buildEnrollmentHowToMessage())
       }
 
       if (isLowContextReply(text)) {
@@ -3152,15 +3184,7 @@ Podemos continuar agora mesmo.`)
     if (convo.step === "offer_transition") {
       if (isEnrollmentHowToIntent(text)) {
         convo.salesLead.stage = "enrollment_explanation"
-        return reply(`Perfeito 😊
-
-Para começar, o processo é simples.
-
-Você me envia os dados necessários para a inscrição,
-eu organizo tudo com você por aqui
-e depois seguimos com a forma de pagamento escolhida.
-
-Podemos continuar agora mesmo.`)
+        return reply(buildEnrollmentHowToMessage())
       }
 
       if (raw === "1") {
@@ -3183,15 +3207,7 @@ Podemos continuar agora mesmo.`)
 
       if (raw === "3") {
         convo.salesLead.stage = "enrollment_explanation"
-        return reply(`Perfeito 😊
-
-Para começar, o processo é simples.
-
-Você me envia os dados necessários para a inscrição,
-eu organizo tudo com você por aqui
-e depois seguimos com a forma de pagamento escolhida.
-
-Podemos continuar agora mesmo.`)
+        return reply(buildEnrollmentHowToMessage())
       }
 
       if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
