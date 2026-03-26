@@ -10,6 +10,48 @@ function onlyDigits(value) {
   return String(value || "").replace(/\D/g, "")
 }
 
+function normalizeDateBR(value) {
+  const raw = String(value || "").trim()
+  if (!raw) return ""
+
+  const compact = onlyDigits(raw)
+  let day = ""
+  let month = ""
+  let year = ""
+
+  if (compact.length === 8) {
+    day = compact.slice(0, 2)
+    month = compact.slice(2, 4)
+    year = compact.slice(4, 8)
+  } else {
+    const parts = raw.split(/[^\d]+/).filter(Boolean)
+    if (parts.length !== 3) return ""
+
+    day = parts[0]
+    month = parts[1]
+    year = parts[2]
+  }
+
+  if (!/^\d{1,2}$/.test(day) || !/^\d{1,2}$/.test(month) || !/^\d{4}$/.test(year)) {
+    return ""
+  }
+
+  const normalized = `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`
+  const [d, m, y] = normalized.split("/").map(Number)
+  if (y < 1900 || y > 2099) return ""
+
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== m - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return ""
+  }
+
+  return normalized
+}
+
 function isCPF(value) {
   const cpf = onlyDigits(value)
 
@@ -38,13 +80,14 @@ function isCPF(value) {
 }
 
 function isDateBR(value) {
-  return /^(0?[1-9]|[12]\d|3[01])\/(0?[1-9]|1[0-2])\/(19|20)\d{2}$/.test(String(value || "").trim())
+  return Boolean(normalizeDateBR(value))
 }
 
 function brDateToISO(value) {
-  if (!isDateBR(value)) return null
+  const normalized = normalizeDateBR(value)
+  if (!normalized) return null
 
-  const [day, month, year] = String(value).split("/")
+  const [day, month, year] = normalized.split("/")
   return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
 }
 
@@ -97,6 +140,7 @@ function detectDueDay(value) {
 module.exports = {
   normalize,
   onlyDigits,
+  normalizeDateBR,
   isCPF,
   isDateBR,
   brDateToISO,
