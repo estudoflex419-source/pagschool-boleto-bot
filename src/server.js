@@ -1513,11 +1513,21 @@ function findSiteCourseKnowledge(text, currentCourse = "") {
   const byText = normalizeCourseInfoCandidate(findCourseInText(text))
   if (byText) return byText
 
+  const byDirectText = normalizeCourseInfoCandidate(
+    findCourseByName(text, ACTIVE_SITE_COURSE_KNOWLEDGE)
+  )
+  if (byDirectText) return byDirectText
+
   const byCurrent = normalizeCourseInfoCandidate(getCourseByName(currentCourse))
   if (byCurrent) return byCurrent
 
   const byCombined = normalizeCourseInfoCandidate(findCourseInText(`${currentCourse} ${text}`))
   if (byCombined) return byCombined
+
+  const byCombinedDirect = normalizeCourseInfoCandidate(
+    findCourseByName(`${currentCourse} ${text}`, ACTIVE_SITE_COURSE_KNOWLEDGE)
+  )
+  if (byCombinedDirect) return byCombinedDirect
 
   const byCurrentFallback = buildFallbackCourseInfoByName(currentCourse)
   if (byCurrentFallback) return byCurrentFallback
@@ -1548,6 +1558,46 @@ function getCourseMatchTerms(course = {}) {
 function findCourseByName(text = "", catalog = getCourseCatalog()) {
   const normalizedText = normalizeIntentText(text)
   if (!normalizedText) return null
+
+  const scopedCatalog = Array.isArray(catalog) ? catalog : []
+
+  const scoreCourseMatch = (course) => {
+    const terms = getCourseMatchTerms(course)
+    if (!terms.length) return 0
+
+    let score = 0
+    const directMatch = terms.find(term => term === normalizedText)
+    if (directMatch) {
+      score = Math.max(score, 1000 + directMatch.length)
+    }
+
+    for (const term of terms) {
+      if (!term || term.length < 4) continue
+      if (normalizedText.includes(term)) {
+        score = Math.max(score, 700 + term.length)
+      }
+      if (term.includes(normalizedText) && normalizedText.length >= 4) {
+        score = Math.max(score, 500 + normalizedText.length)
+      }
+    }
+
+    return score
+  }
+
+  let bestMatch = null
+  let bestScore = 0
+
+  for (const course of scopedCatalog) {
+    const score = scoreCourseMatch(course)
+    if (score > bestScore) {
+      bestScore = score
+      bestMatch = course
+    }
+  }
+
+  if (bestMatch) {
+    return bestMatch
+  }
 
   for (const course of catalog || []) {
     const terms = getCourseMatchTerms(course)
@@ -1592,6 +1642,12 @@ O site é este:
 https://www.estudoflex.com.br/
 
 Assim que você escolher o curso, me manda o nome aqui que eu te explico tudo certinho.`
+}
+
+function buildAwaitingCourseNameMessage() {
+  return `Perfeito 😊
+
+Me manda aqui o nome do curso que te chamou atenção no site que eu te explico como funciona.`
 }
 
 function isLowContextReply(text = "") {
@@ -1691,6 +1747,14 @@ Pra eu te ajudar sem ficar repetindo, me diz só qual caminho você quer agora:
 function preventLoop(convo = {}, message = "", intent = "") {
   if (!isRepeatedBotResponse(convo, message, intent)) return message
 
+  if (
+    intent === "pending_awaiting_course_reminder" ||
+    intent === "pending_awaiting_course_affirmation" ||
+    intent === "course_catalog_request"
+  ) {
+    return buildAwaitingCourseNameMessage()
+  }
+
   if (intent === "more_courses") {
     return `Tem sim 😊
 
@@ -1709,7 +1773,7 @@ Se quiser, eu também te explico qual formato costuma ficar melhor para o seu mo
 Se você quiser, eu sigo com você agora para matrícula sem burocracia.`
   }
 
-  return "Perfeito 😊 Me fala só o que você quer ver agora: cursos, valores, como funciona ou matrícula."
+  return buildAwaitingCourseNameMessage()
 }
 
 function buildMoreCoursesMessage(convo = {}, userText = "") {
@@ -2280,7 +2344,7 @@ function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "
 
     return {
       intent: "pending_awaiting_course_reminder",
-      message: buildCourseListMessage()
+      message: buildAwaitingCourseNameMessage()
     }
   }
 
@@ -3577,7 +3641,8 @@ async function processMessage(phone, text) {
     if (
       convo.pendingStep === "awaiting_course_selection" ||
       convo.pendingStep === "awaiting_course" ||
-      convo.commercialStage === "catalog_redirect"
+      convo.commercialStage === "catalog_redirect" ||
+      convo.lastOfferType === "site_catalog_redirect"
     ) {
       const matchedCourse =
         findCourseByName(text, getCourseCatalog()) ||
