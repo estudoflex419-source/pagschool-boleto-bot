@@ -2,6 +2,7 @@ require("dotenv").config()
 
 const fs = require("node:fs")
 const path = require("node:path")
+const crypto = require("node:crypto")
 
 const {
   PORT,
@@ -759,19 +760,19 @@ ${buildPaymentSummaryLine()}
 
 ${buildPixSoftMention()}
 
-Se você quiser, eu te ajudo a escolher a opção que melhor encaixa no seu momento.`
+Se você quiser, eu te ajudo a decidir qual opção encaixa melhor no seu mês.`
 }
 
 function buildPaymentChoiceMessage() {
-  return `Perfeito, ótima pergunta 😊
+  return `Ótimo 😊
 
-Pra quem quer começar de um jeito leve, normalmente essas duas opções são as mais escolhidas:
+Hoje, as opções mais leves para começar costumam ficar assim:
 
 ${buildPaymentSummaryLine()}
 
 ${buildPixSoftMention()}
 
-Se você quiser, eu te oriento agora qual costuma fazer mais sentido no seu caso.`
+Se quiser, eu te oriento rapidinho qual dessas costuma fazer mais sentido no seu caso.`
 }
 
 function buildPaymentMethodReply(method) {
@@ -814,9 +815,9 @@ Se fizer sentido pra você, eu já te explico rapidinho como funciona a matrícu
 }
 
 function buildPaymentHelpMessage() {
-  return `Faz sentido ter essa dúvida 😊
+  return `Faz total sentido ter essa dúvida 😊
 
-Se a ideia for começar de um jeito mais leve, vale escolher a opção que fica mais confortável no mês.
+Se a ideia for começar de um jeito mais leve, muita gente prefere olhar primeiro a opção que encaixa melhor no orçamento do mês.
 
 ${buildPaymentSummaryLine()}
 
@@ -1614,7 +1615,7 @@ function getMessageHash(text = "") {
 }
 
 function hashMessage(text = "") {
-  return getMessageHash(text)
+  return crypto.createHash("sha1").update(String(text || "")).digest("hex")
 }
 
 function isRepeatedBotResponse(convo = {}, message = "", intent = "") {
@@ -1662,18 +1663,47 @@ Pra eu te ajudar sem ficar repetindo, me diz só qual caminho você quer agora:
 • matrícula`
 }
 
+function preventLoop(convo = {}, message = "", intent = "") {
+  if (!isRepeatedBotResponse(convo, message, intent)) return message
+
+  if (intent === "more_courses") {
+    return `Tem sim 😊
+
+Se você quiser, também posso te organizar por área, como saúde, administrativo ou tecnologia.`
+  }
+
+  if (intent === "price" || intent === "payment_options") {
+    return `Posso te passar as parcelas certinho 😊
+
+Se quiser, eu também te explico qual formato costuma ficar melhor para o seu momento.`
+  }
+
+  if (intent === "enrollment" || intent === "pending_enrollment_intro_confirmed") {
+    return `Perfeito 😊
+
+Se você quiser, eu sigo com você agora para matrícula sem burocracia.`
+  }
+
+  return "Perfeito 😊 Me fala só o que você quer ver agora: cursos, valores, como funciona ou matrícula."
+}
+
 function buildMoreCoursesMessage(convo = {}, userText = "") {
   const catalog = ACTIVE_SITE_COURSE_KNOWLEDGE
   const pageSize = 5
 
   // Detecta se o usuário mencionou uma categoria específica
   const detectedCategory = userText ? detectCategoryFromText(userText) : ""
+  const preferredCategory = detectedCategory || convo.preferredCategory || ""
+  if (preferredCategory) {
+    convo.preferredCategory = preferredCategory
+    convo.mentionedCategories = uniqueItems([...(convo.mentionedCategories || []), preferredCategory])
+  }
 
   let pool = []
 
-  if (detectedCategory) {
+  if (preferredCategory) {
     // Filtra pelo grupo de categoria detectada
-    pool = getCoursesByCategory(detectedCategory)
+    pool = getCoursesByCategory(preferredCategory)
   }
 
   // Se não detectou categoria ou a categoria não tem cursos, usa catálogo completo
@@ -1705,7 +1735,9 @@ function buildMoreCoursesMessage(convo = {}, userText = "") {
 
   convo.moreCoursesOffset = (start + pageSize) % source.length
 
-  const categoryLabel = detectedCategory ? ` da área de *${COURSE_CATEGORY_LABELS[detectedCategory]}*` : ""
+  const categoryLabel = preferredCategory ? ` da área de *${COURSE_CATEGORY_LABELS[preferredCategory]}*` : ""
+  convo.lastOfferType = preferredCategory ? "show_courses_by_category" : "show_more_courses"
+  convo.commercialStage = "recommendation"
 
   return `Tem sim 😊
 
@@ -1784,7 +1816,7 @@ function buildTwoCourseRecommendationMessage(convo = {}) {
   convo.commercialStage = "recommendation"
   convo.step = "course_selection"
   clearPendingStep(convo)
-  convo.lastOfferType = "two_courses_recommendation"
+  convo.lastOfferType = "show_2_courses"
 
   const response = `Ótimo 😊
 
@@ -1795,7 +1827,7 @@ Duas opções que costumam chamar bastante atenção são:
 
 As duas são muito procuradas por quem quer entrar na área com uma formação prática.${mentionFastJob ? " E ajudam bastante quem quer acelerar currículo para conseguir emprego mais rápido." : ""}
 
-Se você quiser, eu já te explico rapidinho qual combina mais com você.`
+Se você quiser, eu também posso te mostrar outras opções.`
 
   markCommercialReply(convo, "recommended_two_courses", response)
   return response
@@ -2030,6 +2062,13 @@ function detectContextualIntent(text = "", convo = {}) {
     return "confirm_enrollment_intro"
   }
 
+  if (
+    isDirectYes(text) &&
+    (convo.commercialStage === "enrollment" || convo.lastOfferType === "enrollment")
+  ) {
+    return "confirm_enrollment_intro"
+  }
+
   if (isNegativeReply(text) && convo.pendingStep === "enrollment_intro_confirmation") {
     return "decline_enrollment_intro"
   }
@@ -2130,6 +2169,7 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
+      convo.commercialStage = "recommendation"
       clearPendingStep(convo)
       return { intent, message: buildMoreCoursesMessage(convo, text) }
 
@@ -2144,10 +2184,14 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       const category = detectCategoryFromText(text) || convo.lastRequestedCategory || ""
       if (category) {
         convo.lastRequestedCategory = category
+        convo.preferredCategory = category
+        convo.mentionedCategories = uniqueItems([...(convo.mentionedCategories || []), category])
       }
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
+      convo.commercialStage = "recommendation"
+      convo.lastOfferType = "show_courses_by_category"
       clearPendingStep(convo)
       return { intent, message: buildCoursesByCategory(category) }
     }
@@ -2157,6 +2201,8 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.step = "payment_intro"
       convo.currentFlow = "commercial"
       convo.commercialStage = "pricing"
+      convo.lastOfferType = "show_price"
+      convo.priceShown = true
       return { intent, message: buildPriceMessage(convo) }
 
     case "payment_options":
@@ -2164,10 +2210,13 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.step = "payment_choice"
       convo.currentFlow = "commercial"
       convo.salesLead.stage = "awaiting_payment_method"
+      convo.commercialStage = "payment"
+      convo.lastOfferType = "payment_guidance"
       return { intent, message: buildPaymentChoiceMessage() }
 
     case "enrollment":
       openEnrollmentConfirmationStep(convo)
+      convo.pendingStep = "enrollment_intro_confirmation"
       return {
         intent,
         message: `Perfeito 😊
@@ -2226,14 +2275,21 @@ Pode ser?`
 }
 
 function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "") {
-  if (convo.pendingStep === "enrollment_intro_confirmation") {
-    if (contextualIntent === "confirm_enrollment_intro") {
-      return {
-        intent: "pending_enrollment_intro_confirmed",
-        message: advanceEnrollmentFromIntroConfirmation(convo)
-      }
+  if (
+    contextualIntent === "confirm_enrollment_intro" ||
+    (isDirectYes(text) && (
+      convo.pendingStep === "enrollment_intro_confirmation" ||
+      convo.commercialStage === "enrollment" ||
+      convo.lastOfferType === "enrollment"
+    ))
+  ) {
+    return {
+      intent: "pending_enrollment_intro_confirmed",
+      message: advanceEnrollmentFromIntroConfirmation(convo)
     }
+  }
 
+  if (convo.pendingStep === "enrollment_intro_confirmation") {
     if (contextualIntent === "decline_enrollment_intro") {
       clearPendingStep(convo)
       convo.salesLead.stage = ""
@@ -2310,6 +2366,86 @@ function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
     convo.enrollmentIntent = true
     convo.commercialStage = "closing"
   }
+}
+
+function inferPreferredCategory(text = "", intentResult = {}, convo = {}) {
+  const byIntent = intentResult?.intent === "course_category" ? (intentResult?.category || "") : ""
+  const byText = detectCategoryFromText(text)
+  const category = byIntent || byText || ""
+  if (!category) return ""
+
+  convo.preferredCategory = category
+  convo.mentionedCategories = uniqueItems([...(convo.mentionedCategories || []), category])
+  return category
+}
+
+function inferSelectedCourse(text = "", intentResult = {}, convo = {}) {
+  const courseInfo = findSiteCourseKnowledge(text, convo.course)
+  if (courseInfo?.title) {
+    convo.selectedCourse = courseInfo.title
+    convo.course = courseInfo.title
+    return courseInfo.title
+  }
+
+  if (intentResult?.intent === "specific_course" && convo.course) {
+    convo.selectedCourse = convo.course
+    return convo.course
+  }
+
+  return ""
+}
+
+function inferUserGoal(text = "", _intentResult = {}, convo = {}) {
+  const mapped = mapGoalReply(text)
+  if (mapped) {
+    convo.userGoal = mapped
+    convo.goal = mapped
+  }
+  return mapped
+}
+
+function updateConversationMemory(convo = {}, text = "", intentResult = {}) {
+  ensureSalesLead(convo)
+  convo.lastUserText = String(text || "").trim()
+  convo.lastIntent = intentResult?.intent || convo.lastIntent || ""
+  convo.updatedAt = Date.now()
+
+  const normalized = normalizeFlowText(text)
+  convo.lastUserMessageHash = hashMessage(normalized)
+
+  inferPreferredCategory(text, intentResult, convo)
+  inferSelectedCourse(text, intentResult, convo)
+  inferUserGoal(text, intentResult, convo)
+
+  if (intentResult?.intent === "more_courses") convo.askedMoreCourses = true
+  if (intentResult?.intent === "how_course_works") convo.askedHowItWorks = true
+  if (intentResult?.intent === "price") convo.priceShown = true
+  if (intentResult?.intent === "payment_options") convo.paymentPreference = convo.paymentPreference || "undecided"
+  if (intentResult?.intent === "enrollment") convo.enrollmentIntent = true
+}
+
+function applyMemoryToIntentResolution(convo = {}, intentResult = {}) {
+  if (!intentResult || !intentResult.intent) return intentResult
+
+  if (
+    intentResult.intent === "more_courses" &&
+    !intentResult.category &&
+    convo.preferredCategory
+  ) {
+    intentResult.category = convo.preferredCategory
+  }
+
+  if (
+    intentResult.intent === "affirmation" &&
+    (convo.pendingStep === "enrollment_intro_confirmation" ||
+      convo.commercialStage === "enrollment" ||
+      convo.lastOfferType === "enrollment")
+  ) {
+    intentResult.contextIntent = "confirm_enrollment_intro"
+    intentResult.shouldConsumePendingStep = true
+  }
+
+  return intentResult
 }
 
 function mapExperienceReply(text = "") {
@@ -2457,7 +2593,7 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
   const parts = []
 
-  parts.push(`Ótima escolha 😊 *${displayName}* costuma ser uma opção bem interessante para quem quer evoluir com foco prático.`)
+  parts.push(`Ótima escolha 😊\n${displayName} costuma chamar bastante atenção de quem busca uma formação prática e com aplicação real.`)
 
   if (normalizedCourseInfo?.summary) {
     parts.push(String(normalizedCourseInfo.summary).trim().replace(/\.$/, "") + ".")
@@ -2465,13 +2601,13 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
 
   if (normalizedCourseInfo?.learns?.length || normalizedCourseInfo?.market) {
     const benefitLine = normalizedCourseInfo?.market
-      ? `Isso costuma ajudar bastante quem quer buscar oportunidade em ${normalizedCourseInfo.market}.`
-      : "Isso costuma ajudar bastante quem quer ganhar base real para entrar melhor no mercado."
+      ? `Ele costuma ajudar bastante quem quer se preparar para oportunidades em ${normalizedCourseInfo.market}.`
+      : "Ele costuma ajudar bastante quem quer ganhar base real para entrar melhor no mercado."
     parts.push(benefitLine)
   }
 
-  parts.push("E mesmo quem está começando do zero geralmente consegue acompanhar bem, porque a proposta é prática e organizada.")
-  parts.push("Se você quiser, eu já posso te mostrar como ficam as parcelas para começar ou te explico primeiro como funciona a matrícula.")
+  parts.push("E mesmo para quem está começando do zero, a trilha costuma ser bem organizada e fácil de acompanhar.")
+  parts.push("Se você quiser, eu já te mostro como ficam as parcelas para começar.")
 
   return parts.join("\n\n")
 }
@@ -3394,17 +3530,7 @@ async function processMessage(phone, text) {
     const replyWithState = (responseText, extra = {}, intent = "") => {
       let finalText = String(responseText || "").trim()
       const incomingIntent = String(intent || "").trim()
-      const incomingHash = getMessageHash(finalText)
-
-      if (
-        finalText &&
-        incomingHash &&
-        incomingHash === String(convo.lastBotMessageHash || "").trim() &&
-        incomingIntent &&
-        incomingIntent === String(convo.lastIntentHandled || "").trim()
-      ) {
-        finalText = buildAntiLoopFallbackMessage()
-      }
+      finalText = preventLoop(convo, finalText, incomingIntent)
 
       registerBotReply(convo, finalText, incomingIntent)
       return reply(finalText, extra)
@@ -3422,12 +3548,13 @@ async function processMessage(phone, text) {
 
     updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion)
 
-    convo.lastUserMessageHash = hashMessage(text)
-
     const intentResult = detectIntent(text, convo, {
       hasSpecificCourseSignal: Boolean(findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)),
       lastHandledIntent: convo.lastHandledIntent || convo.lastIntentHandled || ""
     })
+    updateConversationMemory(convo, text, intentResult)
+    applyMemoryToIntentResolution(convo, intentResult)
+
     const strongIntent = intentResult.strong ? intentResult.intent : ""
     const detectedCategoryIntent = intentResult.category || ""
     const contextualIntent = intentResult.contextIntent || detectContextualIntent(text, convo)
@@ -3436,26 +3563,13 @@ async function processMessage(phone, text) {
       const strongHandled = await handleStrongIntent(strongIntent || intentResult.intent, convo, detectedCategoryIntent || text, phone)
 
       if (strongHandled?.message) {
-        if (isRepeatedBotResponse(convo, strongHandled.message, strongHandled.intent)) {
-          if (strongHandled.intent === "price") {
-            return replyWithState(
-              "Consigo te resumir rapidinho 😊 Temos opções no carnê, cartão e Pix. Se quiser, te explico qual compensa mais para o seu momento.",
-              {},
-              "anti_loop_price_reframe"
-            )
-          }
-          if (strongHandled.intent === "payment_options") {
-            return replyWithState(
-              "Para não repetir, já te adianto a melhor rota: me diga se prefere *parcelado* ou *à vista no Pix* que eu te passo o cenário ideal.",
-              {},
-              "anti_loop_payment_reframe"
-            )
-          }
-          return replyWithState(buildNoRepeatFallback(), {}, "anti_loop_redirect")
-        }
-
         return replyWithState(strongHandled.message, strongHandled.extra || {}, strongHandled.intent)
       }
+    }
+
+    const pendingHandled = handlePendingCommercialStep(convo, text, contextualIntent)
+    if (pendingHandled?.message) {
+      return replyWithState(pendingHandled.message, {}, pendingHandled.intent)
     }
 
     const wantsPrice = isPriceQuestion || wantsPaymentDetails(text)
@@ -3745,9 +3859,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     }
 
     if (intentResult.shouldConsumePendingStep || shouldConsumePendingStep(strongIntent, convo)) {
-      const pendingHandled = handlePendingCommercialStep(convo, text, contextualIntent)
-      if (pendingHandled?.message) {
-        return replyWithState(pendingHandled.message, {}, pendingHandled.intent)
+      const stepHandled = handlePendingCommercialStep(convo, text, contextualIntent)
+      if (stepHandled?.message) {
+        return replyWithState(stepHandled.message, {}, stepHandled.intent)
       }
     }
 

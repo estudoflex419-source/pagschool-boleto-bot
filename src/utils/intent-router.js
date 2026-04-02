@@ -2,6 +2,8 @@
 
 const OVERRIDE_INTENTS = new Set([
   "second_via",
+  "human_agent",
+  "start_over",
   "more_courses",
   "price",
   "payment_options",
@@ -9,128 +11,89 @@ const OVERRIDE_INTENTS = new Set([
   "specific_course",
   "how_course_works",
   "goal_help",
-  "human_agent",
-  "start_over",
   "course_list",
   "compare_courses",
   "course_category"
 ])
 
-const HIGH_PRIORITY_INTENTS = Object.freeze({
-  second_via: 1,
-  human_agent: 0.95,
-  start_over: 0.85,
-  more_courses: 0.8,
-  price: 0.78,
-  payment_options: 0.76,
-  enrollment: 0.75,
-  specific_course: 0.72,
-  how_course_works: 0.7,
-  goal_help: 0.68,
-  course_category: 0.84,
-  compare_courses: 0.66,
-  course_list: 0.64,
-  affirmation: 0.3,
-  negation: 0.32
-})
-
-
-function detectCourseCategory(text = "") {
-  const t = normalizeIntentText(text)
-
-  if (!t) return ""
-
-  if (/\b(saude|enfermagem|farmacia|hospital|clinica|odontologia|nutricao|socorrista|agente de saude|analises clinicas)\b/.test(t)) {
-    return "saude"
-  }
-
-  if (/\b(administrativo|administracao|assistente administrativo|auxiliar administrativo|recursos humanos|rh|contabilidade|operador de caixa)\b/.test(t)) {
-    return "administrativo"
-  }
-
-  if (/\b(informatica|tecnologia|marketing digital|robotica|designer grafico|internet|digital)\b/.test(t)) {
-    return "tecnologia"
-  }
-
-  return ""
-}
-
 const INTENT_PATTERNS = Object.freeze({
   second_via: {
-    phrases: ["segunda via", "2 via", "2a via", "boleto", "fatura", "mensalidade", "linha digitavel", "parcela em aberto"],
-    keywords: [["segunda", "via"], ["2", "via"], ["linha", "digitavel"], ["parcela", "aberto"]],
-    regex: [/\bsegunda\s+via\b/, /\b2a?\s+via\b/, /\bboleto\b/]
-  },
-  more_courses: {
-    phrases: ["tem mais cursos", "tem mais opcoes", "mais opcoes", "outros cursos", "quais outros", "quero ver mais", "me mostra mais", "ver mais cursos", "tem outros", "quais outras opcoes", "tem mais da area", "mais cursos da area", "mais cursos de", "outras opcoes de"],
-    keywords: [["mais", "cursos"], ["mais", "opcoes"], ["outros", "cursos"], ["quais", "outros"], ["mais", "area"]],
-    regex: [/\b(ver|mostrar|mostra)\s+mais\b/, /\boutr[oa]s?\s+cursos?\b/, /\bmais\s+cursos?\s+(da|de|na)\s+area\b/]
-  },
-  price: {
-    phrases: ["quanto custa", "qual valor", "preco", "valores", "quanto fica", "qual o preco", "me passa os valores"],
-    keywords: [["quanto", "custa"], ["qual", "valor"], ["me", "valores"]],
-    regex: [/\bquanto\s+(custa|fica)\b/, /\bqual\s+o?\s*preco\b/]
-  },
-  payment_options: {
-    phrases: ["como paga", "formas de pagamento", "forma de pagamento", "parcelado", "no cartao", "no pix", "no carne", "como funciona o pagamento"],
-    keywords: [["formas", "pagamento"], ["como", "paga"], ["no", "pix"], ["no", "cartao"]],
-    regex: [/\bcomo\s+(paga|pagar)\b/, /\bformas?\s+de\s+pagamento\b/, /\b(parcelado|pix|carne|cartao)\b/]
-  },
-  enrollment: {
-    phrases: ["quero me matricular", "quero comecar", "quero fazer", "quero entrar", "como faco pra comecar", "quero iniciar agora"],
-    keywords: [["quero", "matricular"], ["quero", "comecar"], ["faco", "comecar"], ["quero", "iniciar"]],
-    regex: [/\b(quero|vamos)\s+(me\s+)?(matricular|iniciar|comecar|entrar)\b/, /\bcomo\s+faco\s+pra\s+comecar\b/]
-  },
-  specific_course: {
-    phrases: [],
-    keywords: [["curso"]],
-    regex: []
-  },
-  how_course_works: {
-    phrases: ["como funciona", "e online", "tem prova", "como acesso", "tem suporte", "como estudo"],
-    keywords: [["como", "funciona"], ["como", "acesso"], ["tem", "suporte"]],
-    regex: [/\bcomo\s+funciona\b/, /\be\s+online\b/, /\btem\s+prova\b/]
-  },
-  goal_help: {
-    phrases: ["quero conseguir emprego", "quero melhorar curriculo", "quero comecar do zero", "quero mudar de area", "quero uma oportunidade", "quero trabalhar mais rapido"],
-    keywords: [["conseguir", "emprego"], ["melhorar", "curriculo"], ["do", "zero"], ["mudar", "area"]],
-    regex: [/\b(emprego|trabalho|oportunidade|curriculo|do\s+zero|mudar\s+de\s+area)\b/]
+    priority: 100,
+    phrases: ["segunda via", "2 via", "2a via", "boleto", "fatura", "mensalidade", "parcela", "linha digitavel"],
+    keywords: ["boleto", "fatura", "parcela", "cpf", "mensalidade"]
   },
   human_agent: {
+    priority: 95,
     phrases: ["falar com atendente", "quero um humano", "pessoa real", "atendente", "suporte humano"],
-    keywords: [["falar", "atendente"], ["suporte", "humano"], ["pessoa", "real"]],
-    regex: [/\b(atendente|humano|pessoa\s+real)\b/]
+    keywords: ["atendente", "humano", "pessoa"]
   },
   start_over: {
-    phrases: ["comecar de novo", "menu", "inicio", "voltar"],
-    keywords: [["comecar", "novo"]],
-    regex: [/\b(comecar\s+de\s+novo|inicio|menu|voltar)\b/]
+    priority: 88,
+    phrases: ["menu", "inicio", "comecar de novo", "voltar", "reiniciar"],
+    keywords: ["menu", "inicio", "voltar", "reiniciar"]
+  },
+  course_category: {
+    priority: 84,
+    phrases: ["na area da", "cursos de", "area de", "tem na area"],
+    keywords: ["area", "cursos", "saude", "administrativo", "tecnologia"]
+  },
+  more_courses: {
+    priority: 80,
+    phrases: [
+      "tem mais cursos", "tem mais opcoes", "mais cursos", "mais opcoes", "outros cursos", "quais outros",
+      "quero ver mais", "me mostra mais", "ver mais cursos", "tem outros", "quais outras opcoes", "tem mais"
+    ],
+    keywords: ["mais", "outros", "opcoes", "cursos"]
+  },
+  price: {
+    priority: 75,
+    phrases: ["quanto custa", "qual valor", "quais os valores", "preco", "quanto fica", "qual o preco", "me passa os valores"],
+    keywords: ["valor", "valores", "preco", "custa", "fica"]
+  },
+  enrollment: {
+    priority: 74,
+    phrases: ["quero me matricular", "quero fazer matricula", "quero comecar", "quero iniciar", "quero entrar", "como faco pra me inscrever", "como me inscrevo", "como entro"],
+    keywords: ["matricula", "comecar", "iniciar", "entrar", "inscrever"]
+  },
+  payment_options: {
+    priority: 72,
+    phrases: ["como paga", "formas de pagamento", "forma de pagamento", "como posso pagar", "parcelado", "no cartao", "no pix", "no carne"],
+    keywords: ["pagamento", "pagar", "cartao", "pix", "carne", "parcelado"]
+  },
+  specific_course: {
+    priority: 70,
+    phrases: [],
+    keywords: ["curso"]
+  },
+  how_course_works: {
+    priority: 60,
+    phrases: ["como funciona", "e online", "como acesso", "tem prova", "tem suporte", "como estudo"],
+    keywords: ["funciona", "online", "acesso", "prova", "suporte", "estudo"]
+  },
+  goal_help: {
+    priority: 58,
+    phrases: ["quero conseguir emprego", "quero melhorar curriculo", "quero comecar do zero", "quero mudar de area", "quero uma oportunidade", "quero trabalhar mais rapido"],
+    keywords: ["emprego", "curriculo", "zero", "oportunidade", "trabalhar"]
   },
   course_list: {
-    phrases: ["quais cursos", "lista de cursos", "ver cursos", "quero conhecer os cursos", "quais opcoes"],
-    keywords: [["quais", "cursos"], ["lista", "cursos"], ["ver", "cursos"]],
-    regex: [/\b(quais\s+cursos|lista\s+de\s+cursos|ver\s+cursos)\b/]
+    priority: 50,
+    phrases: ["quais cursos", "lista de cursos", "ver cursos", "conhecer cursos"],
+    keywords: ["quais", "lista", "cursos"]
   },
   compare_courses: {
+    priority: 45,
     phrases: ["comparar cursos", "qual melhor curso", "comparacao de cursos"],
-    keywords: [["comparar", "cursos"], ["qual", "melhor", "curso"]],
-    regex: [/\bcompar(ar|acao)\b.*\bcurso\b/]
+    keywords: ["comparar", "curso", "melhor"]
   },
-  // FIX: ampliadas as frases de afirmação para cobrir "quero sim", "sim quero", etc.
   affirmation: {
-    phrases: [
-      "sim", "quero", "pode", "claro", "ok", "certo", "manda", "pode ser",
-      "quero sim", "sim quero", "claro que sim", "pode sim", "bora sim",
-      "quero ver", "me mostra", "vamos sim", "ta bom", "tá bom", "okay",
-      "aham", "isso", "com certeza", "por favor", "por favor sim"
-    ],
-    keywords: [["pode", "ser"], ["quero", "sim"], ["claro", "que"], ["com", "certeza"]],
-    regex: [/^(sim|quero|pode|claro|ok|certo|manda|bora|vamos)(\s+sim)?$/, /^quero\s+sim$/, /^sim\s+quero$/, /^claro\s+que\s+sim$/]
+    priority: 20,
+    phrases: ["sim", "quero", "pode", "claro", "ok", "certo", "manda", "pode ser", "quero sim", "sim quero", "ta bom", "tá bom"],
+    keywords: ["sim", "quero", "ok", "claro", "manda"]
   },
   negation: {
-    phrases: ["nao", "agora nao", "deixa", "cancelar", "depois vejo"],
-    keywords: [["agora", "nao"], ["depois", "vejo"]],
-    regex: [/^(nao|agora\s+nao|deixa|cancelar|depois\s+vejo)$/]
+    priority: 20,
+    phrases: ["nao", "agora nao", "depois vejo", "cancelar", "deixa"],
+    keywords: ["nao", "cancelar", "deixa", "depois"]
   }
 })
 
@@ -144,198 +107,166 @@ function normalizeIntentText(text = "") {
     .trim()
 }
 
-function getTokens(text = "") {
-  return new Set(normalizeIntentText(text).split(" ").filter(Boolean))
+function tokenize(text = "") {
+  return normalizeIntentText(text).split(" ").filter(Boolean)
 }
 
-function scoreIntent(intent, normalizedText, convo = {}, context = {}) {
-  const patterns = INTENT_PATTERNS[intent]
-  if (!patterns || !normalizedText) return { score: 0, reason: "" }
+function detectCourseCategory(text = "") {
+  const t = normalizeIntentText(text)
+  if (!t) return ""
 
-  const reasons = []
-  let score = 0
-  const tokens = getTokens(normalizedText)
-  const phrase = (patterns.phrases || []).find(item => normalizedText === item || normalizedText.includes(item))
+  if (/\b(saude|enfermagem|farmacia|hospital|clinica|agente de saude|analises clinicas|socorrista)\b/.test(t)) return "saude"
+  if (/\b(administrativo|administracao|recursos humanos|rh|contabilidade|recepcionista)\b/.test(t)) return "administrativo"
+  if (/\b(informatica|tecnologia|marketing digital|designer grafico|internet|digital)\b/.test(t)) return "tecnologia"
+  if (/\b(beleza|estetica|cabeleireiro|barbeiro|maquiagem)\b/.test(t)) return "beleza"
 
-  if (phrase) {
-    score += 0.7
-    reasons.push(`matched phrase: ${phrase}`)
-  }
-
-  const keywordMatch = (patterns.keywords || []).find(group => group.every(item => tokens.has(item)))
-  if (keywordMatch && keywordMatch.length >= 2) {
-    score += 0.2
-    reasons.push(`keywords: ${keywordMatch.join("+")}`)
-  }
-
-  const regexMatch = (patterns.regex || []).find(rule => rule.test(normalizedText))
-  if (regexMatch) {
-    score += 0.2
-    reasons.push("regex match")
-  }
-
-  const pendingStep = String(convo.pendingStep || "")
-  const step = String(convo.step || "")
-  const commercialStage = String(convo.commercialStage || "")
-  const currentFlow = String(convo.currentFlow || "")
-
-  if ([pendingStep, step, commercialStage, currentFlow].join(" ").includes("payment") && ["price", "payment_options"].includes(intent)) {
-    score += 0.1
-    reasons.push("context: payment stage")
-  }
-
-  if (pendingStep === "offer_2_courses_confirmation" && ["more_courses", "course_list", "affirmation"].includes(intent)) {
-    score += 0.15
-    reasons.push("context: pending offer confirmation")
-  }
-
-  if (currentFlow === "financial" && intent === "second_via") {
-    score += 0.15
-    reasons.push("context: financial flow")
-  }
-
-  if (currentFlow === "commercial" && ["enrollment", "goal_help", "course_list", "more_courses"].includes(intent)) {
-    score += 0.1
-    reasons.push("context: commercial flow")
-  }
-
-  const ambiguityPairs = [
-    ["price", "payment_options"],
-    ["course_list", "more_courses"],
-    ["affirmation", "enrollment"]
-  ]
-
-  for (const [a, b] of ambiguityPairs) {
-    if (intent !== a && intent !== b) continue
-    const aScore = quickPatternHit(INTENT_PATTERNS[a], normalizedText)
-    const bScore = quickPatternHit(INTENT_PATTERNS[b], normalizedText)
-    if (aScore && bScore) {
-      score -= 0.15
-      reasons.push(`ambiguity with ${intent === a ? b : a}`)
-    }
-  }
-
-  if (context.lastHandledIntent && context.lastHandledIntent === intent) {
-    score -= 0.05
-    reasons.push("same as last intent")
-  }
-
-  // FIX: não penalizar afirmações compostas como "quero sim" (2 palavras mas contexto claro)
-  if (["affirmation", "negation"].includes(intent) && normalizedText.split(" ").length <= 2) {
-    // só penaliza se NÃO é uma afirmação composta conhecida
-    const isKnownComposite = ["quero sim", "sim quero", "pode sim", "bora sim", "vamos sim", "ta bom", "tá bom"].includes(normalizedText)
-    if (!isKnownComposite) {
-      score -= 0.12
-      reasons.push("short low-context reply")
-    }
-  }
-
-  score = Math.max(0, Math.min(0.99, score))
-  return { score, reason: reasons.join("; ") }
+  return ""
 }
 
-function quickPatternHit(pattern = {}, normalizedText = "") {
-  const phraseHit = (pattern.phrases || []).some(item => normalizedText.includes(item))
-  const regexHit = (pattern.regex || []).some(rule => rule.test(normalizedText))
-  return phraseHit || regexHit
+function phraseScore(normalizedText, phrases = []) {
+  let best = 0
+  for (const phrase of phrases) {
+    const p = normalizeIntentText(phrase)
+    if (!p) continue
+    if (normalizedText === p) best = Math.max(best, 0.95)
+    else if (normalizedText.includes(p)) best = Math.max(best, 0.78)
+  }
+  return best
+}
+
+function keywordScore(tokens = [], keywords = []) {
+  if (!tokens.length || !keywords.length) return 0
+
+  const normalizedKeywords = keywords.map(normalizeIntentText)
+  const matched = normalizedKeywords.filter(k => tokens.includes(k))
+  if (!matched.length) return 0
+
+  const ratio = matched.length / normalizedKeywords.length
+  if (matched.length >= 3) return Math.min(0.72, 0.45 + ratio * 0.3)
+  if (matched.length === 2) return 0.52
+  return 0.28
+}
+
+function getContextBoost(intent, convo = {}, normalizedText = "") {
+  let boost = 0
+
+  if (intent === "affirmation" && convo?.pendingStep) boost += 0.25
+  if (intent === "more_courses" && (convo?.lastOfferType === "course_suggestion" || convo?.commercialStage === "recommendation")) boost += 0.18
+  if (intent === "price" && (convo?.selectedCourse || convo?.course)) boost += 0.12
+  if (intent === "payment_options" && convo?.priceShown) boost += 0.1
+  if (intent === "enrollment" && (convo?.selectedCourse || convo?.priceShown || convo?.enrollmentIntent)) boost += 0.12
+  if (intent === "second_via" && /\bcpf\b/.test(normalizedText)) boost += 0.15
+  if (intent === "course_category" && convo?.preferredCategory) boost += 0.1
+
+  return boost
+}
+
+function scoreIntent(intent, normalizedText, convo = {}) {
+  const tokens = tokenize(normalizedText)
+  const config = INTENT_PATTERNS[intent] || {}
+
+  const pScore = phraseScore(normalizedText, config.phrases || [])
+  const kScore = keywordScore(tokens, config.keywords || [])
+  const cBoost = getContextBoost(intent, convo, normalizedText)
+
+  let score = Math.max(pScore, kScore) + cBoost
+
+  if (["affirmation", "negation"].includes(intent) && tokens.length <= 2 && !convo?.pendingStep) {
+    score -= 0.12
+  }
+
+  if (intent === "price" && /\bparcelad[oa]\b/.test(normalizedText)) score -= 0.05
+  if (intent === "payment_options" && /\bquanto\s+(custa|fica)\b/.test(normalizedText)) score -= 0.05
+
+  if (score > 1) score = 1
+
+  return {
+    score,
+    reason: `p=${pScore.toFixed(2)} k=${kScore.toFixed(2)} c=${cBoost.toFixed(2)}`
+  }
 }
 
 function getIntentCandidates(text, convo = {}, context = {}) {
   const normalizedText = normalizeIntentText(text)
   if (!normalizedText) return []
 
-  const candidates = Object.keys(INTENT_PATTERNS)
-    .map(intent => {
-      if (intent === "specific_course" && !context.hasSpecificCourseSignal) {
-        return null
-      }
+  const candidates = []
 
-      const result = scoreIntent(intent, normalizedText, convo, context)
-      if (result.score <= 0) return null
+  for (const [intent] of Object.entries(INTENT_PATTERNS)) {
+    if (intent === "specific_course" && !context.hasSpecificCourseSignal) continue
 
-      return {
+    const { score, reason } = scoreIntent(intent, normalizedText, convo)
+
+    if (score >= 0.25) {
+      candidates.push({
         intent,
-        score: result.score,
-        reason: result.reason || "pattern match"
-      }
-    })
-    .filter(Boolean)
-
-  return candidates.sort((a, b) => b.score - a.score)
-}
-
-function resolveBestIntent(candidates = [], convo = {}) {
-  if (!Array.isArray(candidates) || !candidates.length) {
-    return {
-      intent: "",
-      score: 0,
-      strong: false,
-      shouldOverrideFlow: false,
-      reason: "no candidates"
+        score,
+        priority: INTENT_PATTERNS[intent]?.priority || 0,
+        strong: score >= 0.7 && !["affirmation", "negation"].includes(intent),
+        reason
+      })
     }
   }
 
-  const pendingStep = String(convo.pendingStep || "")
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    return b.priority - a.priority
+  })
 
-  const ranked = candidates
-    .map(candidate => {
-      const priority = HIGH_PRIORITY_INTENTS[candidate.intent] || 0
-      let finalScore = candidate.score
+  return candidates
+}
 
-      // FIX: boost mais agressivo quando há pendingStep e usuário afirma
-      if (pendingStep === "offer_2_courses_confirmation" && candidate.intent === "affirmation") {
-        finalScore += 0.35
-      }
+function shouldOverrideCurrentFlow(resolvedIntent = null, _convo = {}) {
+  if (!resolvedIntent?.intent) return false
+  if (["affirmation", "negation"].includes(resolvedIntent.intent)) return false
+  if (OVERRIDE_INTENTS.has(resolvedIntent.intent)) return true
+  return Boolean(resolvedIntent.strong)
+}
 
-      if (pendingStep && ["affirmation", "negation"].includes(candidate.intent)) {
-        finalScore += 0.15
-      }
+function shouldConsumePendingStep(resolvedIntent = null, convo = {}) {
+  if (!convo?.pendingStep) return false
+  if (!resolvedIntent?.intent) return true
+  return !shouldOverrideCurrentFlow(resolvedIntent, convo)
+}
 
-      if (candidate.intent === "second_via") {
-        finalScore += 0.1
-      }
+function resolveBestIntent(candidates = [], convo = {}) {
+  const best = candidates[0] || null
 
-      return {
-        ...candidate,
-        priority,
-        finalScore: Math.max(0, Math.min(0.99, finalScore))
-      }
-    })
-    .sort((a, b) => (b.finalScore + b.priority * 0.1) - (a.finalScore + a.priority * 0.1))
-
-  const winner = ranked[0]
-  const contextualAffirmation = winner.intent === "affirmation" && Boolean(pendingStep)
-  const contextualNegation = winner.intent === "negation" && Boolean(pendingStep)
-
-  const strong = winner.finalScore >= 0.67 && !["affirmation", "negation"].includes(winner.intent)
-  const shouldOverrideFlow = strong && OVERRIDE_INTENTS.has(winner.intent)
+  if (!best) {
+    return {
+      intent: "unknown",
+      score: 0,
+      strong: false,
+      shouldOverrideFlow: false,
+      shouldConsumePendingStep: Boolean(convo?.pendingStep),
+      candidates: []
+    }
+  }
 
   return {
-    intent: winner.intent,
-    score: winner.finalScore,
-    strong,
-    shouldOverrideFlow,
-    contextualAffirmation,
-    contextualNegation,
-    reason: winner.reason
+    ...best,
+    shouldOverrideFlow: shouldOverrideCurrentFlow(best, convo),
+    shouldConsumePendingStep: shouldConsumePendingStep(best, convo),
+    candidates
   }
 }
 
 function detectIntent(text, convo = {}, context = {}) {
   const normalizedText = normalizeIntentText(text)
-
   const category = detectCourseCategory(normalizedText)
+
   if (category) {
     return {
       intent: "course_category",
       category,
       score: 0.99,
+      priority: INTENT_PATTERNS.course_category.priority,
       strong: true,
       shouldOverrideFlow: true,
+      shouldConsumePendingStep: false,
       normalizedText,
       candidates: [{ intent: "course_category", score: 0.99, reason: `category: ${category}` }],
       contextIntent: "",
-      shouldConsumePendingStep: false,
       reason: `category: ${category}`
     }
   }
@@ -344,13 +275,15 @@ function detectIntent(text, convo = {}, context = {}) {
   const resolved = resolveBestIntent(candidates, convo)
 
   let contextIntent = ""
-  if (resolved.contextualAffirmation && convo.pendingStep === "offer_2_courses_confirmation") {
+  if (resolved.intent === "affirmation" && convo.pendingStep === "offer_2_courses_confirmation") {
     contextIntent = "confirm_offer_two_courses"
-  } else if (resolved.contextualAffirmation && ["offer_transition", "payment_intro"].includes(convo.step)) {
-    contextIntent = "advance_current_step"
-  } else if (resolved.contextualAffirmation) {
+  } else if (resolved.intent === "affirmation" && (convo.pendingStep === "enrollment_intro_confirmation" || convo.commercialStage === "enrollment" || convo.lastOfferType === "enrollment")) {
+    contextIntent = "confirm_enrollment_intro"
+  } else if (resolved.intent === "negation" && convo.pendingStep === "enrollment_intro_confirmation") {
+    contextIntent = "decline_enrollment_intro"
+  } else if (resolved.intent === "affirmation") {
     contextIntent = "affirmation_without_context"
-  } else if (resolved.contextualNegation) {
+  } else if (resolved.intent === "negation") {
     contextIntent = "negative"
   }
 
@@ -358,17 +291,21 @@ function detectIntent(text, convo = {}, context = {}) {
     ...resolved,
     normalizedText,
     candidates,
-    contextIntent,
-    shouldConsumePendingStep: Boolean(convo.pendingStep) && !resolved.shouldOverrideFlow
+    contextIntent
   }
 }
 
 module.exports = {
   INTENT_PATTERNS,
   normalizeIntentText,
+  tokenize,
+  phraseScore,
+  keywordScore,
   scoreIntent,
   getIntentCandidates,
   resolveBestIntent,
+  shouldOverrideCurrentFlow,
+  shouldConsumePendingStep,
   detectCourseCategory,
   detectIntent
 }
