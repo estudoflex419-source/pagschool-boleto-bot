@@ -1545,10 +1545,53 @@ function getMessageHash(text = "") {
   return normalizeLoose(String(text || "")).slice(0, 280)
 }
 
+function hashMessage(text = "") {
+  return getMessageHash(text)
+}
+
+function isRepeatedBotResponse(convo = {}, message = "", intent = "") {
+  const nextHash = hashMessage(message)
+  if (!nextHash) return false
+
+  const sameHash = nextHash === String(convo.lastBotMessageHash || "")
+  const sameIntent = intent && intent === String(convo.lastHandledIntent || convo.lastIntentHandled || "")
+
+  return Boolean(sameHash && sameIntent)
+}
+
+function markLastBotResponse(convo = {}, message = "", intent = "") {
+  const hash = hashMessage(message)
+  const now = new Date().toISOString()
+  const guard = convo.repeatedResponseGuard || {}
+
+  const sameAsLast = hash && hash === String(convo.lastBotMessageHash || "")
+
+  convo.lastBotMessage = String(message || "").trim()
+  convo.lastBotMessageHash = hash
+  convo.lastIntent = intent || convo.lastIntent || ""
+  convo.lastHandledIntent = intent || convo.lastHandledIntent || convo.lastIntentHandled || ""
+  convo.lastIntentHandled = convo.lastHandledIntent
+  convo.lastAssistantText = String(message || "").trim()
+
+  convo.repeatedResponseGuard = {
+    sameHashCount: sameAsLast ? Number(guard.sameHashCount || 0) + 1 : 0,
+    lastRepeatedAt: sameAsLast ? now : "",
+    lastIntent: intent || ""
+  }
+}
+
 function registerBotReply(convo = {}, responseText = "", intent = "") {
-  convo.lastBotMessageHash = getMessageHash(responseText)
-  convo.lastIntentHandled = intent || convo.lastIntentHandled || ""
-  convo.lastAssistantText = String(responseText || "").trim()
+  markLastBotResponse(convo, responseText, intent)
+}
+
+function buildNoRepeatFallback() {
+  return `Perfeito 😊
+
+Pra eu te ajudar sem ficar repetindo, me diz só qual caminho você quer agora:
+• ver mais cursos
+• valores
+• como funciona
+• matrícula`
 }
 
 function buildMoreCoursesMessage() {
@@ -1566,9 +1609,7 @@ Se quiser, me fala qual te chamou mais atenção que eu te explico melhor 👍`
 }
 
 function buildAntiLoopFallbackMessage() {
-  return `Perfeito 😊
-
-Me fala se você quer ver *mais cursos*, *valores*, *detalhes do conteúdo* ou *matrícula*, que eu sigo por esse caminho sem repetir etapa.`
+  return buildNoRepeatFallback()
 }
 
 function buildTwoCourseSuggestions(convo = {}) {
@@ -1741,6 +1782,279 @@ function hasEnrollmentIntent(text = "") {
     "vamos seguir",
     "bora fechar"
   ].some(signal => t.includes(signal))
+}
+
+function isDirectYes(text = "") {
+  const t = normalizeLoose(text)
+  return ["sim", "quero", "pode", "claro", "ok", "bora", "vamos", "essa", "esse", "a primeira", "primeira"].includes(t)
+}
+
+function isFinancialCriticalIntent(text = "") {
+  const t = normalizeLoose(text)
+  return ["segunda via", "2 via", "2a via", "boleto", "mensalidade", "fatura", "parcela em aberto"].some(term => t.includes(term))
+}
+
+
+function wantsPriceIntent(text = "") {
+  const t = normalizeLoose(text)
+  return ["quanto custa", "qual valor", "preco", "preço", "valores", "quanto fica"].some(term => t.includes(term))
+}
+
+function wantsPaymentOptionsIntent(text = "") {
+  const t = normalizeLoose(text)
+  return ["forma de pagamento", "como posso pagar", "parcelado", "no cartao", "no cartão", "no carne", "no carnê", "no pix"].some(term => t.includes(term))
+}
+
+function wantsEnrollmentIntent(text = "") {
+  const t = normalizeLoose(text)
+  return ["quero me matricular", "quero comecar", "quero começar", "como faco pra entrar", "como faço pra entrar", "quero fazer", "quero iniciar"].some(term => t.includes(term))
+}
+
+function wantsHowCourseWorksIntent(text = "") {
+  const t = normalizeLoose(text)
+  return ["como funciona", "e online", "é online", "tem prova", "como acesso", "tem suporte"].some(term => t.includes(term))
+}
+
+function wantsGoalHelpIntent(text = "") {
+  const t = normalizeLoose(text)
+  return ["quero emprego", "quero melhorar curriculo", "quero melhorar currículo", "quero comecar do zero", "quero começar do zero", "quero mudar de area", "quero mudar de área"].some(term => t.includes(term))
+}
+
+function wantsHumanAgentIntent(text = "") {
+  const t = normalizeLoose(text)
+  return ["falar com atendente", "humano", "pessoa", "atendente real"].some(term => t.includes(term))
+}
+
+function wantsStartOverIntent(text = "") {
+  const t = normalizeLoose(text)
+  return ["voltar", "comecar de novo", "começar de novo", "menu", "inicio", "início"].includes(t)
+}
+
+function wantsCompareCoursesIntent(text = "") {
+  const t = normalizeLoose(text)
+  return t.includes("comparar") && t.includes("curso")
+}
+
+function detectStrongIntent(text = "", convo = {}) {
+  if (isFinancialCriticalIntent(text) && !wantsPaymentOptionsIntent(text)) return "second_via"
+  if (wantsHumanAgentIntent(text)) return "human_agent"
+  if (wantsStartOverIntent(text)) return "start_over"
+  if (wantsMoreCourses(text)) return "more_courses"
+  if (wantsCompareCoursesIntent(text)) return "compare_courses"
+  if (sales.isCourseListIntent(text) || wantsGroupedCourseCatalog(text)) return "course_list"
+  if (wantsPriceIntent(text)) return "price"
+  if (wantsPaymentOptionsIntent(text) || wantsPaymentDetails(text)) return "payment_options"
+  if (wantsEnrollmentIntent(text) || isEnrollmentHowToIntent(text) || wantsStartNow(text)) return "enrollment"
+  if (wantsHowCourseWorksIntent(text) || isCourseFunctionalityQuestion(text)) return "how_course_works"
+  if (findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)?.name) return "specific_course"
+  if (wantsGoalHelpIntent(text) || hasZeroExperienceIntent(text)) return "goal_help"
+  return ""
+}
+
+function detectContextualIntent(text = "", convo = {}) {
+  if (isDirectYes(text) && convo.pendingStep === "offer_2_courses_confirmation") {
+    return "confirm_offer_two_courses"
+  }
+
+  if (isDirectYes(text) && ["offer_transition", "payment_intro"].includes(convo.step)) {
+    return "advance_current_step"
+  }
+
+  if (isDirectYes(text)) {
+    return "affirmation_without_context"
+  }
+
+  if (isNegativeReply(text)) {
+    return "negative"
+  }
+
+  return ""
+}
+
+function shouldOverrideCurrentFlow(intent = "", convo = {}) {
+  if (!intent) return false
+  if (intent === "second_via") return true
+  if (intent === "human_agent") return true
+  if (intent === "start_over") return true
+
+  const overrideIntents = new Set([
+    "more_courses",
+    "price",
+    "payment_options",
+    "enrollment",
+    "specific_course",
+    "how_course_works",
+    "goal_help",
+    "course_list",
+    "compare_courses"
+  ])
+
+  if (!convo.pendingStep && !convo.step) return true
+
+  return overrideIntents.has(intent)
+}
+
+function shouldConsumePendingStep(intent = "", convo = {}) {
+  if (!convo.pendingStep) return false
+  if (!intent) return true
+  return false
+}
+
+function buildCourseSuggestionMessage(convo = {}) {
+  return `Perfeito 😊
+Se você quiser, eu posso te mostrar 2 opções que costumam combinar com o que você busca.
+Pode ser?`
+}
+
+function buildPriceMessage(convo = {}, selectedCourse = null) {
+  const courseInfo = selectedCourse || findSiteCourseKnowledge(convo.course, convo.course)
+  return buildPriceAnswerMessage(convo.course, courseInfo)
+}
+
+function buildHumanizedFallback(convo = {}, text = "") {
+  if (isDirectYes(text)) {
+    return "Perfeito 😊 Eu te acompanho daqui. Você quer que eu te mostre cursos, valores ou já seguimos para matrícula?"
+  }
+
+  if (convo.course) {
+    return `Perfeito 😊 Sobre *${convo.course}*, você quer ver valores, como funciona ou já iniciar sua matrícula?`
+  }
+
+  return "Perfeito 😊 Me conta em uma frase o que você quer agora (curso, valor, pagamento ou matrícula) e eu sigo direto nisso."
+}
+
+async function handleStrongIntent(intent = "", convo = {}, text = "", phone = "") {
+  switch (intent) {
+    case "second_via":
+      convo.path = "existing_student"
+      convo.step = "existing_student_cpf"
+      convo.currentFlow = "financial"
+      clearPendingStep(convo)
+      return {
+        intent,
+        message: "Perfeito 😊 Se você já é aluno(a), me envie seu CPF para eu localizar seu cadastro e seguir com a segunda via."
+      }
+
+    case "human_agent":
+      convo.humanSupportRequested = true
+      await notifyHumanSupportRequest(convo, phone, text)
+      return {
+        intent,
+        message: buildHumanSupportMessage(convo)
+      }
+
+    case "start_over":
+      resetConversation(convo)
+      return { intent, message: buildMenuMessage() }
+
+    case "more_courses":
+      convo.path = "new_enrollment"
+      convo.step = "course_selection"
+      convo.currentFlow = "commercial"
+      clearPendingStep(convo)
+      return { intent, message: buildMoreCoursesMessage() }
+
+    case "course_list":
+      convo.path = "new_enrollment"
+      convo.step = "course_selection"
+      convo.currentFlow = "commercial"
+      clearPendingStep(convo)
+      return { intent, message: buildGroupedCourseCatalogMessage() }
+
+    case "price":
+      convo.path = "new_enrollment"
+      convo.step = "payment_intro"
+      convo.currentFlow = "commercial"
+      convo.commercialStage = "pricing"
+      return { intent, message: buildPriceMessage(convo) }
+
+    case "payment_options":
+      convo.path = "new_enrollment"
+      convo.step = "payment_choice"
+      convo.currentFlow = "commercial"
+      convo.salesLead.stage = "awaiting_payment_method"
+      return { intent, message: buildPaymentChoiceMessage() }
+
+    case "enrollment":
+      convo.path = "new_enrollment"
+      convo.step = "offer_transition"
+      convo.currentFlow = "commercial"
+      convo.salesLead.stage = "enrollment_explanation"
+      return { intent, message: buildEnrollmentHowToMessage() }
+
+    case "specific_course": {
+      const courseInfo = findSiteCourseKnowledge(text, convo.course)
+      if (!courseInfo?.title) {
+        return {
+          intent,
+          message: "Perfeito 😊 Me manda o nome do curso que você quer conhecer que eu te explico de forma objetiva."
+        }
+      }
+
+      convo.course = courseInfo.title
+      convo.selectedCourse = courseInfo.title
+      convo.path = "new_enrollment"
+      convo.step = "offer_transition"
+      convo.currentFlow = "commercial"
+      clearPendingStep(convo)
+
+      return { intent, message: buildEnhancedCoursePresentation(courseInfo.title, courseInfo) }
+    }
+
+    case "how_course_works":
+      if (convo.course) {
+        return { intent, message: buildCourseFunctionalityMessage(convo.course) }
+      }
+      return {
+        intent,
+        message: "Perfeito 😊 Me fala qual curso você quer entender e eu te explico como funciona, acesso e suporte."
+      }
+
+    case "goal_help":
+      convo.path = "new_enrollment"
+      convo.step = "course_selection"
+      convo.currentFlow = "commercial"
+      setPendingStep(convo, "offer_2_courses_confirmation", { source: "goal_help" })
+      return {
+        intent,
+        message: buildCourseSuggestionMessage(convo)
+      }
+
+    case "compare_courses":
+      return {
+        intent,
+        message: "Perfeito 😊 Posso comparar pra você sim. Me fala os 2 cursos que você quer comparar."
+      }
+
+    default:
+      return null
+  }
+}
+
+function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "") {
+  if (convo.pendingStep !== "offer_2_courses_confirmation") return null
+
+  if (contextualIntent === "confirm_offer_two_courses") {
+    clearPendingStep(convo)
+    return {
+      intent: "pending_offer_two_courses",
+      message: buildTwoCourseRecommendationMessage(convo)
+    }
+  }
+
+  if (contextualIntent === "negative") {
+    clearPendingStep(convo)
+    convo.commercialStage = "discovery"
+    return {
+      intent: "pending_offer_two_courses_declined",
+      message: "Sem problema 😊 Me fala só uma área que você curte mais (saúde, administrativo, beleza ou tecnologia) e eu te indico algo certeiro."
+    }
+  }
+
+  return {
+    intent: "pending_offer_two_courses_reminder",
+    message: "Se você quiser, eu te mostro agora 2 cursos que combinam com o que você busca."
+  }
 }
 
 function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
@@ -2896,6 +3210,23 @@ async function processMessage(phone, text) {
 
     updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion)
 
+    convo.lastUserMessageHash = hashMessage(text)
+
+    const strongIntent = detectStrongIntent(text, convo)
+    const contextualIntent = detectContextualIntent(text, convo)
+
+    if (shouldOverrideCurrentFlow(strongIntent, convo)) {
+      const strongHandled = await handleStrongIntent(strongIntent, convo, text, phone)
+
+      if (strongHandled?.message) {
+        if (isRepeatedBotResponse(convo, strongHandled.message, strongHandled.intent)) {
+          return replyWithState(buildNoRepeatFallback(), {}, "anti_loop_redirect")
+        }
+
+        return replyWithState(strongHandled.message, strongHandled.extra || {}, strongHandled.intent)
+      }
+    }
+
     const wantsPrice = isPriceQuestion || wantsPaymentDetails(text)
     const wantsCourseInfo = isCourseDetailsQuestion(text) || isCourseFunctionalityQuestion(text)
     const wantsToEnroll = isEnrollmentHowToIntent(text) || wantsStartNow(cleanText)
@@ -2948,12 +3279,6 @@ async function processMessage(phone, text) {
         convo.step = "offer_transition"
         return replyWithState(buildEnrollmentHowToMessage(), {}, "wants_to_enroll")
       }
-    }
-
-    if (wantsHumanSupport(text)) {
-      convo.humanSupportRequested = true
-      await notifyHumanSupportRequest(convo, phone, text)
-      return replyWithState(buildHumanSupportMessage(convo), {}, "wants_human_support")
     }
 
     const currentStage = convo.salesLead.stage || ""
@@ -3169,18 +3494,10 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       return reply(buildMenuMessage())
     }
 
-    if (convo.pendingStep === "offer_2_courses_confirmation") {
-      if (sales.isAffirmative(text) || isSimplePositive(cleanText)) {
-        const response = buildTwoCourseRecommendationMessage(convo)
-        return reply(response)
-      }
-
-      if (isNegativeReply(text)) {
-        clearPendingStep(convo)
-        convo.commercialStage = "discovery"
-        const response = "Sem problema 😊 Me fala só uma área que você curte mais (saúde, administrativo, beleza ou tecnologia) e eu te indico algo certeiro."
-        markCommercialReply(convo, "ask_area_after_decline", response)
-        return reply(response)
+    if (shouldConsumePendingStep(strongIntent, convo)) {
+      const pendingHandled = handlePendingCommercialStep(convo, text, contextualIntent)
+      if (pendingHandled?.message) {
+        return replyWithState(pendingHandled.message, {}, pendingHandled.intent)
       }
     }
 
@@ -3890,12 +4207,20 @@ ${nextData.prompt}`)
       return reply(buildPostSaleReply(text, convo))
     }
 
-    const aiReply = await fallbackAI(text, convo, "resposta_geral")
-    if (aiReply) {
-      return reply(aiReply)
+    const humanizedFallback = buildHumanizedFallback(convo, text)
+    if (humanizedFallback) {
+      if (isRepeatedBotResponse(convo, humanizedFallback, "humanized_fallback")) {
+        return replyWithState(buildNoRepeatFallback(), {}, "anti_loop_fallback")
+      }
+      return replyWithState(humanizedFallback, {}, "humanized_fallback")
     }
 
-    return reply(buildMenuMessage())
+    const aiReply = await fallbackAI(text, convo, "resposta_geral")
+    if (aiReply) {
+      return replyWithState(aiReply, {}, "ai_fallback")
+    }
+
+    return replyWithState(buildMenuMessage(), {}, "menu_fallback")
   } catch (error) {
     console.error("Erro no processamento da mensagem:", error)
     return reply("Tive um pequeno problema aqui. Pode me enviar novamente sua mensagem?")
