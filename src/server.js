@@ -577,13 +577,15 @@ function getPaymentPlan(_courseName = "") {
 function buildPaymentSummaryLine() {
   const carne = PAYMENT_OPTIONS.carne
   const cartao = PAYMENT_OPTIONS.cartao
-  const pix = PAYMENT_OPTIONS.pix
 
   return [
-    `- 📘 *Carnê:* ${carne.installments}x de ${formatMoneyBR(carne.installmentValue)} (total ${formatMoneyBR(carne.total)})`,
-    `- 💳 *Cartão:* ${cartao.installments}x de ${formatMoneyBR(cartao.installmentValue)} (total ${formatMoneyBR(cartao.total)})`,
-    `- 💵 *À vista / Pix:* ${formatMoneyBR(pix.total)}`
+    `💳 *Cartão:* ${cartao.installments}x de ${formatMoneyBR(cartao.installmentValue)}`,
+    `📘 *Carnê:* ${carne.installments}x de ${formatMoneyBR(carne.installmentValue)}`
   ].join("\n")
+}
+
+function buildPixSoftMention() {
+  return "Se preferir, também posso te explicar a opção à vista no Pix."
 }
 
 function wantsHumanSupport(text = "") {
@@ -724,23 +726,25 @@ Assim a equipe já pega seu caso com mais contexto.`
 function buildPaymentIntroMessage() {
   return `Perfeito 😊
 
-Aqui o investimento é na *taxa de material didático + acesso à plataforma*.
-
-Se quiser, eu já te passo os valores certinhos e te ajudo a escolher a forma que fica mais leve.`
-}
-
-function buildPaymentChoiceMessage() {
-  return `Perfeito 😊
-
-Hoje o investimento do material didático + acesso funciona assim:
+Pra você já ter uma noção, a forma mais leve de começar costuma ficar assim:
 
 ${buildPaymentSummaryLine()}
 
-Se você quiser, eu te digo rapidinho qual costuma combinar melhor com seu momento.
+${buildPixSoftMention()}
 
-1 - Carnê
-2 - Cartão
-3 - À vista / Pix`
+Se você quiser, eu te ajudo a escolher a opção que melhor encaixa no seu momento.`
+}
+
+function buildPaymentChoiceMessage() {
+  return `Perfeito, ótima pergunta 😊
+
+Pra quem quer começar de um jeito leve, normalmente essas duas opções são as mais escolhidas:
+
+${buildPaymentSummaryLine()}
+
+${buildPixSoftMention()}
+
+Se você quiser, eu te oriento agora qual costuma fazer mais sentido no seu caso.`
 }
 
 function buildPaymentMethodReply(method) {
@@ -750,58 +754,48 @@ function buildPaymentMethodReply(method) {
   if (method === "pix") {
     return `Perfeito 😊
 
-No *${option.label}*, a taxa do material didático fica em:
+Se você preferir pagar à vista, no *Pix* fica em:
 
 *${formatMoneyBR(option.total)}*
-
-Essa é a opção com o *menor valor total*.
 
 Se você preferir, já pode pagar agora no Pix:
 *Chave (CNPJ):* ${PIX_RECEIVER.key}
 *Nome:* ${PIX_RECEIVER.name}
 
-Se hoje não der para pagar, eu te peço os dados e já organizo um *boleto único para o próximo mês* na data que você escolher.`
+Se hoje não der para pagar, eu te peço os dados e já organizo um *carnê único para o próximo mês* na data que você escolher.`
   }
 
   if (method === "cartao") {
     return `Perfeito 😊
 
-No *${option.label}*, a taxa do material didático fica em:
+No *${option.label}*, costuma ficar assim:
 
-*${option.installments} vezes de ${formatMoneyBR(option.installmentValue)}*
-Total: *${formatMoneyBR(option.total)}*
+*${option.installments}x de ${formatMoneyBR(option.installmentValue)}*
 
-Essa costuma ser uma boa opção para quem quer *parcela menor*.
+É uma opção que muita gente escolhe quando quer manter a parcela mais leve.
 
-Se quiser, já posso te explicar agora como funciona a inscrição.`
+Se fizer sentido pra você, eu já te explico rapidinho como funciona a matrícula.`
   }
 
   return `Perfeito 😊
 
-No *${option.label}*, a taxa do material didático fica em:
+No *${option.label}*, costuma ficar assim:
 
-*${option.installments} vezes de ${formatMoneyBR(option.installmentValue)}*
-Total: *${formatMoneyBR(option.total)}*
+*${option.installments}x de ${formatMoneyBR(option.installmentValue)}*
 
-Se quiser, já posso te explicar agora como funciona a inscrição.`
+Se fizer sentido pra você, eu já te explico rapidinho como funciona a matrícula.`
 }
 
 function buildPaymentHelpMessage() {
-  return `Claro 😊
+  return `Faz sentido ter essa dúvida 😊
 
-Hoje funciona assim para a taxa do material didático:
+Se a ideia for começar de um jeito mais leve, vale escolher a opção que fica mais confortável no mês.
 
 ${buildPaymentSummaryLine()}
 
-De forma simples:
-- *Pix* → menor valor total
-- *Cartão* → parcelamento com parcela menor
-- *Carnê* → opção para quem prefere seguir no formato carnê
+${buildPixSoftMention()}
 
-Se quiser, me responde só com:
-1 - Carnê
-2 - Cartão
-3 - Pix`
+Se você quiser, eu te ajudo a decidir isso rapidinho e já seguimos para matrícula.`
 }
 
 function buildEnrollmentHowToMessage() {
@@ -1358,9 +1352,9 @@ que eu sigo com você na opção para o próximo mês.`
 function buildDeferredBoletoAskAmountMessage(dueDateBR) {
   return `Sem problema 😊
 
-Eu posso deixar um *boleto para o próximo mês*.
+Eu posso deixar um *carnê único para o próximo mês*.
 
-Me fala o *valor que você quer colocar* nesse boleto.
+Me fala o *valor que você quer colocar* nesse carnê.
 
 Exemplo:
 *95*
@@ -1373,7 +1367,7 @@ Vencimento previsto: *${dueDateBR}*`
 function buildDeferredBoletoAskDueDayMessage() {
   return `Sem problema 😊
 
-Se hoje não der para pagar no Pix, eu organizo um *boleto único para o próximo mês* para você.
+Se hoje não der para pagar no Pix, eu organizo um *carnê único para o próximo mês* para você.
 
 Me diga o dia de vencimento que prefere (entre 1 e 28).
 Exemplos: *5*, *10*, *15* ou *20*.
@@ -1386,7 +1380,7 @@ function buildDeferredBoletoCreatedMessage(amount, dueDateBR, result = {}) {
 
   lines.push("Perfeito 😊")
   lines.push("")
-  lines.push("Seu boleto foi organizado para o próximo mês.")
+  lines.push("Seu carnê único foi organizado para o próximo mês.")
   lines.push("")
   lines.push(`*Valor:* ${formatMoneyBR(amount)}`)
   lines.push(`*Vencimento:* ${dueDateBR}`)
@@ -1399,7 +1393,7 @@ function buildDeferredBoletoCreatedMessage(amount, dueDateBR, result = {}) {
 
   if (result?.pdfUrl) {
     lines.push("")
-    lines.push("*Link do boleto:*")
+    lines.push("*Link do carnê:*")
     lines.push(String(result.pdfUrl))
   }
 
@@ -2344,27 +2338,21 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
   const parts = []
 
-  parts.push(`Perfeito 😊 *${displayName}* pode ser uma boa opção para o seu momento.`)
+  parts.push(`Ótima escolha 😊 *${displayName}* costuma ser uma opção bem interessante para quem quer evoluir com foco prático.`)
 
   if (normalizedCourseInfo?.summary) {
     parts.push(String(normalizedCourseInfo.summary).trim().replace(/\.$/, "") + ".")
   }
 
-  if (normalizedCourseInfo?.workload) {
-    const durationPart = normalizedCourseInfo.duration ? ` e duração média de *${normalizedCourseInfo.duration}*` : ""
-    parts.push(`A carga horária informada é de *${normalizedCourseInfo.workload}*${durationPart}.`)
+  if (normalizedCourseInfo?.learns?.length || normalizedCourseInfo?.market) {
+    const benefitLine = normalizedCourseInfo?.market
+      ? `Isso costuma ajudar bastante quem quer buscar oportunidade em ${normalizedCourseInfo.market}.`
+      : "Isso costuma ajudar bastante quem quer ganhar base real para entrar melhor no mercado."
+    parts.push(benefitLine)
   }
 
-  if (normalizedCourseInfo?.learns?.length) {
-    parts.push(`No conteúdo você vai ver, por exemplo: ${normalizedCourseInfo.learns.slice(0, 6).join(", ")}.`)
-  }
-
-  if (normalizedCourseInfo?.market) {
-    parts.push(`Mercado de trabalho: ${normalizedCourseInfo.market}.`)
-  }
-
-  parts.push("Vantagens: curso EAD, certificado e flexibilidade para estudar no seu ritmo.")
-  parts.push("Se quiser, eu posso te mostrar todos os detalhes completos desse curso ou te ajudar a ver os valores.")
+  parts.push("E mesmo quem está começando do zero geralmente consegue acompanhar bem, porque a proposta é prática e organizada.")
+  parts.push("Se você quiser, eu já posso te mostrar como ficam as parcelas para começar ou te explico primeiro como funciona a matrícula.")
 
   return parts.join("\n\n")
 }
@@ -2435,11 +2423,10 @@ function buildCourseDetailFollowUpMessage(text = "", courseInfo = null) {
 
   lines.push("")
   lines.push("Se fizer sentido para você, já te levo para o fechamento agora.")
-  lines.push(`Taxa do material didático: ${buildPaymentSummaryLine()}`)
-  lines.push("Para avançar, me responde com:")
-  lines.push("1 - PIX")
-  lines.push("2 - carnê")
-  lines.push("3 - cartão")
+  lines.push("Para você já visualizar, as parcelas para começar hoje são:")
+  lines.push(buildPaymentSummaryLine())
+  lines.push(buildPixSoftMention())
+  lines.push("Se quiser, eu te ajudo a escolher a melhor e já seguimos para matrícula.")
 
   return lines.join("\n")
 }
@@ -2458,7 +2445,7 @@ function buildConsultativeOfferTransition(convo = {}) {
   parts.push(`Perfeito 😊 ${prefix}pelo que você me contou, *${courseName}* faz sentido para o seu momento.`)
 
   if (goal) {
-    parts.push(`Ele pode te ajudar principalmente em: *${goal}*.`)
+    parts.push(`Pelo seu objetivo de *${goal}*, ele tende a te ajudar bastante.`)
   }
 
   if (experience) {
@@ -2481,10 +2468,7 @@ function buildConsultativeOfferTransition(convo = {}) {
     parts.push(`A carga horária informada é de ${courseInfo.workload}${duration}.`)
   }
 
-  parts.push(`Se você quiser, agora eu posso seguir de 3 formas:
-1 - te mostrar os valores
-2 - te explicar melhor o que você vai aprender
-3 - já te orientar para começar a matrícula`)
+  parts.push("Se fizer sentido pra você, eu já posso te mostrar as parcelas e te orientar no próximo passo da matrícula.")
 
   return parts.join("\n\n")
 }
@@ -2496,12 +2480,14 @@ function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {
 
   return `Ótima pergunta 😊
 
-Hoje o investimento do material didático + acesso à plataforma é:
+Hoje a forma mais leve de começar costuma ficar assim:
 ${buildPaymentSummaryLine()}
+
+${buildPixSoftMention()}
 
 ${courseSummary}
 
-Se quiser, eu já te indico a forma que costuma ficar melhor pra você ou já inicio sua matrícula agora.`
+Se você quiser, eu te ajudo a escolher a melhor opção e já deixo sua matrícula encaminhada.`
 }
 
 function buildPixMessage() {
@@ -2558,7 +2544,7 @@ Se quiser, eu sigo com você por aqui.`
     if (convo.payment === "Boleto a vista") {
       return `Perfeito 😊
 
-Assim que o pagamento do boleto único for confirmado, a equipe segue com a liberação do seu acesso à plataforma.
+Assim que o pagamento do carnê único for confirmado, a equipe segue com a liberação do seu acesso à plataforma.
 
 Se você já pagou, pode me enviar o comprovante por aqui.`
     }
@@ -2997,7 +2983,7 @@ async function finalizeDeferredBoletoEnrollment(convo, sourcePhone = "") {
     convo.step = nextData.step
     return reply(`Perfeito 😊
 
-Para emitir seu *boleto único*, preciso concluir alguns dados de cadastro.
+Para emitir seu *carnê único*, preciso concluir alguns dados de cadastro.
 
 ${nextData.prompt}`)
   }
@@ -3036,7 +3022,7 @@ ${nextData.prompt}`)
 
     return reply(`Perfeito 😊
 
-Tive uma instabilidade para emitir o *boleto único* automaticamente agora, mas seus dados já ficaram registrados.
+Tive uma instabilidade para emitir o *carnê único* automaticamente agora, mas seus dados já ficaram registrados.
 Nossa equipe vai acompanhar e concluir a emissão com prioridade.`)
   }
 
@@ -3050,9 +3036,9 @@ Nossa equipe vai acompanhar e concluir a emissão com prioridade.`)
   await notifyInternalLead(convo, sourcePhone, { force: true })
 
   if (created?.error) {
-    const friendlyIssue = humanizeEnrollmentIssue(created.error, "boleto único")
+    const friendlyIssue = humanizeEnrollmentIssue(created.error, "carnê único")
 
-    return reply(`Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do *boleto único*.
+    return reply(`Consegui avançar com parte do cadastro, mas encontrei um detalhe na integração do *carnê único*.
 
 Motivo: ${friendlyIssue}
 
@@ -3062,7 +3048,7 @@ Se quiser, eu já deixo sua solicitação registrada e seguimos o ajuste final d
   if (created?.carnePendente || !created?.secondVia?.parcela) {
     return reply(`Perfeito 😊
 
-Sua matrícula foi criada, mas o *boleto único* ainda está sendo processado pela plataforma.
+Sua matrícula foi criada, mas o *carnê único* ainda está sendo processado pela plataforma.
 Assim que a emissão for concluída, a equipe poderá seguir com o envio.`)
   }
 
@@ -3076,7 +3062,7 @@ ${buildSecondViaText(created.secondVia)}`,
       documentBuffer: pdfPayload?.buffer || null,
       filename: pdfPayload?.filename || "boleto.pdf",
       mimeType: pdfPayload?.mimeType || "application/pdf",
-      caption: "Segue o PDF do seu boleto único."
+      caption: "Segue o PDF do seu carnê único."
     }
   )
 }
@@ -3212,9 +3198,7 @@ async function continueFromSelectedPayment(convo, phone, payment) {
     if (needsCourse) {
       convo.step = "collecting_pix_course"
       return reply(`Perfeito 😊 Vamos seguir na opção PIX à vista.
-Valor: ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}.
-
-Essa é a opção com *menor valor total*.
+Valor à vista no Pix: ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}.
 
 Para finalizar no PIX, eu preciso só destes dados:
 - Curso
@@ -3227,7 +3211,7 @@ Me envie o nome do curso, por favor.`)
     if (!String(convo.name || "").trim()) {
       convo.step = "collecting_name"
       return reply(`Perfeito 😊 Vamos seguir na opção PIX à vista.
-Valor: ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}.
+Valor à vista no Pix: ${formatMoneyBR(DEFAULT_PIX_CASH_VALUE)}.
 
 Me envie seu nome completo, por favor.`)
     }
@@ -3248,7 +3232,7 @@ Me envie seu nome completo, por favor.`)
       convo.step = nextData.step
       return reply(`Perfeito 😊 Vamos seguir na opção cartão.
 
-Essa costuma ser uma boa opção para quem quer *parcela menor*.
+Normalmente essa opção fica com parcela mais leve.
 
 Para deixar tudo encaminhado, preciso de alguns dados de cadastro.
 
@@ -3473,7 +3457,7 @@ Depois me envie o comprovante por aqui.`)
       const preferredDay = detectPreferredFutureDay(text)
 
       if (!preferredDay) {
-        return reply("Sem problema 😊 Me diz só um dia entre 1 e 28 para o vencimento do boleto único do próximo mês.")
+        return reply("Sem problema 😊 Me diz só um dia entre 1 e 28 para o vencimento do carnê único do próximo mês.")
       }
 
       const dueDateBR = getNextMonthDueDateBR(preferredDay)
@@ -3490,7 +3474,7 @@ Depois me envie o comprovante por aqui.`)
       if (!desiredAmount) {
         return reply(`Sem problema 😊
 
-Me fala só o valor que você quer colocar no boleto do próximo mês.
+Me fala só o valor que você quer colocar no carnê do próximo mês.
 
 Exemplo:
 *95*
@@ -3521,7 +3505,7 @@ ou
 
       return reply(`Perfeito 😊
 
-Anotei aqui um *boleto único para o próximo mês* no valor de *${formatMoneyBR(desiredAmount)}*, com vencimento em *${dueDateBR}*.
+Anotei aqui um *carnê único para o próximo mês* no valor de *${formatMoneyBR(desiredAmount)}*, com vencimento em *${dueDateBR}*.
 
 Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     }
@@ -3945,7 +3929,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.paymentTeaserShown = false
         ensureSalesLead(convo)
         convo.salesLead.stage = "payment_intro"
-        return reply("Perfeito 😊 então vamos avançar. Posso te passar os valores agora e já te orientar na matrícula.")
+        return reply("Perfeito 😊 Que bom que você curtiu. Eu já te mostro as opções mais leves e te acompanho no próximo passo da matrícula.")
       }
 
       if (isPriceQuestion) {
@@ -4068,7 +4052,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         return reply(`Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Para eu gerar seu *boleto único*, me confirme primeiro o curso que você quer fazer.`)
+Para eu gerar seu *carnê único*, me confirme primeiro o curso que você quer fazer.`)
       }
 
       const nextData = getNextEnrollmentDataPrompt(convo)
@@ -4082,7 +4066,7 @@ Para eu gerar seu *boleto único*, me confirme primeiro o curso que você quer f
       return reply(`Perfeito 😊
 Dia ${preferredDay} ficou combinado para o próximo mês.
 
-Agora vou só pegar seus dados para gerar o *boleto único*.
+Agora vou só pegar seus dados para gerar o *carnê único*.
 
 ${nextData.prompt}`)
     }
@@ -4109,7 +4093,7 @@ ${nextData.prompt}`)
         buildFallbackCourseInfoByName(text)
 
       if (!boletoCourseInfo?.title) {
-        return reply("Perfeito 😊 Para emitir seu *boleto único*, me informe o nome do curso.")
+        return reply("Perfeito 😊 Para emitir seu *carnê único*, me informe o nome do curso.")
       }
 
       convo.course = boletoCourseInfo.title
@@ -4137,7 +4121,7 @@ ${nextData.prompt}`)
       }
 
       if (convo.payment === "Boleto a vista") {
-        return reply("Perfeito 😊 Agora me envie seu CPF com 11 números para concluir o *boleto único*.")
+        return reply("Perfeito 😊 Agora me envie seu CPF com 11 números para concluir o *carnê único*.")
       }
 
       return reply(sales.askCPF())
