@@ -1,6 +1,9 @@
 ﻿"use strict";
 
 const express = require("express");
+const crypto = require("crypto");
+
+const INBOUND_DEDUP_WINDOW_MS = 15000;
 
 function normalizeDocumentBuffer(input) {
   if (!input) return null;
@@ -32,6 +35,22 @@ function normalizeOutgoingTexts(response = {}) {
   return [text];
 }
 
+function buildInboundFingerprint(event = {}) {
+  const phone = String(event?.from || "").trim();
+  const type = String(event?.type || "").trim();
+  const text = String(event?.text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!phone || (!text && !type)) return "";
+
+  const raw = `${phone}|${type}|${text}`;
+  return crypto.createHash("sha1").update(raw).digest("hex");
+}
+
 function createMetaRoutes({
   verifyToken,
   processMessage,
@@ -42,6 +61,28 @@ function createMetaRoutes({
   normalizePhone = (value) => String(value || ""),
 }) {
   const router = express.Router();
+  const recentInboundEvents = new Map();
+
+  function isRecentDuplicateEvent(event = {}) {
+    const fingerprint = buildInboundFingerprint(event);
+    if (!fingerprint) return false;
+
+    const now = Date.now();
+    const lastSeenAt = recentInboundEvents.get(fingerprint) || 0;
+
+    for (const [key, seenAt] of recentInboundEvents.entries()) {
+      if (now - seenAt > INBOUND_DEDUP_WINDOW_MS) {
+        recentInboundEvents.delete(key);
+      }
+    }
+
+    if (lastSeenAt && now - lastSeenAt <= INBOUND_DEDUP_WINDOW_MS) {
+      return true;
+    }
+
+    recentInboundEvents.set(fingerprint, now);
+    return false;
+  }
 
   router.get("/meta/webhook", (req, res) => {
     try {
@@ -69,6 +110,10 @@ function createMetaRoutes({
       }
 
       for (const event of events) {
+        if (isRecentDuplicateEvent(event)) {
+          continue;
+        }
+
         const messageId = String(event.id || "").trim();
 
         if (messageId && processedMessageStore?.reserve) {
