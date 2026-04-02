@@ -151,7 +151,7 @@ function getContextBoost(intent, convo = {}, normalizedText = "") {
   let boost = 0
 
   if (intent === "affirmation" && convo?.pendingStep) boost += 0.25
-  if (intent === "more_courses" && (convo?.lastOfferType === "course_suggestion" || convo?.commercialStage === "recommendation")) boost += 0.18
+  if (intent === "more_courses" && (convo?.lastOfferType === "course_suggestion" || convo?.commercialStage === "catalog_redirect")) boost += 0.18
   if (intent === "price" && (convo?.selectedCourse || convo?.course)) boost += 0.12
   if (intent === "payment_options" && convo?.priceShown) boost += 0.1
   if (intent === "enrollment" && (convo?.selectedCourse || convo?.priceShown || convo?.enrollmentIntent)) boost += 0.12
@@ -275,9 +275,7 @@ function detectIntent(text, convo = {}, context = {}) {
   const resolved = resolveBestIntent(candidates, convo)
 
   let contextIntent = ""
-  if (resolved.intent === "affirmation" && convo.pendingStep === "offer_2_courses_confirmation") {
-    contextIntent = "confirm_offer_two_courses"
-  } else if (resolved.intent === "affirmation" && (convo.pendingStep === "enrollment_intro_confirmation" || convo.commercialStage === "enrollment" || convo.lastOfferType === "enrollment")) {
+  if (resolved.intent === "affirmation" && (convo.pendingStep === "enrollment_intro_confirmation" || convo.commercialStage === "enrollment" || convo.lastOfferType === "enrollment")) {
     contextIntent = "confirm_enrollment_intro"
   } else if (resolved.intent === "negation" && convo.pendingStep === "enrollment_intro_confirmation") {
     contextIntent = "decline_enrollment_intro"
