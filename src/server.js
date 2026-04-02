@@ -468,6 +468,28 @@ function wantsGroupedCourseCatalog(text = "") {
   ].some(term => t.includes(term))
 }
 
+function wantsMoreCourses(text = "") {
+  const t = normalizeLoose(text)
+
+  return [
+    "tem mais cursos",
+    "tem mais curso",
+    "quais outros cursos",
+    "quais outros tem",
+    "tem mais opcoes",
+    "tem mais opções",
+    "quero ver mais cursos",
+    "quero ver mais opcoes",
+    "quero ver mais opções",
+    "me mostra mais",
+    "me mostre mais",
+    "tem outros",
+    "mais cursos",
+    "mais opcoes",
+    "mais opções"
+  ].some(term => t.includes(term))
+}
+
 function getPaymentOption(key = "") {
   return PAYMENT_OPTIONS[key] || null
 }
@@ -1517,6 +1539,36 @@ function clearPendingStep(convo = {}) {
 function markCommercialReply(convo = {}, action = "", responseText = "") {
   convo.lastBotAction = action || ""
   convo.lastCommercialResponseHash = normalizeLoose(String(responseText || "")).slice(0, 280)
+}
+
+function getMessageHash(text = "") {
+  return normalizeLoose(String(text || "")).slice(0, 280)
+}
+
+function registerBotReply(convo = {}, responseText = "", intent = "") {
+  convo.lastBotMessageHash = getMessageHash(responseText)
+  convo.lastIntentHandled = intent || convo.lastIntentHandled || ""
+  convo.lastAssistantText = String(responseText || "").trim()
+}
+
+function buildMoreCoursesMessage() {
+  return `Tem sim 😊
+
+Olha algumas outras opções que costumam chamar bastante atenção:
+
+• Atendente de Farmácia
+• Auxiliar Administrativo
+• Informática
+• Recepcionista Hospitalar
+• Psicologia Básica
+
+Se quiser, me fala qual te chamou mais atenção que eu te explico melhor 👍`
+}
+
+function buildAntiLoopFallbackMessage() {
+  return `Perfeito 😊
+
+Me fala se você quer ver *mais cursos*, *valores*, *detalhes do conteúdo* ou *matrícula*, que eu sigo por esse caminho sem repetir etapa.`
 }
 
 function buildTwoCourseSuggestions(convo = {}) {
@@ -2813,6 +2865,24 @@ async function processMessage(phone, text) {
   try {
     const convo = getConversation(phone)
     const cleanText = normalizeFlowText(text || "")
+    const replyWithState = (responseText, extra = {}, intent = "") => {
+      let finalText = String(responseText || "").trim()
+      const incomingIntent = String(intent || "").trim()
+      const incomingHash = getMessageHash(finalText)
+
+      if (
+        finalText &&
+        incomingHash &&
+        incomingHash === String(convo.lastBotMessageHash || "").trim() &&
+        incomingIntent &&
+        incomingIntent === String(convo.lastIntentHandled || "").trim()
+      ) {
+        finalText = buildAntiLoopFallbackMessage()
+      }
+
+      registerBotReply(convo, finalText, incomingIntent)
+      return reply(finalText, extra)
+    }
 
     ensureSalesLead(convo)
     const matchedKnowledgeCourse = findCourseInText(text)
@@ -2826,10 +2896,64 @@ async function processMessage(phone, text) {
 
     updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion)
 
+    const wantsPrice = isPriceQuestion || wantsPaymentDetails(text)
+    const wantsCourseInfo = isCourseDetailsQuestion(text) || isCourseFunctionalityQuestion(text)
+    const wantsToEnroll = isEnrollmentHowToIntent(text) || wantsStartNow(cleanText)
+    const hasPriorityIntent = wantsMoreCourses(text) || wantsPrice || wantsCourseInfo || wantsToEnroll
+
+    if (hasPriorityIntent) {
+      clearPendingStep(convo)
+      convo.salesLead.stage = ""
+      convo.commercialStage = "discovery"
+
+      if (wantsMoreCourses(text)) {
+        convo.path = "new_enrollment"
+        convo.step = "course_selection"
+        return replyWithState(buildMoreCoursesMessage(), {}, "wants_more_courses")
+      }
+
+      if (wantsPrice) {
+        convo.path = "new_enrollment"
+        convo.step = "payment_intro"
+        return replyWithState(
+          buildPriceAnswerMessage(convo.course, courseInfoFromText),
+          {},
+          "wants_price"
+        )
+      }
+
+      if (wantsCourseInfo) {
+        if (!convo.course && !courseInfoFromText) {
+          return replyWithState(
+            "Perfeito 😊 Me manda o nome do curso que você quer entender melhor, que eu te explico conteúdo, duração e mercado.",
+            {},
+            "wants_course_info"
+          )
+        }
+
+        const courseInfo =
+          courseInfoFromText ||
+          findSiteCourseKnowledge(text, convo.course) ||
+          buildFallbackCourseInfoByName(convo.course)
+
+        if (courseInfo) {
+          convo.course = courseInfo.title || convo.course
+          convo.step = "offer_transition"
+          return replyWithState(buildFullCourseDetailsMessage(courseInfo), {}, "wants_course_info")
+        }
+      }
+
+      if (wantsToEnroll) {
+        convo.path = "new_enrollment"
+        convo.step = "offer_transition"
+        return replyWithState(buildEnrollmentHowToMessage(), {}, "wants_to_enroll")
+      }
+    }
+
     if (wantsHumanSupport(text)) {
       convo.humanSupportRequested = true
       await notifyHumanSupportRequest(convo, phone, text)
-      return reply(buildHumanSupportMessage(convo))
+      return replyWithState(buildHumanSupportMessage(convo), {}, "wants_human_support")
     }
 
     const currentStage = convo.salesLead.stage || ""
