@@ -12,7 +12,8 @@ const OVERRIDE_INTENTS = new Set([
   "human_agent",
   "start_over",
   "course_list",
-  "compare_courses"
+  "compare_courses",
+  "course_category"
 ])
 
 const HIGH_PRIORITY_INTENTS = Object.freeze({
@@ -26,11 +27,33 @@ const HIGH_PRIORITY_INTENTS = Object.freeze({
   specific_course: 0.72,
   how_course_works: 0.7,
   goal_help: 0.68,
+  course_category: 0.84,
   compare_courses: 0.66,
   course_list: 0.64,
   affirmation: 0.3,
   negation: 0.32
 })
+
+
+function detectCourseCategory(text = "") {
+  const t = normalizeIntentText(text)
+
+  if (!t) return ""
+
+  if (/\b(saude|enfermagem|farmacia|hospital|clinica|odontologia|nutricao|socorrista|agente de saude|analises clinicas)\b/.test(t)) {
+    return "saude"
+  }
+
+  if (/\b(administrativo|administracao|assistente administrativo|auxiliar administrativo|recursos humanos|rh|contabilidade|operador de caixa)\b/.test(t)) {
+    return "administrativo"
+  }
+
+  if (/\b(informatica|tecnologia|marketing digital|robotica|designer grafico|internet|digital)\b/.test(t)) {
+    return "tecnologia"
+  }
+
+  return ""
+}
 
 const INTENT_PATTERNS = Object.freeze({
   second_via: {
@@ -300,6 +323,23 @@ function resolveBestIntent(candidates = [], convo = {}) {
 
 function detectIntent(text, convo = {}, context = {}) {
   const normalizedText = normalizeIntentText(text)
+
+  const category = detectCourseCategory(normalizedText)
+  if (category) {
+    return {
+      intent: "course_category",
+      category,
+      score: 0.99,
+      strong: true,
+      shouldOverrideFlow: true,
+      normalizedText,
+      candidates: [{ intent: "course_category", score: 0.99, reason: `category: ${category}` }],
+      contextIntent: "",
+      shouldConsumePendingStep: false,
+      reason: `category: ${category}`
+    }
+  }
+
   const candidates = getIntentCandidates(normalizedText, convo, context)
   const resolved = resolveBestIntent(candidates, convo)
 
@@ -329,5 +369,6 @@ module.exports = {
   scoreIntent,
   getIntentCandidates,
   resolveBestIntent,
+  detectCourseCategory,
   detectIntent
 }
