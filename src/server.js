@@ -653,6 +653,21 @@ function isSimplePositive(text = "") {
   )
 }
 
+function isNegativeReply(text = "") {
+  const t = normalizeFlowText(text)
+
+  return (
+    t === "nao" ||
+    t === "não" ||
+    t === "agora nao" ||
+    t === "agora não" ||
+    t === "depois" ||
+    t === "depois eu vejo" ||
+    t === "nao quero" ||
+    t === "não quero"
+  )
+}
+
 function buildHumanSupportMessage(convo = {}) {
   const prefix = buildHumanPrefix(convo)
 
@@ -1487,6 +1502,85 @@ function isLowContextReply(text = "") {
   return lowSignals.has(t)
 }
 
+function setPendingStep(convo = {}, step = "", context = null) {
+  convo.pendingStep = step || ""
+  convo.pendingStepSince = step ? new Date().toISOString() : ""
+  convo.pendingStepContext = context || null
+}
+
+function clearPendingStep(convo = {}) {
+  convo.pendingStep = ""
+  convo.pendingStepSince = ""
+  convo.pendingStepContext = null
+}
+
+function markCommercialReply(convo = {}, action = "", responseText = "") {
+  convo.lastBotAction = action || ""
+  convo.lastCommercialResponseHash = normalizeLoose(String(responseText || "")).slice(0, 280)
+}
+
+function buildTwoCourseSuggestions(convo = {}) {
+  const catalog = ACTIVE_SITE_COURSE_KNOWLEDGE
+  const normalizedGoal = normalizeLoose(convo.goal || "")
+
+  const healthPool = catalog.filter(course =>
+    /saude|saúde|farmac|enfermagem|hospital|clinica|clínica|agente/.test(
+      normalizeLoose(`${course.title} ${course.summary} ${(course.aliases || []).join(" ")}`)
+    )
+  )
+
+  let selected = healthPool.slice(0, 2).map(item => item.title)
+
+  if (normalizedGoal && !selected.length) {
+    selected = catalog
+      .filter(course => normalizeLoose(`${course.title} ${course.summary}`).includes(normalizedGoal))
+      .slice(0, 2)
+      .map(item => item.title)
+  }
+
+  if (selected.length < 2) {
+    selected = uniqueItems([
+      ...selected,
+      "Agente de Saúde",
+      "Atendente de Farmácia"
+    ]).slice(0, 2)
+  }
+
+  return selected
+}
+
+function buildTwoCourseRecommendationMessage(convo = {}) {
+  const suggestedCourses = buildTwoCourseSuggestions(convo)
+  const [firstCourse, secondCourse] = suggestedCourses
+  const objective = normalizeLoose(convo.goal || "")
+  const mentionFastJob =
+    objective.includes("emprego") ||
+    objective.includes("trabalho") ||
+    objective.includes("curriculo") ||
+    objective.includes("currículo")
+
+  convo.lastSuggestedCourses = suggestedCourses
+  convo.alreadySuggestedCourses = true
+  convo.commercialStage = "recommendation"
+  convo.step = "course_selection"
+  clearPendingStep(convo)
+  convo.lastOfferType = "two_courses_recommendation"
+
+  const response = `Ótimo 😊
+
+Duas opções que costumam chamar bastante atenção são:
+
+1 - ${firstCourse}
+2 - ${secondCourse}
+
+As duas são muito procuradas por quem quer entrar na área com uma formação prática.${mentionFastJob ? " E ajudam bastante quem quer acelerar currículo para conseguir emprego mais rápido." : ""}
+
+Se você quiser, eu já te explico rapidinho qual combina mais com você.`
+
+  markCommercialReply(convo, "recommended_two_courses", response)
+  return response
+}
+
 function buildGoalClarification(courseName = "") {
   const label = String(courseName || "esse curso").trim()
 
@@ -1601,14 +1695,16 @@ function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
   ensureSalesLead(convo)
   const now = new Date().toISOString()
   const diagnosis = extractGoalAndExperience(text)
+  const lowContext = isLowContextReply(text)
 
   if (detectedCourse?.name) {
     convo.course = detectedCourse.name
     convo.salesLead.course = detectedCourse.name
     convo.commercialStage = convo.commercialStage === "closing" ? "closing" : "connection"
+    clearPendingStep(convo)
   }
 
-  if (diagnosis.goal) {
+  if (diagnosis.goal && !lowContext) {
     convo.goal = diagnosis.goal
     convo.objectiveCapturedAt = now
     if (!convo.commercialStage || convo.commercialStage === "discovery") {
@@ -1622,6 +1718,7 @@ function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
 
   if (isPriceQuestion) {
     convo.priceShown = true
+    convo.alreadyAnsweredPrice = true
     convo.commercialStage = "pricing"
   }
 
@@ -2948,6 +3045,21 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       return reply(buildMenuMessage())
     }
 
+    if (convo.pendingStep === "offer_2_courses_confirmation") {
+      if (sales.isAffirmative(text) || isSimplePositive(cleanText)) {
+        const response = buildTwoCourseRecommendationMessage(convo)
+        return reply(response)
+      }
+
+      if (isNegativeReply(text)) {
+        clearPendingStep(convo)
+        convo.commercialStage = "discovery"
+        const response = "Sem problema 😊 Me fala só uma área que você curte mais (saúde, administrativo, beleza ou tecnologia) e eu te indico algo certeiro."
+        markCommercialReply(convo, "ask_area_after_decline", response)
+        return reply(response)
+      }
+    }
+
     if (convo.paymentTeaserShown && wantsPaymentDetails(text)) {
       convo.paymentTeaserShown = false
       convo.step = "payment_choice"
@@ -3026,10 +3138,17 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     if (!convo.course && (convo.goal || hasZeroExperienceIntent(text))) {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
+      setPendingStep(convo, "offer_2_courses_confirmation", {
+        source: "goal_or_zero_experience"
+      })
+      convo.lastOfferType = "offer_2_courses"
+      convo.commercialStage = "discovery"
       const recommendation = convo.goal
         ? "Pelo seu objetivo, costuma valer focar em cursos práticos que aceleram currículo e entrada no mercado."
         : "Começar do zero não atrapalha 😊 dá para evoluir passo a passo com trilha prática."
-      return reply(`${recommendation}\n\nSe você quiser, eu já te indico 2 cursos que combinam com isso.`)
+      const response = `${recommendation}\n\nSe você quiser, eu já te indico 2 cursos que combinam com isso.`
+      markCommercialReply(convo, "offered_two_courses", response)
+      return reply(response)
     }
 
     if (detectedCourse?.name) {
@@ -3045,6 +3164,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
+      clearPendingStep(convo)
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
@@ -3067,6 +3187,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     if (!detectedCourse && courseInfoFromText && convo.step === "course_selection") {
       convo.path = "new_enrollment"
       convo.course = courseInfoFromText.title
+      clearPendingStep(convo)
       convo.step = "offer_transition"
       convo.paymentTeaserShown = false
 
