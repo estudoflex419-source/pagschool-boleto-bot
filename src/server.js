@@ -1485,6 +1485,31 @@ Pra eu te indicar melhor, posso separar por área:
 Pode me responder com o número ou me mandar direto o nome do curso.`
 }
 
+function buildCourseSelectionNudgeMessage(convo = {}) {
+  const attempt = Number(convo.courseSelectionNudgeCount || 0)
+
+  if (attempt <= 1) {
+    return `Fechado 😊 Se você quiser, eu já te indico 3 opções certeiras.
+
+Me fala só qual é seu foco hoje: *emprego rápido, melhorar currículo ou mudar de área*?`
+  }
+
+  if (attempt === 2) {
+    return `Perfeito, vamos facilitar 😊
+
+Posso te sugerir por objetivo:
+- emprego rápido: Farmácia, Operador de Caixa, Assistente Administrativo
+- área da saúde: Enfermagem, Cuidador de Idosos, Análises Clínicas
+- tecnologia/internet: Informática, Marketing Digital, Designer Gráfico
+
+Qual dessas linhas combina mais com você hoje?`
+  }
+
+  return `Sem problema 😊
+
+Me manda *1 objetivo* (ex.: "quero trabalhar rápido") e eu te devolvo a melhor indicação já com explicação curta e direta.`
+}
+
 function isLowContextReply(text = "") {
   const t = normalizeLoose(text)
 
@@ -2941,6 +2966,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.path = "new_enrollment"
         convo.step = "course_selection"
         convo.paymentTeaserShown = false
+        convo.courseSelectionNudgeCount = 0
         return reply(buildCourseListMessage())
       }
     }
@@ -2981,6 +3007,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
+      convo.courseSelectionNudgeCount = 0
       return reply(buildCourseListMessage())
     }
 
@@ -2988,6 +3015,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
+      convo.courseSelectionNudgeCount = 0
       return reply(buildCourseListMessage())
     }
 
@@ -2995,6 +3023,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
+      convo.courseSelectionNudgeCount = 0
       return reply(buildGroupedCourseCatalogMessage())
     }
 
@@ -3011,6 +3040,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
+      convo.courseSelectionNudgeCount = 0
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
@@ -3035,6 +3065,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.course = courseInfoFromText.title
       convo.step = "diagnosis_goal"
       convo.paymentTeaserShown = false
+      convo.courseSelectionNudgeCount = 0
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
@@ -3140,7 +3171,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       }
 
       if (raw === "6") {
-        return reply("Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te mostro todos os detalhes.")
+        return reply("Perfeito 😊 Me manda o nome do curso que você tem em mente que eu te explico de forma direta e te ajudo a decidir com segurança.")
       }
 
       if (wantsGroupedCourseCatalog(text)) {
@@ -3151,14 +3182,27 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.course = courseInfoFromText.title
         convo.step = "diagnosis_goal"
         convo.paymentTeaserShown = false
+        convo.courseSelectionNudgeCount = 0
         return reply(buildFullCourseDetailsMessage(courseInfoFromText))
       }
 
       if (isLowContextReply(text)) {
-        return reply(buildCourseListMessage())
+        convo.courseSelectionNudgeCount = Number(convo.courseSelectionNudgeCount || 0) + 1
+
+        const aiReply = await fallbackAI(text, convo, "descobrir_objetivo_para_indicar_curso")
+        if (aiReply) {
+          return reply(aiReply)
+        }
+
+        return reply(buildCourseSelectionNudgeMessage(convo))
       }
 
-      return reply("Me manda o nome do curso ou o número da área que você quer ver 😊")
+      const aiReply = await fallbackAI(text, convo, "engajar_descoberta_de_curso")
+      if (aiReply) {
+        return reply(aiReply)
+      }
+
+      return reply("Boa 😊 Se quiser, te indico agora por objetivo. Me diz se você busca emprego rápido, melhorar currículo ou mudar de área.")
     }
 
     if (convo.step === "diagnosis_goal") {
