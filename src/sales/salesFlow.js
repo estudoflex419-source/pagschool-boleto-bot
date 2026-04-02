@@ -612,15 +612,18 @@ function buildValueConnection(convo = {}) {
 function materialPitch() {
   return `Perfeito 😊
 
-O investimento é na taxa única do material didático + acesso à plataforma para acompanhar o conteúdo com mais organização.`
+O investimento é na taxa do material didático + acesso à plataforma, de um jeito que fique leve para você começar.`
 }
 
 function investmentMessage() {
-  return `Agora me diga qual forma de pagamento você prefere:
+  return `Hoje a forma mais leve de começar costuma ficar assim 😊
 
-1 - Carnê
-2 - Cartão
-3 - PIX à vista (${PIX_CASH_VALUE_LABEL})`
+💳 Cartão: 12x de R$ 65,00
+📘 Carnê: 12x de R$ 95,00
+
+Se preferir, também posso te explicar a opção à vista no Pix.
+
+Se você quiser, eu te ajudo a escolher a melhor opção para o seu momento.`
 }
 
 function askName(course, payment) {
@@ -926,7 +929,7 @@ Se você quiser, eu posso só te mostrar de forma bem direta como funciona ${cou
     return `Sem problema 😊
 Podemos sim deixar para o próximo mês.
 
-Se ficar melhor para você, eu posso organizar um *boleto único* para a data que você preferir, assim você consegue se planejar com calma.
+Se ficar melhor para você, eu posso organizar um *carnê único* para a data que você preferir, assim você consegue se planejar com calma.
 
 Qual dia fica melhor para você: 5, 10, 15, 20 ou outro?`
   }
