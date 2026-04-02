@@ -186,8 +186,13 @@ function normalizeFlowText(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+function normalizeIntentText(value = "") {
+  return normalizeFlowText(value)
 }
 
 function uniqueItems(items = []) {
@@ -1520,6 +1525,45 @@ function findSiteCourseKnowledge(text, currentCourse = "") {
   return null
 }
 
+function getCourseMatchTerms(course = {}) {
+  const terms = new Set()
+  const rawName = extractCourseLabel(course)
+  const normalizedName = normalizeIntentText(rawName)
+
+  if (normalizedName) {
+    terms.add(normalizedName)
+  }
+
+  const aliases = Array.isArray(course.aliases) ? course.aliases : []
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeIntentText(alias)
+    if (normalizedAlias) {
+      terms.add(normalizedAlias)
+    }
+  }
+
+  return [...terms]
+}
+
+function findCourseByName(text = "", catalog = getCourseCatalog()) {
+  const normalizedText = normalizeIntentText(text)
+  if (!normalizedText) return null
+
+  for (const course of catalog || []) {
+    const terms = getCourseMatchTerms(course)
+    if (terms.includes(normalizedText)) {
+      return course
+    }
+  }
+
+  const knowledgeMatch = findCourseInText(normalizedText)
+  if (knowledgeMatch) {
+    return knowledgeMatch
+  }
+
+  return null
+}
+
 function buildInstitutionalTrustBlock() {
   return [
     "A Estudo Flex trabalha com cursos EAD e certificado.",
@@ -2198,11 +2242,31 @@ Pode ser?`
 
 function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "") {
   if (convo.pendingStep === "awaiting_course" || convo.pendingStep === "awaiting_course_selection") {
-    const selectedCourse = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
+    const selectedCourse =
+      findCourseByName(text, getCourseCatalog()) ||
+      findSiteCourseKnowledge(text, convo.course) ||
+      sales.findCourse(text)
 
     if (selectedCourse?.title || selectedCourse?.name) {
+      const courseInfo = normalizeCourseInfoCandidate(selectedCourse)
+      const courseTitle = extractCourseLabel(courseInfo || selectedCourse)
+
+      convo.course = courseTitle || convo.course
+      convo.selectedCourse = courseTitle || convo.selectedCourse
+      convo.selectedCategory = inferCourseCategory(courseInfo || { title: courseTitle })
+      convo.path = "new_enrollment"
+      convo.step = "offer_transition"
+      convo.currentFlow = "commercial"
+      convo.commercialStage = "course_detail"
+      convo.lastOfferType = "course_explanation"
+      ensureSalesLead(convo)
+      convo.salesLead.selectedCourse = convo.selectedCourse
       clearPendingStep(convo)
-      return null
+
+      return {
+        intent: "pending_awaiting_course_match",
+        message: buildEnhancedCoursePresentation(convo.selectedCourse, courseInfo)
+      }
     }
 
     if (isDirectYes(text) || contextualIntent === "affirmation_without_context") {
@@ -3508,6 +3572,40 @@ async function processMessage(phone, text) {
         category: detectCategoryFromText(text) || convo.preferredCategory || ""
       })
       return replyWithState(buildCourseListMessage(), {}, "course_catalog_request")
+    }
+
+    if (
+      convo.pendingStep === "awaiting_course_selection" ||
+      convo.pendingStep === "awaiting_course" ||
+      convo.commercialStage === "catalog_redirect"
+    ) {
+      const matchedCourse =
+        findCourseByName(text, getCourseCatalog()) ||
+        findSiteCourseKnowledge(text, convo.course) ||
+        sales.findCourse(text)
+
+      if (matchedCourse?.title || matchedCourse?.name) {
+        const courseInfo = normalizeCourseInfoCandidate(matchedCourse)
+        const courseTitle = extractCourseLabel(courseInfo || matchedCourse)
+
+        convo.course = courseTitle || convo.course
+        convo.selectedCourse = courseTitle || convo.selectedCourse
+        convo.selectedCategory = inferCourseCategory(courseInfo || { title: courseTitle })
+        convo.path = "new_enrollment"
+        convo.step = "offer_transition"
+        convo.currentFlow = "commercial"
+        convo.commercialStage = "course_detail"
+        convo.lastOfferType = "course_explanation"
+        ensureSalesLead(convo)
+        convo.salesLead.selectedCourse = convo.selectedCourse
+        clearPendingStep(convo)
+
+        return replyWithState(
+          buildEnhancedCoursePresentation(convo.selectedCourse, courseInfo),
+          {},
+          "specific_course"
+        )
+      }
     }
 
     const intentResult = detectIntent(text, convo, {
