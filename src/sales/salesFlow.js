@@ -478,14 +478,12 @@ Hoje você já tem algum curso em mente ou quer que eu te mostre algumas opçõe
 }
 
 function showCourses() {
-  return `Temos cursos em áreas como:
-- saúde
-- administrativo
-- beleza
-- tecnologia
-- atendimento
+  return `Perfeito 😊
 
-Se você quiser, me fala seu objetivo e eu te indico os melhores para o seu perfil.`
+Pra ficar mais fácil de ver todas as opções com calma, dá uma olhada no nosso site:
+https://www.estudoflex.com.br/
+
+Depois me fala aqui o curso que mais te chamou atenção que eu te explico como funciona.`
 }
 
 function buildCourseLearnBlock(course) {
@@ -776,8 +774,19 @@ function isCourseListIntent(text) {
     t.includes("opcoes") ||
     t.includes("opções") ||
     t.includes("me mostra os cursos") ||
-    t.includes("quero conhecer os cursos")
+    t.includes("quero conhecer os cursos") ||
+    t.includes("quero ver os cursos") ||
+    t.includes("tem cursos") ||
+    t.includes("quero saber os cursos") ||
+    t.includes("quais areas voces tem") ||
+    t.includes("quais áreas vocês têm") ||
+    t.includes("tem curso na area") ||
+    t.includes("tem curso na área")
   )
+}
+
+function isCourseCatalogRequest(text) {
+  return isCourseListIntent(text)
 }
 
 function isPriceQuestion(text) {
@@ -966,6 +975,7 @@ module.exports = {
   isExistingStudentIntent,
   isNewEnrollmentIntent,
   isCourseListIntent,
+  isCourseCatalogRequest,
   isPriceQuestion,
   detectCloseMoment,
   detectPaymentMethod,
