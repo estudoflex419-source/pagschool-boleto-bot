@@ -43,6 +43,7 @@ function createDefaultConversation() {
     userGoal: "",
     userExperienceLevel: "",
     selectedCourse: "",
+    selectedCategory: "",
     paymentPreference: "",
     paymentInterest: "",
     askedHowItWorks: false,
@@ -73,6 +74,7 @@ function createDefaultConversation() {
     lastUserText: "",
     lastAssistantText: "",
     lastStepWhenAnswered: "",
+    updatedAt: "",
   };
 }
 

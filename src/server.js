@@ -1542,6 +1542,14 @@ https://www.estudoflex.com.br/
 Depois me fala aqui o nome do curso que mais te chamou atenção que eu te explico como funciona.`
 }
 
+function buildCatalogRedirectAffirmationMessage() {
+  return `Ótimo 😊
+O site é este:
+https://www.estudoflex.com.br/
+
+Assim que você escolher o curso, me manda o nome aqui que eu te explico tudo certinho.`
+}
+
 function isLowContextReply(text = "") {
   const t = normalizeLoose(text)
 
@@ -1669,19 +1677,14 @@ function buildMoreCoursesMessage(convo = {}, userText = "") {
     convo.mentionedCategories = uniqueItems([...(convo.mentionedCategories || []), preferredCategory])
   }
 
-  const categoryLabel = preferredCategory ? ` da área de *${COURSE_CATEGORY_LABELS[preferredCategory]}*` : ""
   convo.lastOfferType = "site_catalog_redirect"
-  convo.commercialStage = "course_catalog"
+  convo.commercialStage = "catalog_redirect"
   setPendingStep(convo, "awaiting_course_selection", {
     source: "course_catalog_request",
     category: preferredCategory || ""
   })
 
-  return `Perfeito 😊
-Pra ver todas as opções${categoryLabel} com calma, dá uma olhada no nosso site:
-https://www.estudoflex.com.br/
-
-Quando você escolher um curso, me manda o nome aqui que eu te explico tudo certinho.`
+  return buildCourseListMessage()
 }
 
 // Função auxiliar — detecta categoria a partir do texto do usuário
@@ -1738,41 +1741,31 @@ function buildTwoCourseSuggestions(convo = {}) {
 }
 
 function buildTwoCourseRecommendationMessage(convo = {}) {
-  const suggestedCourses = buildTwoCourseSuggestions(convo)
-  const [firstCourse, secondCourse] = suggestedCourses
-  const objective = normalizeLoose(convo.goal || "")
-  const mentionFastJob =
-    objective.includes("emprego") ||
-    objective.includes("trabalho") ||
-    objective.includes("curriculo") ||
-    objective.includes("currículo")
-
-  convo.lastSuggestedCourses = suggestedCourses
-  convo.alreadySuggestedCourses = true
-  convo.commercialStage = "recommendation"
+  convo.commercialStage = "catalog_redirect"
   convo.step = "course_selection"
-  clearPendingStep(convo)
-  convo.lastOfferType = "show_2_courses"
+  convo.lastOfferType = "site_catalog_redirect"
+  setPendingStep(convo, "awaiting_course_selection", { source: "legacy_two_course_path" })
+  return buildCourseListMessage()
+}
 
-  const response = `Ótimo 😊
+function shouldPrioritizeCatalogRedirect(text = "", convo = {}) {
+  const matchedCourse = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
+  if (matchedCourse?.title || matchedCourse?.name) return false
 
-Duas opções que costumam chamar bastante atenção são:
+  if (isGeneralCourseCatalogQuestion(text)) return true
+  if (wantsGroupedCourseCatalog(text)) return true
+  if (wantsMoreCourses(text)) return true
 
-1 - ${firstCourse}
-2 - ${secondCourse}
+  const t = normalizeLoose(text)
+  if (detectCategoryFromText(text) && /\b(tem|quais|curso|cursos|area|área)\b/.test(t)) return true
 
-As duas são muito procuradas por quem quer entrar na área com uma formação prática.${mentionFastJob ? " E ajudam bastante quem quer acelerar currículo para conseguir emprego mais rápido." : ""}
-
-Se você quiser, eu também posso te mostrar outras opções.`
-
-  markCommercialReply(convo, "recommended_two_courses", response)
-  return response
+  return false
 }
 
 function buildGoalClarification(courseName = "") {
   const label = String(courseName || "esse curso").trim()
 
-  return `Perfeito 😊 Pra eu te orientar melhor no *${label}*, qual é seu principal objetivo agora?`
+  return `Perfeito 😊 Se você quiser, eu te explico o *${label}* de forma prática e depois já te mostro valores e matrícula.`
 }
 
 function mapGoalReply(text = "") {
@@ -1992,10 +1985,6 @@ function detectStrongIntent(text = "", convo = {}) {
 }
 
 function detectContextualIntent(text = "", convo = {}) {
-  if (isDirectYes(text) && convo.pendingStep === "offer_2_courses_confirmation") {
-    return "confirm_offer_two_courses"
-  }
-
   if (isDirectYes(text) && convo.pendingStep === "enrollment_intro_confirmation") {
     return "confirm_enrollment_intro"
   }
@@ -2118,13 +2107,13 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
-      convo.commercialStage = "course_catalog"
+      convo.commercialStage = "catalog_redirect"
       convo.lastOfferType = "site_catalog_redirect"
       setPendingStep(convo, "awaiting_course_selection", {
         source: "course_catalog_request",
         category: category || ""
       })
-      const message = category ? buildCoursesByCategory(category) : buildGroupedCourseCatalogMessage()
+      const message = buildCourseListMessage()
       return { intent: "course_catalog_request", message }
     }
 
@@ -2174,8 +2163,8 @@ Pode ser?`
       convo.path = "new_enrollment"
       convo.step = "offer_transition"
       convo.currentFlow = "commercial"
-      convo.commercialStage = "connection"
-      convo.lastOfferType = "specific_course"
+      convo.commercialStage = "course_detail"
+      convo.lastOfferType = "course_explanation"
       clearPendingStep(convo)
 
       return { intent, message: buildEnhancedCoursePresentation(courseInfo.title, courseInfo) }
@@ -2194,10 +2183,12 @@ Pode ser?`
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
-      clearPendingStep(convo)
+      convo.commercialStage = "catalog_redirect"
+      convo.lastOfferType = "site_catalog_redirect"
+      setPendingStep(convo, "awaiting_course_selection", { source: "goal_help" })
       return {
         intent,
-        message: buildTwoCourseRecommendationMessage(convo)
+        message: buildCourseListMessage()
       }
 
     case "compare_courses":
@@ -2222,24 +2213,16 @@ function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "
 
     if (isDirectYes(text) || contextualIntent === "affirmation_without_context") {
       convo.lastOfferType = "site_catalog_redirect"
-      convo.commercialStage = "course_catalog"
+      convo.commercialStage = "catalog_redirect"
       return {
         intent: "pending_awaiting_course_selection_affirmation",
-        message: `Ótimo 😊
-O site é este:
-https://www.estudoflex.com.br/
-
-Assim que você escolher o curso, me manda o nome aqui que eu te explico tudo certinho.`
+        message: buildCatalogRedirectAffirmationMessage()
       }
     }
 
     return {
       intent: "pending_awaiting_course_selection_reminder",
-      message: `Perfeito 😊
-Pra você ver todas as opções com mais calma, dá uma olhada no nosso site:
-https://www.estudoflex.com.br/
-
-Depois me fala aqui o nome do curso que mais te chamou atenção que eu te explico como funciona.`
+      message: buildCourseListMessage()
     }
   }
 
@@ -2274,29 +2257,7 @@ Depois me fala aqui o nome do curso que mais te chamou atenção que eu te expli
     }
   }
 
-  if (convo.pendingStep !== "offer_2_courses_confirmation") return null
-
-  if (contextualIntent === "confirm_offer_two_courses") {
-    clearPendingStep(convo)
-    return {
-      intent: "pending_offer_two_courses",
-      message: buildTwoCourseRecommendationMessage(convo)
-    }
-  }
-
-  if (contextualIntent === "negative") {
-    clearPendingStep(convo)
-    convo.commercialStage = "discovery"
-    return {
-      intent: "pending_offer_two_courses_declined",
-      message: "Sem problema 😊 Me fala só uma área que você curte mais (saúde, administrativo, beleza ou tecnologia) e eu te indico algo certeiro."
-    }
-  }
-
-  return {
-    intent: "pending_offer_two_courses_reminder",
-    message: "Se você quiser, eu te mostro agora 2 cursos que combinam com o que você busca."
-  }
+  return null
 }
 
 function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
@@ -2310,7 +2271,10 @@ function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
     convo.selectedCourse = detectedCourse.name
     convo.salesLead.course = detectedCourse.name
     convo.salesLead.selectedCourse = detectedCourse.name
-    convo.commercialStage = convo.commercialStage === "closing" ? "closing" : "connection"
+    const category = inferCourseCategory(findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name) || { title: detectedCourse.name })
+    convo.selectedCategory = category
+    convo.commercialStage = convo.commercialStage === "closing" ? "closing" : "course_detail"
+    convo.lastOfferType = "course_explanation"
     clearPendingStep(convo)
   }
 
@@ -2318,7 +2282,7 @@ function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
     convo.goal = diagnosis.goal
     convo.objectiveCapturedAt = now
     if (!convo.commercialStage || convo.commercialStage === "discovery") {
-      convo.commercialStage = "connection"
+      convo.commercialStage = "course_detail"
     }
   }
 
@@ -2563,27 +2527,47 @@ function buildCourseHighlights(courseInfo) {
 function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const normalizedCourseInfo = courseInfo || buildFallbackCourseInfoByName(selectedCourseName)
   const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
-  const parts = []
+  const category = inferCourseCategory(normalizedCourseInfo || { title: displayName })
 
-  parts.push(`Ótima escolha 😊\n${displayName} costuma chamar bastante atenção de quem gosta dessa área e quer aprender de forma prática.`)
-
-  if (normalizedCourseInfo?.summary) {
-    parts.push(String(normalizedCourseInfo.summary).trim().replace(/\.$/, "") + ".")
+  const profilesByCategory = {
+    saude: "gosta da área de cuidado, atendimento e rotina prática",
+    administrativo: "quer crescer com organização, gestão e rotina de escritório",
+    beleza: "quer atuar com estética, atendimento e serviços de alto giro",
+    tecnologia: "busca habilidades digitais e oportunidades no mercado online",
+    industrial: "curte operação técnica, manutenção e rotina de campo",
+    agro: "quer atuar com máquinas, operação e atividades do setor agrícola",
+    logistica: "gosta de organização operacional, pátio e movimentação de cargas",
+    educacao: "quer trabalhar com ensino, apoio educacional e desenvolvimento",
+    juridico: "busca atuação com normas, segurança e preparação técnica",
+    idiomas: "quer ampliar oportunidades com comunicação e linguagem",
+    gastronomia: "quer trabalhar com produção de alimentos e atendimento",
+    geral: "quer aprender de forma prática e evoluir profissionalmente"
   }
 
-  if (normalizedCourseInfo?.learns?.length) {
-    parts.push(`Você aprende temas como ${normalizedCourseInfo.learns.slice(0, 4).join(", ")}.`)
+  const benefitsByCategory = {
+    saude: "aprender de forma prática e entender melhor esse tipo de atuação",
+    administrativo: "se preparar para rotina profissional e fortalecer o currículo",
+    beleza: "desenvolver técnica para começar a atender com mais segurança",
+    tecnologia: "desenvolver habilidade prática e se posicionar melhor no mercado",
+    industrial: "ganhar base técnica para atuar com mais confiança",
+    agro: "aprender operação na prática e ampliar oportunidades de trabalho",
+    logistica: "entender a operação do setor e aumentar sua empregabilidade",
+    educacao: "ganhar repertório para atuar com mais preparo e segurança",
+    juridico: "ganhar base sólida para começar na área com direcionamento",
+    idiomas: "evoluir o conhecimento de forma aplicada ao dia a dia",
+    gastronomia: "aprender técnicas práticas para atuar na área",
+    geral: "ganhar base e se preparar melhor para novas oportunidades"
   }
 
-  if (normalizedCourseInfo?.market) {
-    parts.push(`É uma formação que costuma interessar quem quer entender melhor a rotina de ${normalizedCourseInfo.market}.`)
-  } else {
-    parts.push("É uma formação que costuma interessar quem quer ganhar base e se preparar melhor para oportunidades.")
-  }
+  const profile = profilesByCategory[category] || profilesByCategory.geral
+  const benefit = benefitsByCategory[category] || benefitsByCategory.geral
 
-  parts.push("Se você quiser, eu te explico agora como funciona ou já te passo os valores para começar.")
+  return `Ótima escolha 😊
+${displayName} costuma chamar bastante atenção de quem ${profile}.
 
-  return parts.join("\n\n")
+É uma opção interessante para quem quer ${benefit}.
+
+Se você quiser, eu posso te explicar como funciona e depois já te passo as opções para começar.`
 }
 
 function buildSelectedCourseAnswer(_text, courseInfo) {
@@ -2674,7 +2658,7 @@ function buildConsultativeOfferTransition(convo = {}) {
   parts.push(`Perfeito 😊 ${prefix}pelo que você me contou, *${courseName}* faz sentido para o seu momento.`)
 
   if (goal) {
-    parts.push(`Pelo seu objetivo de *${goal}*, ele tende a te ajudar bastante.`)
+    parts.push(`Esse curso costuma fazer sentido para quem quer *${goal}*.`)
   }
 
   if (experience) {
@@ -3522,6 +3506,19 @@ async function processMessage(phone, text) {
 
     updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion)
 
+    if (shouldPrioritizeCatalogRedirect(text, convo)) {
+      convo.path = "new_enrollment"
+      convo.step = "course_selection"
+      convo.currentFlow = "commercial"
+      convo.lastOfferType = "site_catalog_redirect"
+      convo.commercialStage = "catalog_redirect"
+      setPendingStep(convo, "awaiting_course_selection", {
+        source: "course_catalog_request",
+        category: detectCategoryFromText(text) || convo.preferredCategory || ""
+      })
+      return replyWithState(buildCourseListMessage(), {}, "course_catalog_request")
+    }
+
     const intentResult = detectIntent(text, convo, {
       hasSpecificCourseSignal: Boolean(findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)),
       lastHandledIntent: convo.lastHandledIntent || convo.lastIntentHandled || ""
@@ -3560,7 +3557,7 @@ async function processMessage(phone, text) {
         convo.path = "new_enrollment"
         convo.step = "course_selection"
         convo.lastOfferType = "site_catalog_redirect"
-        convo.commercialStage = "course_catalog"
+        convo.commercialStage = "catalog_redirect"
         setPendingStep(convo, "awaiting_course_selection", {
           source: "course_catalog_request",
           category: convo.preferredCategory || ""
@@ -3863,7 +3860,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.path = "new_enrollment"
         convo.step = "course_selection"
         convo.paymentTeaserShown = false
-        return reply("Perfeito 😊 Me manda o curso que você tem em mente ou seu objetivo (ex.: conseguir emprego mais rápido) que eu te ajudo a escolher.")
+        return reply("Perfeito 😊 Me manda o nome do curso que você quer conhecer e eu te explico como funciona.")
       }
     }
 
@@ -3903,7 +3900,13 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
-      return reply("Perfeito 😊 Me conta só seu objetivo principal agora que eu te indico o melhor caminho.")
+      convo.lastOfferType = "site_catalog_redirect"
+      convo.commercialStage = "catalog_redirect"
+      setPendingStep(convo, "awaiting_course_selection", {
+        source: "course_catalog_request",
+        category: convo.preferredCategory || ""
+      })
+      return reply(buildCourseListMessage())
     }
 
     if (sales.isCourseListIntent(text) && !convo.course) {
@@ -3911,7 +3914,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
-      convo.commercialStage = "course_catalog"
+      convo.commercialStage = "catalog_redirect"
       setPendingStep(convo, "awaiting_course_selection", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
@@ -3924,28 +3927,12 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
-      convo.commercialStage = "course_catalog"
+      convo.commercialStage = "catalog_redirect"
       setPendingStep(convo, "awaiting_course_selection", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
       })
-      return reply(buildGroupedCourseCatalogMessage())
-    }
-
-    if (!convo.course && (convo.goal || hasZeroExperienceIntent(text))) {
-      convo.path = "new_enrollment"
-      convo.step = "course_selection"
-      setPendingStep(convo, "offer_2_courses_confirmation", {
-        source: "goal_or_zero_experience"
-      })
-      convo.lastOfferType = "offer_2_courses"
-      convo.commercialStage = "discovery"
-      const recommendation = convo.goal
-        ? "Pelo seu objetivo, costuma valer focar em cursos práticos que aceleram currículo e entrada no mercado."
-        : "Começar do zero não atrapalha 😊 dá para evoluir passo a passo com trilha prática."
-      const response = `${recommendation}\n\nSe você quiser, eu já te indico 2 cursos que combinam com isso.`
-      markCommercialReply(convo, "offered_two_courses", response)
-      return reply(response)
+      return reply(buildCourseListMessage())
     }
 
     if (detectedCourse?.name) {
@@ -3962,6 +3949,10 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.path = "new_enrollment"
       convo.course = detectedCourse.name
       clearPendingStep(convo)
+      convo.selectedCourse = detectedCourse.name
+      convo.selectedCategory = inferCourseCategory(courseInfo || { title: detectedCourse.name })
+      convo.commercialStage = "course_detail"
+      convo.lastOfferType = "course_explanation"
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
@@ -3985,6 +3976,10 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.path = "new_enrollment"
       convo.course = courseInfoFromText.title
       clearPendingStep(convo)
+      convo.selectedCourse = courseInfoFromText.title
+      convo.selectedCategory = inferCourseCategory(courseInfoFromText)
+      convo.commercialStage = "course_detail"
+      convo.lastOfferType = "course_explanation"
       convo.step = "offer_transition"
       convo.paymentTeaserShown = false
 
@@ -4071,46 +4066,23 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     }
 
     if (convo.step === "course_selection") {
-      if (raw === "1") {
-        return reply(buildCategoryCourseSuggestionMessage("saude"))
-      }
-
-      if (raw === "2") {
-        return reply(buildCategoryCourseSuggestionMessage("administrativo"))
-      }
-
-      if (raw === "3") {
-        return reply(buildCategoryCourseSuggestionMessage("beleza"))
-      }
-
-      if (raw === "4") {
-        return reply(buildCategoryCourseSuggestionMessage("tecnologia"))
-      }
-
-      if (raw === "5") {
-        return reply(buildGroupedCourseCatalogMessage())
-      }
-
-      if (raw === "6") {
-        return reply("Perfeito 😊 Me manda o nome do curso que você tem em mente e eu te mostro todos os detalhes.")
-      }
-
-      if (wantsGroupedCourseCatalog(text)) {
-        return reply(buildGroupedCourseCatalogMessage())
-      }
-
       if (courseInfoFromText) {
         convo.course = courseInfoFromText.title
-        convo.step = "diagnosis_goal"
+        convo.selectedCourse = courseInfoFromText.title
+        convo.selectedCategory = inferCourseCategory(courseInfoFromText)
+        convo.commercialStage = "course_detail"
+        convo.lastOfferType = "course_explanation"
+        convo.step = "offer_transition"
         convo.paymentTeaserShown = false
-        return reply(buildFullCourseDetailsMessage(courseInfoFromText))
+        clearPendingStep(convo)
+        return reply(buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText))
       }
 
       if (isLowContextReply(text)) {
-        return reply(buildCourseListMessage())
+        return reply(buildCatalogRedirectAffirmationMessage())
       }
 
-      return reply("Me manda o nome do curso ou o número da área que você quer ver 😊")
+      return reply(buildCourseListMessage())
     }
 
     if (convo.step === "diagnosis_goal") {
@@ -4220,12 +4192,12 @@ Pode ser?`)
         convo.course = ""
         convo.paymentTeaserShown = false
         convo.lastOfferType = "site_catalog_redirect"
-        convo.commercialStage = "course_catalog"
+        convo.commercialStage = "catalog_redirect"
         setPendingStep(convo, "awaiting_course_selection", {
           source: "course_catalog_request",
           category: convo.preferredCategory || ""
         })
-        return reply(buildGroupedCourseCatalogMessage())
+        return reply(buildCourseListMessage())
       }
 
       if (wantsPaymentDetails(text) || isPaymentGuidanceQuestion(text)) {
@@ -4271,12 +4243,12 @@ Pode ser?`)
         convo.course = ""
         convo.paymentTeaserShown = false
         convo.lastOfferType = "site_catalog_redirect"
-        convo.commercialStage = "course_catalog"
+        convo.commercialStage = "catalog_redirect"
         setPendingStep(convo, "awaiting_course_selection", {
           source: "course_catalog_request",
           category: convo.preferredCategory || ""
         })
-        return reply(buildGroupedCourseCatalogMessage())
+        return reply(buildCourseListMessage())
       }
 
       if (isPaymentGuidanceQuestion(text)) {
