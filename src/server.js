@@ -468,25 +468,40 @@ function wantsGroupedCourseCatalog(text = "") {
   ].some(term => t.includes(term))
 }
 
+function normalizeMoreCoursesText(text = "") {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\bcursos?\b/g, "curso")
+    .replace(/\bopcoes?\b/g, "opcao")
+}
+
 function wantsMoreCourses(text = "") {
-  const t = normalizeLoose(text)
+  const t = normalizeMoreCoursesText(text)
 
   return [
-    "tem mais cursos",
+    "mais curso",
+    "mais opcao",
+    "outros curso",
+    "outras opcao",
+    "tem mais",
     "tem mais curso",
-    "quais outros cursos",
-    "quais outros tem",
-    "tem mais opcoes",
-    "tem mais opções",
-    "quero ver mais cursos",
-    "quero ver mais opcoes",
-    "quero ver mais opções",
-    "me mostra mais",
-    "me mostre mais",
+    "tem mais opcao",
     "tem outros",
-    "mais cursos",
-    "mais opcoes",
-    "mais opções"
+    "quais outros",
+    "quais mais",
+    "me mostra mais",
+    "ver mais",
+    "quero ver mais",
+    "quero ver mais curso",
+    "quero ver mais opcao",
+    "mais ai",
+    "mais curso",
+    "mais opcao"
   ].some(term => t.includes(term))
 }
 
@@ -1594,16 +1609,29 @@ Pra eu te ajudar sem ficar repetindo, me diz só qual caminho você quer agora:
 • matrícula`
 }
 
-function buildMoreCoursesMessage() {
+function buildMoreCoursesMessage(convo = {}) {
+  const catalog = ACTIVE_SITE_COURSE_KNOWLEDGE
+  const currentOffset = Number(convo.moreCoursesOffset || 0)
+  const pageSize = 5
+  const options = catalog.length ? catalog : [
+    { title: "Atendente de Farmácia" },
+    { title: "Auxiliar Administrativo" },
+    { title: "Informática" },
+    { title: "Recepcionista Hospitalar" },
+    { title: "Psicologia Básica" }
+  ]
+
+  const start = currentOffset % options.length
+  const ordered = options.slice(start).concat(options.slice(0, start))
+  const selected = ordered.slice(0, pageSize).map(item => `• ${extractCourseLabel(item.title)}`).join("\n")
+
+  convo.moreCoursesOffset = (start + pageSize) % options.length
+
   return `Tem sim 😊
 
 Olha algumas outras opções que costumam chamar bastante atenção:
 
-• Atendente de Farmácia
-• Auxiliar Administrativo
-• Informática
-• Recepcionista Hospitalar
-• Psicologia Básica
+${selected}
 
 Se quiser, me fala qual te chamou mais atenção que eu te explico melhor 👍`
 }
@@ -1952,7 +1980,7 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
       clearPendingStep(convo)
-      return { intent, message: buildMoreCoursesMessage() }
+      return { intent, message: buildMoreCoursesMessage(convo) }
 
     case "course_list":
       convo.path = "new_enrollment"
@@ -3240,7 +3268,7 @@ async function processMessage(phone, text) {
       if (wantsMoreCourses(text)) {
         convo.path = "new_enrollment"
         convo.step = "course_selection"
-        return replyWithState(buildMoreCoursesMessage(), {}, "wants_more_courses")
+        return replyWithState(buildMoreCoursesMessage(convo), {}, "wants_more_courses")
       }
 
       if (wantsPrice) {
