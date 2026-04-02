@@ -452,6 +452,29 @@ ${buildCourseTitlesList(items, 15)}
 Me manda o *nome do curso* que você quer ver e eu te passo os detalhes completos.`
 }
 
+function buildCoursesByCategory(categoryKey = "") {
+  const label = COURSE_CATEGORY_LABELS[categoryKey] || "Cursos"
+  const items = getCoursesByCategory(categoryKey)
+
+  if (!items.length) {
+    return `Perfeito 😊
+
+No momento eu não encontrei cursos cadastrados nessa área.
+
+Se quiser, posso te mostrar outras áreas com bastante procura.`
+  }
+
+  const selected = items.slice(0, 5).map(course => `• ${extractCourseLabel(course.title || course.name || "")}`)
+
+  return `Tem sim 😊
+Olha algumas opções na área de *${label}* que costumam chamar bastante atenção:
+
+${selected.join("\n")}
+
+Se alguma te chamar atenção, me fala que eu te explico melhor 👍`
+}
+
+
 function wantsGroupedCourseCatalog(text = "") {
   const t = normalizeLoose(text)
 
@@ -1988,6 +2011,7 @@ function detectStrongIntent(text = "", convo = {}) {
   if (wantsMoreCourses(text)) return "more_courses"
   if (wantsCompareCoursesIntent(text)) return "compare_courses"
   if (sales.isCourseListIntent(text) || wantsGroupedCourseCatalog(text)) return "course_list"
+  if (detectCategoryFromText(text)) return "course_category"
   if (wantsPriceIntent(text)) return "price"
   if (wantsPaymentOptionsIntent(text) || wantsPaymentDetails(text)) return "payment_options"
   if (wantsEnrollmentIntent(text) || isEnrollmentHowToIntent(text) || wantsStartNow(text)) return "enrollment"
@@ -2040,7 +2064,8 @@ function shouldOverrideCurrentFlow(intent = "", convo = {}) {
     "how_course_works",
     "goal_help",
     "course_list",
-    "compare_courses"
+    "compare_courses",
+    "course_category"
   ])
 
   if (!convo.pendingStep && !convo.step) return true
@@ -2114,6 +2139,18 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.currentFlow = "commercial"
       clearPendingStep(convo)
       return { intent, message: buildGroupedCourseCatalogMessage() }
+
+    case "course_category": {
+      const category = detectCategoryFromText(text) || convo.lastRequestedCategory || ""
+      if (category) {
+        convo.lastRequestedCategory = category
+      }
+      convo.path = "new_enrollment"
+      convo.step = "course_selection"
+      convo.currentFlow = "commercial"
+      clearPendingStep(convo)
+      return { intent, message: buildCoursesByCategory(category) }
+    }
 
     case "price":
       convo.path = "new_enrollment"
@@ -3392,10 +3429,11 @@ async function processMessage(phone, text) {
       lastHandledIntent: convo.lastHandledIntent || convo.lastIntentHandled || ""
     })
     const strongIntent = intentResult.strong ? intentResult.intent : ""
+    const detectedCategoryIntent = intentResult.category || ""
     const contextualIntent = intentResult.contextIntent || detectContextualIntent(text, convo)
 
     if (intentResult.shouldOverrideFlow || shouldOverrideCurrentFlow(strongIntent, convo)) {
-      const strongHandled = await handleStrongIntent(strongIntent || intentResult.intent, convo, text, phone)
+      const strongHandled = await handleStrongIntent(strongIntent || intentResult.intent, convo, detectedCategoryIntent || text, phone)
 
       if (strongHandled?.message) {
         if (isRepeatedBotResponse(convo, strongHandled.message, strongHandled.intent)) {
