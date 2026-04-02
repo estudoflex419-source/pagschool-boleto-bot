@@ -864,7 +864,12 @@ function isAffirmative(text) {
     "vamos nessa",
     "me mostra",
     "mostrar",
-    "quero ver"
+    "quero ver",
+    "certo",
+    "tá certo",
+    "ta certo",
+    "tá bom",
+    "ta bom"
   ].some(item => t.includes(item))
 }
 

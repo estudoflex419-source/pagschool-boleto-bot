@@ -136,7 +136,8 @@ function buildResponseRulesBlock(responseRules = {}) {
   rules.push("- responda em no máximo 2 parágrafos curtos")
   rules.push("- evite listas longas")
   rules.push("- nunca repita a mesma ideia em frases diferentes")
-  rules.push("- se o cliente responder só \"sim\", \"ok\", \"pode\" ou algo muito curto, peça clarificação curta")
+  rules.push("- palavras curtas de confirmação (ex.: \"certo\", \"ok\", \"sim\") não são tema do curso e nunca devem aparecer como tópico de conteúdo")
+  rules.push("- se o cliente responder curto após demonstrar interesse, avance para matrícula com CTA direto em vez de voltar para diagnóstico")
   rules.push("- quando a pergunta for genérica, ofereça no máximo 3 cursos por vez")
   rules.push("- faça no máximo 1 pergunta por mensagem")
   rules.push("- não fale como robô e não use linguagem engessada")
@@ -293,6 +294,7 @@ Responda de forma curta, humana e comercial.
 No máximo uma pergunta.
 Sem introdução técnica.
 Sem repetir o nome do curso várias vezes.
+Nunca trate "certo", "ok", "sim" como conteúdo/assunto do curso.
 Sempre feche com um convite direto para matrícula.`
 }
 
