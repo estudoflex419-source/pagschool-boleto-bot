@@ -397,82 +397,33 @@ function buildCourseTitlesList(courses = [], limit = 20) {
 }
 
 function buildGroupedCourseCatalogMessage() {
-  const orderedKeys = [
-    "saude",
-    "administrativo",
-    "beleza",
-    "tecnologia",
-    "idiomas",
-    "juridico",
-    "educacao",
-    "industrial",
-    "agro",
-    "logistica",
-    "gastronomia",
-    "geral"
-  ]
-
-  const blocks = []
-
-  for (const key of orderedKeys) {
-    const items = getCoursesByCategory(key)
-    if (!items.length) continue
-
-    blocks.push(`*${COURSE_CATEGORY_LABELS[key]}*`)
-    blocks.push(buildCourseTitlesList(items, 20))
-    blocks.push("")
-  }
-
   return `Perfeito 😊
 
-Aqui estão os cursos separados por área:
+Pra ficar mais fácil de ver todas as opções com calma, dá uma olhada no nosso site:
+https://www.estudoflex.com.br/
 
-${blocks.join("\n").trim()}
-
-Me manda o *nome do curso* que eu te mostro os detalhes completos.`
+Depois me fala aqui o curso que mais te chamou atenção que eu te explico melhor.`
 }
 
 function buildCategoryCourseSuggestionMessage(categoryKey = "") {
-  const label = COURSE_CATEGORY_LABELS[categoryKey] || "Cursos"
-  const items = getCoursesByCategory(categoryKey)
-
-  if (!items.length) {
-    return `Perfeito 😊
-
-No momento eu não encontrei cursos cadastrados nessa área.
-
-Me manda o nome do curso que você quer e eu verifico para você.`
-  }
+  const label = COURSE_CATEGORY_LABELS[categoryKey] || "essa área"
 
   return `Perfeito 😊
 
-Na área de *${label}*, encontrei estes cursos:
+Pra ver todas as opções da área de *${label}* com calma, o melhor caminho é pelo site:
+https://www.estudoflex.com.br/
 
-${buildCourseTitlesList(items, 15)}
-
-Me manda o *nome do curso* que você quer ver e eu te passo os detalhes completos.`
+Quando escolher o curso que mais te interessar, me fala aqui que eu te explico como funciona.`
 }
 
 function buildCoursesByCategory(categoryKey = "") {
   const label = COURSE_CATEGORY_LABELS[categoryKey] || "Cursos"
-  const items = getCoursesByCategory(categoryKey)
-
-  if (!items.length) {
-    return `Perfeito 😊
-
-No momento eu não encontrei cursos cadastrados nessa área.
-
-Se quiser, posso te mostrar outras áreas com bastante procura.`
-  }
-
-  const selected = items.slice(0, 5).map(course => `• ${extractCourseLabel(course.title || course.name || "")}`)
 
   return `Tem sim 😊
-Olha algumas opções na área de *${label}* que costumam chamar bastante atenção:
+Pra você ver com calma as opções da área de *${label}*, olha aqui:
+https://www.estudoflex.com.br/
 
-${selected.join("\n")}
-
-Se alguma te chamar atenção, me fala que eu te explico melhor 👍`
+Depois me fala o curso que você escolher e eu te explico certinho.`
 }
 
 
@@ -489,6 +440,27 @@ function wantsGroupedCourseCatalog(text = "") {
     "catálogo de cursos",
     "cursos disponiveis",
     "cursos disponíveis",
+    "todos os cursos"
+  ].some(term => t.includes(term))
+}
+
+function isGeneralCourseCatalogQuestion(text = "") {
+  const t = normalizeLoose(text)
+  if (!t) return false
+
+  return [
+    "quais cursos",
+    "quero conhecer os cursos",
+    "quero ver os cursos",
+    "me mostra os cursos",
+    "lista de cursos",
+    "tem cursos",
+    "quais areas",
+    "quais áreas",
+    "tem curso na area",
+    "tem curso na área",
+    "catalogo",
+    "catálogo",
     "todos os cursos"
   ].some(term => t.includes(term))
 }
@@ -1688,64 +1660,23 @@ Se você quiser, eu sigo com você agora para matrícula sem burocracia.`
 }
 
 function buildMoreCoursesMessage(convo = {}, userText = "") {
-  const catalog = ACTIVE_SITE_COURSE_KNOWLEDGE
-  const pageSize = 5
-
-  // Detecta se o usuário mencionou uma categoria específica
   const detectedCategory = userText ? detectCategoryFromText(userText) : ""
   const preferredCategory = detectedCategory || convo.preferredCategory || ""
   if (preferredCategory) {
+    convo.selectedCategory = preferredCategory
     convo.preferredCategory = preferredCategory
     convo.mentionedCategories = uniqueItems([...(convo.mentionedCategories || []), preferredCategory])
   }
 
-  let pool = []
-
-  if (preferredCategory) {
-    // Filtra pelo grupo de categoria detectada
-    pool = getCoursesByCategory(preferredCategory)
-  }
-
-  // Se não detectou categoria ou a categoria não tem cursos, usa catálogo completo
-  if (!pool.length) {
-    pool = catalog.length ? catalog : [
-      { title: "Atendente de Farmácia" },
-      { title: "Auxiliar Administrativo" },
-      { title: "Informática" },
-      { title: "Recepcionista Hospitalar" },
-      { title: "Psicologia Básica" }
-    ]
-  }
-
-  // Exclui o curso atual da conversa para não repetir
-  const currentCourse = normalizeLoose(convo.course || "")
-  const filtered = pool.filter(item => normalizeLoose(extractCourseLabel(item.title || item.name || "")) !== currentCourse)
-
-  // Exclui cursos já sugeridos antes
-  const alreadySuggested = new Set((convo.lastSuggestedCourses || []).map(c => normalizeLoose(String(c || ""))))
-  const fresh = filtered.filter(item => !alreadySuggested.has(normalizeLoose(extractCourseLabel(item.title || item.name || ""))))
-
-  // Se não sobrou nada fresh, usa o pool filtrado sem essa restrição
-  const source = fresh.length >= 3 ? fresh : filtered
-
-  const currentOffset = Number(convo.moreCoursesOffset || 0)
-  const start = currentOffset % source.length
-  const ordered = source.slice(start).concat(source.slice(0, start))
-  const selected = ordered.slice(0, pageSize).map(item => `• ${extractCourseLabel(item.title || item.name || "")}`)
-
-  convo.moreCoursesOffset = (start + pageSize) % source.length
-
   const categoryLabel = preferredCategory ? ` da área de *${COURSE_CATEGORY_LABELS[preferredCategory]}*` : ""
-  convo.lastOfferType = preferredCategory ? "show_courses_by_category" : "show_more_courses"
+  convo.lastOfferType = "course_catalog_request"
   convo.commercialStage = "recommendation"
 
-  return `Tem sim 😊
+  return `Perfeito 😊
+Pra ver todas as opções${categoryLabel} com calma, dá uma olhada no nosso site:
+https://www.estudoflex.com.br/
 
-Olha algumas outras opções${categoryLabel} que costumam chamar bastante atenção:
-
-${selected.join("\n")}
-
-Se quiser, me fala qual te chamou mais atenção que eu te explico melhor 👍`
+Quando você escolher um curso, me manda o nome aqui que eu te explico tudo certinho.`
 }
 
 // Função auxiliar — detecta categoria a partir do texto do usuário
@@ -2037,18 +1968,20 @@ function wantsCompareCoursesIntent(text = "") {
 }
 
 function detectStrongIntent(text = "", convo = {}) {
+  const matchedCourse = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
+
   if (isFinancialCriticalIntent(text) && !wantsPaymentOptionsIntent(text)) return "second_via"
   if (wantsHumanAgentIntent(text)) return "human_agent"
   if (wantsStartOverIntent(text)) return "start_over"
-  if (wantsMoreCourses(text)) return "more_courses"
+  if (wantsMoreCourses(text) || isGeneralCourseCatalogQuestion(text)) return "course_catalog_request"
   if (wantsCompareCoursesIntent(text)) return "compare_courses"
-  if (sales.isCourseListIntent(text) || wantsGroupedCourseCatalog(text)) return "course_list"
-  if (detectCategoryFromText(text)) return "course_category"
+  if (sales.isCourseCatalogRequest(text) || wantsGroupedCourseCatalog(text)) return "course_catalog_request"
+  if (matchedCourse && !isGeneralCourseCatalogQuestion(text)) return "specific_course"
+  if (detectCategoryFromText(text)) return "course_catalog_request"
   if (wantsPriceIntent(text)) return "price"
   if (wantsPaymentOptionsIntent(text) || wantsPaymentDetails(text)) return "payment_options"
   if (wantsEnrollmentIntent(text) || isEnrollmentHowToIntent(text) || wantsStartNow(text)) return "enrollment"
   if (wantsHowCourseWorksIntent(text) || isCourseFunctionalityQuestion(text)) return "how_course_works"
-  if (findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)?.name) return "specific_course"
   if (wantsGoalHelpIntent(text) || hasZeroExperienceIntent(text)) return "goal_help"
   return ""
 }
@@ -2165,25 +2098,14 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       resetConversation(convo)
       return { intent, message: buildMenuMessage() }
 
+    case "course_catalog_request":
     case "more_courses":
-      convo.path = "new_enrollment"
-      convo.step = "course_selection"
-      convo.currentFlow = "commercial"
-      convo.commercialStage = "recommendation"
-      clearPendingStep(convo)
-      return { intent, message: buildMoreCoursesMessage(convo, text) }
-
     case "course_list":
-      convo.path = "new_enrollment"
-      convo.step = "course_selection"
-      convo.currentFlow = "commercial"
-      clearPendingStep(convo)
-      return { intent, message: buildGroupedCourseCatalogMessage() }
-
     case "course_category": {
       const category = detectCategoryFromText(text) || convo.lastRequestedCategory || ""
       if (category) {
         convo.lastRequestedCategory = category
+        convo.selectedCategory = category
         convo.preferredCategory = category
         convo.mentionedCategories = uniqueItems([...(convo.mentionedCategories || []), category])
       }
@@ -2191,9 +2113,10 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
       convo.commercialStage = "recommendation"
-      convo.lastOfferType = "show_courses_by_category"
+      convo.lastOfferType = "course_catalog_request"
       clearPendingStep(convo)
-      return { intent, message: buildCoursesByCategory(category) }
+      const message = category ? buildCoursesByCategory(category) : buildGroupedCourseCatalogMessage()
+      return { intent: "course_catalog_request", message }
     }
 
     case "price":
@@ -2226,6 +2149,7 @@ Pode ser?`
       }
 
     case "specific_course": {
+      ensureSalesLead(convo)
       const courseInfo = findSiteCourseKnowledge(text, convo.course)
       if (!courseInfo?.title) {
         return {
@@ -2236,9 +2160,13 @@ Pode ser?`
 
       convo.course = courseInfo.title
       convo.selectedCourse = courseInfo.title
+      convo.salesLead.selectedCourse = courseInfo.title
+      convo.selectedCategory = inferCourseCategory(courseInfo)
       convo.path = "new_enrollment"
       convo.step = "offer_transition"
       convo.currentFlow = "commercial"
+      convo.commercialStage = "connection"
+      convo.lastOfferType = "specific_course"
       clearPendingStep(convo)
 
       return { intent, message: buildEnhancedCoursePresentation(courseInfo.title, courseInfo) }
@@ -2339,7 +2267,9 @@ function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
 
   if (detectedCourse?.name) {
     convo.course = detectedCourse.name
+    convo.selectedCourse = detectedCourse.name
     convo.salesLead.course = detectedCourse.name
+    convo.salesLead.selectedCourse = detectedCourse.name
     convo.commercialStage = convo.commercialStage === "closing" ? "closing" : "connection"
     clearPendingStep(convo)
   }
@@ -2369,12 +2299,13 @@ function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
 }
 
 function inferPreferredCategory(text = "", intentResult = {}, convo = {}) {
-  const byIntent = intentResult?.intent === "course_category" ? (intentResult?.category || "") : ""
+  const byIntent = intentResult?.intent === "course_catalog_request" ? (intentResult?.category || "") : ""
   const byText = detectCategoryFromText(text)
   const category = byIntent || byText || ""
   if (!category) return ""
 
   convo.preferredCategory = category
+  convo.selectedCategory = category
   convo.mentionedCategories = uniqueItems([...(convo.mentionedCategories || []), category])
   return category
 }
@@ -2384,6 +2315,7 @@ function inferSelectedCourse(text = "", intentResult = {}, convo = {}) {
   if (courseInfo?.title) {
     convo.selectedCourse = courseInfo.title
     convo.course = courseInfo.title
+    convo.salesLead.selectedCourse = courseInfo.title
     return courseInfo.title
   }
 
@@ -2593,21 +2525,23 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
   const parts = []
 
-  parts.push(`Ótima escolha 😊\n${displayName} costuma chamar bastante atenção de quem busca uma formação prática e com aplicação real.`)
+  parts.push(`Ótima escolha 😊\n${displayName} costuma chamar bastante atenção de quem gosta dessa área e quer aprender de forma prática.`)
 
   if (normalizedCourseInfo?.summary) {
     parts.push(String(normalizedCourseInfo.summary).trim().replace(/\.$/, "") + ".")
   }
 
-  if (normalizedCourseInfo?.learns?.length || normalizedCourseInfo?.market) {
-    const benefitLine = normalizedCourseInfo?.market
-      ? `Ele costuma ajudar bastante quem quer se preparar para oportunidades em ${normalizedCourseInfo.market}.`
-      : "Ele costuma ajudar bastante quem quer ganhar base real para entrar melhor no mercado."
-    parts.push(benefitLine)
+  if (normalizedCourseInfo?.learns?.length) {
+    parts.push(`Você aprende temas como ${normalizedCourseInfo.learns.slice(0, 4).join(", ")}.`)
   }
 
-  parts.push("E mesmo para quem está começando do zero, a trilha costuma ser bem organizada e fácil de acompanhar.")
-  parts.push("Se você quiser, eu já te mostro como ficam as parcelas para começar.")
+  if (normalizedCourseInfo?.market) {
+    parts.push(`É uma formação que costuma interessar quem quer entender melhor a rotina de ${normalizedCourseInfo.market}.`)
+  } else {
+    parts.push("É uma formação que costuma interessar quem quer ganhar base e se preparar melhor para oportunidades.")
+  }
+
+  parts.push("Se você quiser, eu te explico agora como funciona ou já te passo os valores para começar.")
 
   return parts.join("\n\n")
 }
