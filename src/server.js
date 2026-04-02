@@ -1610,31 +1610,77 @@ Pra eu te ajudar sem ficar repetindo, me diz só qual caminho você quer agora:
 • matrícula`
 }
 
-function buildMoreCoursesMessage(convo = {}) {
+function buildMoreCoursesMessage(convo = {}, userText = "") {
   const catalog = ACTIVE_SITE_COURSE_KNOWLEDGE
-  const currentOffset = Number(convo.moreCoursesOffset || 0)
   const pageSize = 5
-  const options = catalog.length ? catalog : [
-    { title: "Atendente de Farmácia" },
-    { title: "Auxiliar Administrativo" },
-    { title: "Informática" },
-    { title: "Recepcionista Hospitalar" },
-    { title: "Psicologia Básica" }
-  ]
 
-  const start = currentOffset % options.length
-  const ordered = options.slice(start).concat(options.slice(0, start))
-  const selected = ordered.slice(0, pageSize).map(item => `• ${extractCourseLabel(item.title)}`).join("\n")
+  // Detecta se o usuário mencionou uma categoria específica
+  const detectedCategory = userText ? detectCategoryFromText(userText) : ""
 
-  convo.moreCoursesOffset = (start + pageSize) % options.length
+  let pool = []
+
+  if (detectedCategory) {
+    // Filtra pelo grupo de categoria detectada
+    pool = getCoursesByCategory(detectedCategory)
+  }
+
+  // Se não detectou categoria ou a categoria não tem cursos, usa catálogo completo
+  if (!pool.length) {
+    pool = catalog.length ? catalog : [
+      { title: "Atendente de Farmácia" },
+      { title: "Auxiliar Administrativo" },
+      { title: "Informática" },
+      { title: "Recepcionista Hospitalar" },
+      { title: "Psicologia Básica" }
+    ]
+  }
+
+  // Exclui o curso atual da conversa para não repetir
+  const currentCourse = normalizeLoose(convo.course || "")
+  const filtered = pool.filter(item => normalizeLoose(extractCourseLabel(item.title || item.name || "")) !== currentCourse)
+
+  // Exclui cursos já sugeridos antes
+  const alreadySuggested = new Set((convo.lastSuggestedCourses || []).map(c => normalizeLoose(String(c || ""))))
+  const fresh = filtered.filter(item => !alreadySuggested.has(normalizeLoose(extractCourseLabel(item.title || item.name || ""))))
+
+  // Se não sobrou nada fresh, usa o pool filtrado sem essa restrição
+  const source = fresh.length >= 3 ? fresh : filtered
+
+  const currentOffset = Number(convo.moreCoursesOffset || 0)
+  const start = currentOffset % source.length
+  const ordered = source.slice(start).concat(source.slice(0, start))
+  const selected = ordered.slice(0, pageSize).map(item => `• ${extractCourseLabel(item.title || item.name || "")}`)
+
+  convo.moreCoursesOffset = (start + pageSize) % source.length
+
+  const categoryLabel = detectedCategory ? ` da área de *${COURSE_CATEGORY_LABELS[detectedCategory]}*` : ""
 
   return `Tem sim 😊
 
-Olha algumas outras opções que costumam chamar bastante atenção:
+Olha algumas outras opções${categoryLabel} que costumam chamar bastante atenção:
 
-${selected}
+${selected.join("\n")}
 
 Se quiser, me fala qual te chamou mais atenção que eu te explico melhor 👍`
+}
+
+// Função auxiliar — detecta categoria a partir do texto do usuário
+function detectCategoryFromText(text = "") {
+  const t = normalizeLoose(text)
+
+  if (/saude|saúde|farmac|enfermagem|hospital|clinica|clínica|agente|odonto|nutri|socorrista|radiolog/.test(t)) return "saude"
+  if (/administra|administrativo|rh|recursos humanos|contabil|logistic|marketing|recepcioni|operador de caixa|pedagogi/.test(t)) return "administrativo"
+  if (/beleza|barbeiro|cabeleireiro|maquiagem|unhas|sobrancelha|depila|massot|estetica|estética/.test(t)) return "beleza"
+  if (/tecnologia|informatica|informática|computador|design|grafico|gráfico|internet|digital/.test(t)) return "tecnologia"
+  if (/ingles|inglês|idioma|libras/.test(t)) return "idiomas"
+  if (/seguranca|segurança|juridico|jurídico|concurso/.test(t)) return "juridico"
+  if (/educac|educação|creche|pedagogia/.test(t)) return "educacao"
+  if (/industrial|eletric|elétric|refriger|construc|solda|mecanico|mecânico/.test(t)) return "industrial"
+  if (/agro|trator|colheita|agricola|agrícola|campo/.test(t)) return "agro"
+  if (/logistic|logística|portuar|conteiner|contêiner|transporte/.test(t)) return "logistica"
+  if (/gastronom|confeit|cozinha|culinaria/.test(t)) return "gastronomia"
+
+  return ""
 }
 
 function buildAntiLoopFallbackMessage() {
@@ -1814,8 +1860,38 @@ function hasEnrollmentIntent(text = "") {
 }
 
 function isDirectYes(text = "") {
-  const t = normalizeLoose(text)
-  return ["sim", "quero", "pode", "claro", "ok", "bora", "vamos", "essa", "esse", "a primeira", "primeira"].includes(t)
+  const t = normalizeFlowText(text)
+
+  // match exato (1 palavra)
+  const exactMatches = ["sim", "quero", "pode", "ok", "okay", "claro", "bora", "vamos", "essa", "esse", "a primeira", "primeira", "certo"]
+  if (exactMatches.includes(t)) return true
+
+  // match para afirmações compostas conhecidas
+  const compositeMatches = [
+    "quero sim",
+    "sim quero",
+    "claro que sim",
+    "pode sim",
+    "bora sim",
+    "vamos sim",
+    "ta bom",
+    "tá bom",
+    "ta certo",
+    "tá certo",
+    "com certeza",
+    "por favor",
+    "quero ver",
+    "me mostra",
+    "pode ser",
+    "fechado",
+    "aham",
+    "uhum",
+    "isso mesmo",
+    "isso sim"
+  ]
+  if (compositeMatches.includes(t)) return true
+
+  return false
 }
 
 function isFinancialCriticalIntent(text = "") {
@@ -1981,7 +2057,7 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
       clearPendingStep(convo)
-      return { intent, message: buildMoreCoursesMessage(convo) }
+      return { intent, message: buildMoreCoursesMessage(convo, text) }
 
     case "course_list":
       convo.path = "new_enrollment"
@@ -2043,10 +2119,10 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
-      setPendingStep(convo, "offer_2_courses_confirmation", { source: "goal_help" })
+      clearPendingStep(convo)
       return {
         intent,
-        message: buildCourseSuggestionMessage(convo)
+        message: buildTwoCourseRecommendationMessage(convo)
       }
 
     case "compare_courses":

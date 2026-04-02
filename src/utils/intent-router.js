@@ -39,9 +39,9 @@ const INTENT_PATTERNS = Object.freeze({
     regex: [/\bsegunda\s+via\b/, /\b2a?\s+via\b/, /\bboleto\b/]
   },
   more_courses: {
-    phrases: ["tem mais cursos", "tem mais opcoes", "mais opcoes", "outros cursos", "quais outros", "quero ver mais", "me mostra mais", "ver mais cursos", "tem outros", "quais outras opcoes"],
-    keywords: [["mais", "cursos"], ["mais", "opcoes"], ["outros", "cursos"], ["quais", "outros"]],
-    regex: [/\b(ver|mostrar|mostra)\s+mais\b/, /\boutr[oa]s?\s+cursos?\b/]
+    phrases: ["tem mais cursos", "tem mais opcoes", "mais opcoes", "outros cursos", "quais outros", "quero ver mais", "me mostra mais", "ver mais cursos", "tem outros", "quais outras opcoes", "tem mais da area", "mais cursos da area", "mais cursos de", "outras opcoes de"],
+    keywords: [["mais", "cursos"], ["mais", "opcoes"], ["outros", "cursos"], ["quais", "outros"], ["mais", "area"]],
+    regex: [/\b(ver|mostrar|mostra)\s+mais\b/, /\boutr[oa]s?\s+cursos?\b/, /\bmais\s+cursos?\s+(da|de|na)\s+area\b/]
   },
   price: {
     phrases: ["quanto custa", "qual valor", "preco", "valores", "quanto fica", "qual o preco", "me passa os valores"],
@@ -93,10 +93,16 @@ const INTENT_PATTERNS = Object.freeze({
     keywords: [["comparar", "cursos"], ["qual", "melhor", "curso"]],
     regex: [/\bcompar(ar|acao)\b.*\bcurso\b/]
   },
+  // FIX: ampliadas as frases de afirmação para cobrir "quero sim", "sim quero", etc.
   affirmation: {
-    phrases: ["sim", "quero", "pode", "claro", "ok", "certo", "manda", "pode ser"],
-    keywords: [["pode", "ser"]],
-    regex: [/^(sim|quero|pode|claro|ok|certo|manda|bora|vamos)$/]
+    phrases: [
+      "sim", "quero", "pode", "claro", "ok", "certo", "manda", "pode ser",
+      "quero sim", "sim quero", "claro que sim", "pode sim", "bora sim",
+      "quero ver", "me mostra", "vamos sim", "ta bom", "tá bom", "okay",
+      "aham", "isso", "com certeza", "por favor", "por favor sim"
+    ],
+    keywords: [["pode", "ser"], ["quero", "sim"], ["claro", "que"], ["com", "certeza"]],
+    regex: [/^(sim|quero|pode|claro|ok|certo|manda|bora|vamos)(\s+sim)?$/, /^quero\s+sim$/, /^sim\s+quero$/, /^claro\s+que\s+sim$/]
   },
   negation: {
     phrases: ["nao", "agora nao", "deixa", "cancelar", "depois vejo"],
@@ -191,9 +197,14 @@ function scoreIntent(intent, normalizedText, convo = {}, context = {}) {
     reasons.push("same as last intent")
   }
 
+  // FIX: não penalizar afirmações compostas como "quero sim" (2 palavras mas contexto claro)
   if (["affirmation", "negation"].includes(intent) && normalizedText.split(" ").length <= 2) {
-    score -= 0.12
-    reasons.push("short low-context reply")
+    // só penaliza se NÃO é uma afirmação composta conhecida
+    const isKnownComposite = ["quero sim", "sim quero", "pode sim", "bora sim", "vamos sim", "ta bom", "tá bom"].includes(normalizedText)
+    if (!isKnownComposite) {
+      score -= 0.12
+      reasons.push("short low-context reply")
+    }
   }
 
   score = Math.max(0, Math.min(0.99, score))
@@ -248,8 +259,9 @@ function resolveBestIntent(candidates = [], convo = {}) {
       const priority = HIGH_PRIORITY_INTENTS[candidate.intent] || 0
       let finalScore = candidate.score
 
+      // FIX: boost mais agressivo quando há pendingStep e usuário afirma
       if (pendingStep === "offer_2_courses_confirmation" && candidate.intent === "affirmation") {
-        finalScore += 0.2
+        finalScore += 0.35
       }
 
       if (pendingStep && ["affirmation", "negation"].includes(candidate.intent)) {
