@@ -32,6 +32,7 @@ const {
   extractPhoneFromWhatsApp,
   detectDueDay
 } = require("./utils/text")
+const { detectIntent } = require("./utils/intent-router")
 const {
   getCourseCatalog,
   getCourseByName,
@@ -3205,8 +3206,8 @@ ${sales.askDueDay()}`)
 
 async function processMessage(phone, text) {
   try {
-    const convo = getConversation(phone)
     const cleanText = normalizeFlowText(text || "")
+    const convo = getConversation(phone)
     const replyWithState = (responseText, extra = {}, intent = "") => {
       let finalText = String(responseText || "").trim()
       const incomingIntent = String(intent || "").trim()
@@ -3240,14 +3241,32 @@ async function processMessage(phone, text) {
 
     convo.lastUserMessageHash = hashMessage(text)
 
-    const strongIntent = detectStrongIntent(text, convo)
-    const contextualIntent = detectContextualIntent(text, convo)
+    const intentResult = detectIntent(text, convo, {
+      hasSpecificCourseSignal: Boolean(findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)),
+      lastHandledIntent: convo.lastHandledIntent || convo.lastIntentHandled || ""
+    })
+    const strongIntent = intentResult.strong ? intentResult.intent : ""
+    const contextualIntent = intentResult.contextIntent || detectContextualIntent(text, convo)
 
-    if (shouldOverrideCurrentFlow(strongIntent, convo)) {
-      const strongHandled = await handleStrongIntent(strongIntent, convo, text, phone)
+    if (intentResult.shouldOverrideFlow || shouldOverrideCurrentFlow(strongIntent, convo)) {
+      const strongHandled = await handleStrongIntent(strongIntent || intentResult.intent, convo, text, phone)
 
       if (strongHandled?.message) {
         if (isRepeatedBotResponse(convo, strongHandled.message, strongHandled.intent)) {
+          if (strongHandled.intent === "price") {
+            return replyWithState(
+              "Consigo te resumir rapidinho 😊 Temos opções no carnê, cartão e Pix. Se quiser, te explico qual compensa mais para o seu momento.",
+              {},
+              "anti_loop_price_reframe"
+            )
+          }
+          if (strongHandled.intent === "payment_options") {
+            return replyWithState(
+              "Para não repetir, já te adianto a melhor rota: me diga se prefere *parcelado* ou *à vista no Pix* que eu te passo o cenário ideal.",
+              {},
+              "anti_loop_payment_reframe"
+            )
+          }
           return replyWithState(buildNoRepeatFallback(), {}, "anti_loop_redirect")
         }
 
@@ -3522,7 +3541,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       return reply(buildMenuMessage())
     }
 
-    if (shouldConsumePendingStep(strongIntent, convo)) {
+    if (intentResult.shouldConsumePendingStep || shouldConsumePendingStep(strongIntent, convo)) {
       const pendingHandled = handlePendingCommercialStep(convo, text, contextualIntent)
       if (pendingHandled?.message) {
         return replyWithState(pendingHandled.message, {}, pendingHandled.intent)
