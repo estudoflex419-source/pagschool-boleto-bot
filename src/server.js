@@ -581,7 +581,7 @@ function buildPaymentSummaryLine() {
 }
 
 function buildPixSoftMention() {
-  return "Se preferir, também posso te explicar a opção à vista no Pix."
+  return ""
 }
 
 function wantsHumanSupport(text = "") {
@@ -1679,7 +1679,7 @@ function buildMoreCoursesMessage(convo = {}, userText = "") {
 
   convo.lastOfferType = "site_catalog_redirect"
   convo.commercialStage = "catalog_redirect"
-  setPendingStep(convo, "awaiting_course_selection", {
+  setPendingStep(convo, "awaiting_course", {
     source: "course_catalog_request",
     category: preferredCategory || ""
   })
@@ -1744,7 +1744,7 @@ function buildTwoCourseRecommendationMessage(convo = {}) {
   convo.commercialStage = "catalog_redirect"
   convo.step = "course_selection"
   convo.lastOfferType = "site_catalog_redirect"
-  setPendingStep(convo, "awaiting_course_selection", { source: "legacy_two_course_path" })
+  setPendingStep(convo, "awaiting_course", { source: "legacy_two_course_path" })
   return buildCourseListMessage()
 }
 
@@ -2046,12 +2046,6 @@ function shouldConsumePendingStep(intent = "", convo = {}) {
   return false
 }
 
-function buildCourseSuggestionMessage(convo = {}) {
-  return `Perfeito 😊
-Se você quiser, eu posso te mostrar 2 opções que costumam combinar com o que você busca.
-Pode ser?`
-}
-
 function buildPriceMessage(convo = {}, selectedCourse = null) {
   const courseInfo = selectedCourse || findSiteCourseKnowledge(convo.course, convo.course)
   return buildPriceAnswerMessage(convo.course, courseInfo)
@@ -2109,7 +2103,7 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.currentFlow = "commercial"
       convo.commercialStage = "catalog_redirect"
       convo.lastOfferType = "site_catalog_redirect"
-      setPendingStep(convo, "awaiting_course_selection", {
+      setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: category || ""
       })
@@ -2185,7 +2179,7 @@ Pode ser?`
       convo.currentFlow = "commercial"
       convo.commercialStage = "catalog_redirect"
       convo.lastOfferType = "site_catalog_redirect"
-      setPendingStep(convo, "awaiting_course_selection", { source: "goal_help" })
+      setPendingStep(convo, "awaiting_course", { source: "goal_help" })
       return {
         intent,
         message: buildCourseListMessage()
@@ -2203,7 +2197,7 @@ Pode ser?`
 }
 
 function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "") {
-  if (convo.pendingStep === "awaiting_course_selection") {
+  if (convo.pendingStep === "awaiting_course" || convo.pendingStep === "awaiting_course_selection") {
     const selectedCourse = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
 
     if (selectedCourse?.title || selectedCourse?.name) {
@@ -2215,13 +2209,13 @@ function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
       return {
-        intent: "pending_awaiting_course_selection_affirmation",
+        intent: "pending_awaiting_course_affirmation",
         message: buildCatalogRedirectAffirmationMessage()
       }
     }
 
     return {
-      intent: "pending_awaiting_course_selection_reminder",
+      intent: "pending_awaiting_course_reminder",
       message: buildCourseListMessage()
     }
   }
@@ -2638,7 +2632,6 @@ function buildCourseDetailFollowUpMessage(text = "", courseInfo = null) {
   lines.push("Se fizer sentido para você, já te levo para o fechamento agora.")
   lines.push("Para você já visualizar, as parcelas para começar hoje são:")
   lines.push(buildPaymentSummaryLine())
-  lines.push(buildPixSoftMention())
   lines.push("Se quiser, eu te ajudo a escolher a melhor e já seguimos para matrícula.")
 
   return lines.join("\n")
@@ -2695,8 +2688,6 @@ function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {
 
 Hoje a forma mais leve de começar costuma ficar assim:
 ${buildPaymentSummaryLine()}
-
-${buildPixSoftMention()}
 
 ${courseSummary}
 
@@ -3512,7 +3503,7 @@ async function processMessage(phone, text) {
       convo.currentFlow = "commercial"
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
-      setPendingStep(convo, "awaiting_course_selection", {
+      setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: detectCategoryFromText(text) || convo.preferredCategory || ""
       })
@@ -3558,7 +3549,7 @@ async function processMessage(phone, text) {
         convo.step = "course_selection"
         convo.lastOfferType = "site_catalog_redirect"
         convo.commercialStage = "catalog_redirect"
-        setPendingStep(convo, "awaiting_course_selection", {
+        setPendingStep(convo, "awaiting_course", {
           source: "course_catalog_request",
           category: convo.preferredCategory || ""
         })
@@ -3860,7 +3851,13 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.path = "new_enrollment"
         convo.step = "course_selection"
         convo.paymentTeaserShown = false
-        return reply("Perfeito 😊 Me manda o nome do curso que você quer conhecer e eu te explico como funciona.")
+        convo.lastOfferType = "site_catalog_redirect"
+        convo.commercialStage = "catalog_redirect"
+        setPendingStep(convo, "awaiting_course", {
+          source: "course_catalog_request",
+          category: convo.preferredCategory || ""
+        })
+        return reply(buildCourseListMessage())
       }
     }
 
@@ -3902,7 +3899,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
-      setPendingStep(convo, "awaiting_course_selection", {
+      setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
       })
@@ -3915,7 +3912,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
-      setPendingStep(convo, "awaiting_course_selection", {
+      setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
       })
@@ -3928,7 +3925,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
-      setPendingStep(convo, "awaiting_course_selection", {
+      setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
       })
@@ -4193,7 +4190,7 @@ Pode ser?`)
         convo.paymentTeaserShown = false
         convo.lastOfferType = "site_catalog_redirect"
         convo.commercialStage = "catalog_redirect"
-        setPendingStep(convo, "awaiting_course_selection", {
+        setPendingStep(convo, "awaiting_course", {
           source: "course_catalog_request",
           category: convo.preferredCategory || ""
         })
@@ -4244,7 +4241,7 @@ Pode ser?`)
         convo.paymentTeaserShown = false
         convo.lastOfferType = "site_catalog_redirect"
         convo.commercialStage = "catalog_redirect"
-        setPendingStep(convo, "awaiting_course_selection", {
+        setPendingStep(convo, "awaiting_course", {
           source: "course_catalog_request",
           category: convo.preferredCategory || ""
         })
