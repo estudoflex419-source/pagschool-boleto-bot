@@ -3293,6 +3293,14 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     }
 
     if (convo.step === "payment_intro") {
+      if (sales.isCourseListIntent(text) || wantsGroupedCourseCatalog(text)) {
+        convo.path = "new_enrollment"
+        convo.step = "course_selection"
+        convo.course = ""
+        convo.paymentTeaserShown = false
+        return reply(buildGroupedCourseCatalogMessage())
+      }
+
       if (wantsPaymentDetails(text) || isPaymentGuidanceQuestion(text)) {
         convo.step = "payment_choice"
         return reply(buildPaymentChoiceMessage())
@@ -3330,6 +3338,14 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
     }
 
     if (convo.step === "payment_choice") {
+      if (sales.isCourseListIntent(text) || wantsGroupedCourseCatalog(text)) {
+        convo.path = "new_enrollment"
+        convo.step = "course_selection"
+        convo.course = ""
+        convo.paymentTeaserShown = false
+        return reply(buildGroupedCourseCatalogMessage())
+      }
+
       if (isPaymentGuidanceQuestion(text)) {
         return reply(buildPaymentHelpMessage())
       }
