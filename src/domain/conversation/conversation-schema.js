@@ -26,6 +26,8 @@ function createDefaultConversation() {
     alreadySuggestedCourses: false,
     alreadyAnsweredPrice: false,
     lastCommercialResponseHash: "",
+    lastBotMessageHash: "",
+    lastIntentHandled: "",
     name: "",
     cpf: "",
     birthDate: "",
