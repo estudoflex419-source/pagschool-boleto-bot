@@ -665,6 +665,10 @@ function wantsStartNow(text = "") {
     t.includes("quero me inscrever") ||
     t.includes("quero fazer a inscricao") ||
     t.includes("quero fazer a inscrição") ||
+    t.includes("como faco pra me inscrever") ||
+    t.includes("como faço pra me inscrever") ||
+    t.includes("como entro") ||
+    t.includes("como que eu entro") ||
     t.includes("posso começar") ||
     t.includes("pode explicar a inscricao") ||
     t.includes("pode explicar a inscrição") ||
@@ -808,6 +812,37 @@ Para começar, funciona assim:
 3) no final eu te envio o resumo para você confirmar
 
 Se quiser, seguimos agora.`
+}
+
+function openEnrollmentConfirmationStep(convo = {}) {
+  ensureSalesLead(convo)
+  convo.path = "new_enrollment"
+  convo.step = "offer_transition"
+  convo.currentFlow = "commercial"
+  convo.commercialStage = "enrollment"
+  convo.lastOfferType = "enrollment"
+  convo.enrollmentIntent = true
+  convo.salesLead.stage = "awaiting_enrollment_intro_confirmation"
+  setPendingStep(convo, "enrollment_intro_confirmation", { source: "enrollment_intent" })
+}
+
+function advanceEnrollmentFromIntroConfirmation(convo = {}) {
+  ensureSalesLead(convo)
+  clearPendingStep(convo)
+  convo.path = "new_enrollment"
+  convo.step = "payment_intro"
+  convo.currentFlow = "commercial"
+  convo.commercialStage = "enrollment"
+  convo.lastOfferType = "enrollment"
+  convo.enrollmentIntent = true
+  convo.paymentTeaserShown = false
+  convo.salesLead.stage = "payment_intro"
+
+  return `Ótimo 😊
+
+${buildPaymentIntroMessage()}
+
+Se você quiser, eu já sigo com você para a matrícula.`
 }
 
 function buildEnrollmentStartMessage(convo = {}) {
@@ -1906,7 +1941,19 @@ function wantsPaymentOptionsIntent(text = "") {
 
 function wantsEnrollmentIntent(text = "") {
   const t = normalizeLoose(text)
-  return ["quero me matricular", "quero comecar", "quero começar", "como faco pra entrar", "como faço pra entrar", "quero fazer", "quero iniciar"].some(term => t.includes(term))
+  return [
+    "quero me matricular",
+    "quero comecar",
+    "quero começar",
+    "como faco pra entrar",
+    "como faço pra entrar",
+    "como faco pra me inscrever",
+    "como faço pra me inscrever",
+    "como entro",
+    "como que eu entro",
+    "quero fazer",
+    "quero iniciar"
+  ].some(term => t.includes(term))
 }
 
 function wantsHowCourseWorksIntent(text = "") {
@@ -1953,6 +2000,14 @@ function detectStrongIntent(text = "", convo = {}) {
 function detectContextualIntent(text = "", convo = {}) {
   if (isDirectYes(text) && convo.pendingStep === "offer_2_courses_confirmation") {
     return "confirm_offer_two_courses"
+  }
+
+  if (isDirectYes(text) && convo.pendingStep === "enrollment_intro_confirmation") {
+    return "confirm_enrollment_intro"
+  }
+
+  if (isNegativeReply(text) && convo.pendingStep === "enrollment_intro_confirmation") {
+    return "decline_enrollment_intro"
   }
 
   if (isDirectYes(text) && ["offer_transition", "payment_intro"].includes(convo.step)) {
@@ -2075,11 +2130,14 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       return { intent, message: buildPaymentChoiceMessage() }
 
     case "enrollment":
-      convo.path = "new_enrollment"
-      convo.step = "offer_transition"
-      convo.currentFlow = "commercial"
-      convo.salesLead.stage = "enrollment_explanation"
-      return { intent, message: buildEnrollmentHowToMessage() }
+      openEnrollmentConfirmationStep(convo)
+      return {
+        intent,
+        message: `Perfeito 😊
+
+Pra se inscrever, eu te explico rapidinho como funciona a matrícula e já te mostro a forma mais leve de começar.
+Pode ser?`
+      }
 
     case "specific_course": {
       const courseInfo = findSiteCourseKnowledge(text, convo.course)
@@ -2131,6 +2189,30 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
 }
 
 function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "") {
+  if (convo.pendingStep === "enrollment_intro_confirmation") {
+    if (contextualIntent === "confirm_enrollment_intro") {
+      return {
+        intent: "pending_enrollment_intro_confirmed",
+        message: advanceEnrollmentFromIntroConfirmation(convo)
+      }
+    }
+
+    if (contextualIntent === "decline_enrollment_intro") {
+      clearPendingStep(convo)
+      convo.salesLead.stage = ""
+      convo.commercialStage = "connection"
+      return {
+        intent: "pending_enrollment_intro_declined",
+        message: "Sem problema 😊 Se quiser, eu te explico melhor o curso primeiro e depois seguimos para matrícula."
+      }
+    }
+
+    return {
+      intent: "pending_enrollment_intro_reminder",
+      message: "Perfeito 😊 Se você quiser, eu já te explico rapidinho como funciona a matrícula para seguir sem complicação."
+    }
+  }
+
   if (convo.pendingStep !== "offer_2_courses_confirmation") return null
 
   if (contextualIntent === "confirm_offer_two_courses") {
@@ -3132,6 +3214,8 @@ function isEnrollmentHowToIntent(text) {
 
   return [
     "como me inscrevo",
+    "como faco pra me inscrever",
+    "como faço pra me inscrever",
     "como faz para me inscrever",
     "como faco para me inscrever",
     "como faço para me inscrever",
@@ -3144,7 +3228,9 @@ function isEnrollmentHowToIntent(text) {
     "quero fazer matricula",
     "quero fazer matrícula",
     "como comeco",
-    "como começo"
+    "como começo",
+    "como entro",
+    "como que eu entro"
   ].some(term => t.includes(term))
 }
 
@@ -3382,9 +3468,15 @@ async function processMessage(phone, text) {
       }
 
       if (wantsToEnroll) {
-        convo.path = "new_enrollment"
-        convo.step = "offer_transition"
-        return replyWithState(buildEnrollmentHowToMessage(), {}, "wants_to_enroll")
+        openEnrollmentConfirmationStep(convo)
+        return replyWithState(
+          `Perfeito 😊
+
+Pra se inscrever, eu te explico rapidinho como funciona a matrícula e já te mostro a forma mais leve de começar.
+Pode ser?`,
+          {},
+          "wants_to_enroll"
+        )
       }
     }
 
@@ -3419,6 +3511,19 @@ async function processMessage(phone, text) {
         convo.salesLead.stage = "enrollment_explanation"
 
         return reply(buildEnrollmentHowToMessage())
+      }
+    }
+
+    if (currentStage === "awaiting_enrollment_intro_confirmation") {
+      if (isSimplePositive(cleanText) || isDirectYes(cleanText)) {
+        return reply(advanceEnrollmentFromIntroConfirmation(convo))
+      }
+
+      if (isNegativeReply(cleanText)) {
+        clearPendingStep(convo)
+        convo.salesLead.stage = ""
+        convo.commercialStage = "connection"
+        return reply("Sem problema 😊 Se quiser, eu te explico melhor o curso primeiro e depois seguimos para matrícula.")
       }
     }
 
@@ -3920,8 +4025,11 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
     if (convo.step === "offer_transition") {
       if (isEnrollmentHowToIntent(text)) {
-        convo.salesLead.stage = "enrollment_explanation"
-        return reply(buildEnrollmentHowToMessage())
+        openEnrollmentConfirmationStep(convo)
+        return reply(`Perfeito 😊
+
+Pra se inscrever, eu te explico rapidinho como funciona a matrícula e já te mostro a forma mais leve de começar.
+Pode ser?`)
       }
 
       if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
