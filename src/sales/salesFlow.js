@@ -612,7 +612,7 @@ function buildValueConnection(convo = {}) {
 function materialPitch() {
   return `Perfeito 😊
 
-Os cursos são gratuitos, e existe apenas a taxa única do material didático para acompanhar o conteúdo com mais organização.`
+O investimento é na taxa única do material didático + acesso à plataforma para acompanhar o conteúdo com mais organização.`
 }
 
 function investmentMessage() {
@@ -828,7 +828,7 @@ function detectCloseMoment(text) {
 function detectPaymentMethod(text) {
   const t = normalizeText(text)
 
-  if (t === "1" || t.includes("carne") || t.includes("carnê") || t.includes("boleto")) {
+  if (t === "1" || t.includes("carne") || t.includes("carnê")) {
     return "Carnê"
   }
 

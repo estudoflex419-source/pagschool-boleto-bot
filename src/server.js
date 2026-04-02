@@ -671,29 +671,23 @@ Assim a equipe já pega seu caso com mais contexto.`
 function buildPaymentIntroMessage() {
   return `Perfeito 😊
 
-O curso é totalmente gratuito.
+Aqui o investimento é na *taxa de material didático + acesso à plataforma*.
 
-Você paga apenas a *taxa única do material didático*.
-
-Se quiser, eu posso te mostrar os valores certinhos e também te explicar qual opção costuma fazer mais sentido para o seu caso.`
+Se quiser, eu já te passo os valores certinhos e te ajudo a escolher a forma que fica mais leve.`
 }
 
 function buildPaymentChoiceMessage() {
   return `Perfeito 😊
 
-O curso é totalmente gratuito.
-Existe apenas a taxa única do material didático.
+Hoje o investimento do material didático + acesso funciona assim:
 
-*VALOR DO MATERIAL DIDÁTICO:*
 ${buildPaymentSummaryLine()}
 
-Qual opção você quer analisar melhor?
+Se você quiser, eu te digo rapidinho qual costuma combinar melhor com seu momento.
 
 1 - Carnê
 2 - Cartão
-3 - À vista / Pix
-
-Se quiser, eu também posso te dizer qual costuma compensar mais conforme seu objetivo.`
+3 - À vista / Pix`
 }
 
 function buildPaymentMethodReply(method) {
@@ -853,7 +847,7 @@ function buildFullCourseDetailsMessage(courseInfo) {
 
   lines.push("Se fizer sentido para você, já posso conduzir seu fechamento de matrícula agora mesmo.")
   lines.push("Para avançar, me envie:")
-  lines.push("1 - forma de pagamento (PIX, boleto único ou cartão)")
+  lines.push("1 - forma de pagamento (Pix, carnê ou cartão)")
   lines.push("2 - nome completo")
   lines.push("3 - CPF")
 
@@ -1456,33 +1450,17 @@ function buildInstitutionalTrustBlock() {
 }
 
 function buildMenuMessage() {
-  return `Oi 😊 Seja bem-vindo(a) à Estudo Flex.
+  return `Oi, seja bem-vindo(a) 😊
 
-Eu sou a *LILO*, sua assistente virtual.
-
-Posso te ajudar de 3 formas:
-
-1 - Já sou aluno(a) e preciso de suporte / segunda via
-2 - Quero fazer uma nova matrícula
-3 - Quero descobrir qual curso combina mais comigo
-
-Se preferir, também pode me responder em frase.
-Exemplo: *quero um curso para trabalhar mais rápido*.`
+Me fala: você quer conhecer um curso, saber valores ou já quer fazer sua matrícula?`
 }
 
 function buildCourseListMessage() {
   return `Perfeito 😊
 
-Pra eu te indicar melhor, posso separar por área:
+Se você já tiver um curso em mente, me manda o nome direto que eu já te explico e te passo os valores.
 
-1 - Saúde
-2 - Administrativo / escritório
-3 - Beleza / estética
-4 - Tecnologia / internet
-5 - Ver todos os cursos separados
-6 - Já tenho um curso em mente
-
-Pode me responder com o número ou me mandar direto o nome do curso.`
+Se ainda estiver decidindo, eu te indico 2 ou 3 opções certeiras pro seu objetivo.`
 }
 
 function isLowContextReply(text = "") {
@@ -1512,15 +1490,7 @@ function isLowContextReply(text = "") {
 function buildGoalClarification(courseName = "") {
   const label = String(courseName || "esse curso").trim()
 
-  return `Perfeito 😊 Pra eu te orientar melhor no *${label}*, me conta o que é mais importante para você agora:
-
-- conseguir emprego mais rápido
-- melhorar currículo
-- mudar de área
-- começar do zero
-- aumentar renda
-
-Pode me responder do seu jeito mesmo.`
+  return `Perfeito 😊 Pra eu te orientar melhor no *${label}*, qual é seu principal objetivo agora?`
 }
 
 function mapGoalReply(text = "") {
@@ -1565,7 +1535,7 @@ function buildExperienceClarification(courseName = "") {
     return "Entendi 😊 No inglês, você está começando do zero ou já tem alguma base? Isso me ajuda a te orientar melhor."
   }
 
-  return "Entendi 😊 Você está começando do zero ou já teve algum contato com essa área? Isso me ajuda a te orientar de forma mais assertiva."
+  return "Entendi 😊 Você está começando do zero ou já teve contato com a área?"
 }
 
 function hasExplicitExperienceSignal(text = "") {
@@ -1593,6 +1563,72 @@ function extractGoalAndExperience(text = "") {
     : ""
 
   return { goal, experience }
+}
+
+function hasZeroExperienceIntent(text = "") {
+  const t = normalizeLoose(text)
+  return [
+    "comecando do zero",
+    "comecando do zero",
+    "começar do zero",
+    "comecar do zero",
+    "do zero",
+    "sem experiencia",
+    "sem experiência",
+    "nunca trabalhei",
+    "nao tenho experiencia",
+    "não tenho experiência"
+  ].some(signal => t.includes(signal))
+}
+
+function hasEnrollmentIntent(text = "") {
+  const t = normalizeLoose(text)
+  return [
+    "quero me matricular",
+    "quero matricular",
+    "quero fechar",
+    "pode matricular",
+    "vamos fechar",
+    "quero iniciar",
+    "quero comecar",
+    "quero começar",
+    "vamos seguir",
+    "bora fechar"
+  ].some(signal => t.includes(signal))
+}
+
+function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
+  ensureSalesLead(convo)
+  const now = new Date().toISOString()
+  const diagnosis = extractGoalAndExperience(text)
+
+  if (detectedCourse?.name) {
+    convo.course = detectedCourse.name
+    convo.salesLead.course = detectedCourse.name
+    convo.commercialStage = convo.commercialStage === "closing" ? "closing" : "connection"
+  }
+
+  if (diagnosis.goal) {
+    convo.goal = diagnosis.goal
+    convo.objectiveCapturedAt = now
+    if (!convo.commercialStage || convo.commercialStage === "discovery") {
+      convo.commercialStage = "connection"
+    }
+  }
+
+  if (diagnosis.experience || hasZeroExperienceIntent(text)) {
+    convo.experience = diagnosis.experience || "começando do zero"
+  }
+
+  if (isPriceQuestion) {
+    convo.priceShown = true
+    convo.commercialStage = "pricing"
+  }
+
+  if (hasEnrollmentIntent(text) || sales.detectCloseMoment(text)) {
+    convo.enrollmentIntent = true
+    convo.commercialStage = "closing"
+  }
 }
 
 function mapExperienceReply(text = "") {
@@ -1834,7 +1870,7 @@ function buildCourseDetailFollowUpMessage(text = "", courseInfo = null) {
   lines.push(`Taxa do material didático: ${buildPaymentSummaryLine()}`)
   lines.push("Para avançar, me responde com:")
   lines.push("1 - PIX")
-  lines.push("2 - boleto único")
+  lines.push("2 - carnê")
   lines.push("3 - cartão")
 
   return lines.join("\n")
@@ -1889,27 +1925,15 @@ function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {
   const { compactCourseExplanation = true } = options
   const courseLabel = courseName || courseInfo?.title || ""
   const courseSummary = buildCourseSalesSummary(courseName, courseInfo, compactCourseExplanation)
-  const freeLine = courseLabel
-    ? `${courseLabel} é *100% gratuito*, sem mensalidade.`
-    : "Os cursos são *100% gratuitos*, sem mensalidade."
 
   return `Ótima pergunta 😊
 
-${courseSummary}
-${freeLine}
-
-Você paga apenas a *taxa única do material didático*:
-
+Hoje o investimento do material didático + acesso à plataforma é:
 ${buildPaymentSummaryLine()}
 
-Se quiser, eu posso seguir de 2 formas:
-- te indicar a opção que mais compensa
-- ou já iniciar sua matrícula
+${courseSummary}
 
-Também pode me responder direto com:
-1 - Carnê
-2 - Cartão
-3 - Pix`
+Se quiser, eu já te indico a forma que costuma ficar melhor pra você ou já inicio sua matrícula agora.`
 }
 
 function buildPixMessage() {
@@ -2694,6 +2718,16 @@ async function processMessage(phone, text) {
     const cleanText = normalizeFlowText(text || "")
 
     ensureSalesLead(convo)
+    const matchedKnowledgeCourse = findCourseInText(text)
+    const detectedCourse = matchedKnowledgeCourse
+      ? { name: extractCourseLabel(matchedKnowledgeCourse) }
+      : sales.findCourse(text)
+    const courseInfoFromText = findSiteCourseKnowledge(text, convo.course)
+    const isPriceQuestion = sales.isPriceQuestion(text)
+    const normalizedText = normalize(text || "")
+    const raw = String(text || "").trim().toLowerCase()
+
+    updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion)
 
     if (wantsHumanSupport(text)) {
       convo.humanSupportRequested = true
@@ -2890,15 +2924,6 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       return reply(buildEnrollmentConfirmation(enrollment, paymentMethod))
     }
 
-    const normalizedText = normalize(text || "")
-    const matchedKnowledgeCourse = findCourseInText(text)
-    const detectedCourse = matchedKnowledgeCourse
-      ? { name: extractCourseLabel(matchedKnowledgeCourse) }
-      : sales.findCourse(text)
-    const courseInfoFromText = findSiteCourseKnowledge(text, convo.course)
-    const raw = String(text || "").trim().toLowerCase()
-    const isPriceQuestion = sales.isPriceQuestion(text)
-
     const paymentSelectedInFlexibleFlow = detectPaymentSelection(text, {
       allowNumeric: ["payment_intro", "payment_choice", "payment_deferral_day", "post_sale"].includes(convo.step)
     })
@@ -2941,7 +2966,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.path = "new_enrollment"
         convo.step = "course_selection"
         convo.paymentTeaserShown = false
-        return reply(buildCourseListMessage())
+        return reply("Perfeito 😊 Me manda o curso que você tem em mente ou seu objetivo (ex.: conseguir emprego mais rápido) que eu te ajudo a escolher.")
       }
     }
 
@@ -2981,7 +3006,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
-      return reply(buildCourseListMessage())
+      return reply("Perfeito 😊 Me conta só seu objetivo principal agora que eu te indico o melhor caminho.")
     }
 
     if (sales.isCourseListIntent(text) && !convo.course) {
@@ -2996,6 +3021,15 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.step = "course_selection"
       convo.paymentTeaserShown = false
       return reply(buildGroupedCourseCatalogMessage())
+    }
+
+    if (!convo.course && (convo.goal || hasZeroExperienceIntent(text))) {
+      convo.path = "new_enrollment"
+      convo.step = "course_selection"
+      const recommendation = convo.goal
+        ? "Pelo seu objetivo, costuma valer focar em cursos práticos que aceleram currículo e entrada no mercado."
+        : "Começar do zero não atrapalha 😊 dá para evoluir passo a passo com trilha prática."
+      return reply(`${recommendation}\n\nSe você quiser, eu já te indico 2 cursos que combinam com isso.`)
     }
 
     if (detectedCourse?.name) {
@@ -3025,15 +3059,15 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         return reply(buildCourseQuickResumeMessage(courseInfo))
       }
 
-      convo.step = "diagnosis_goal"
+      convo.step = "offer_transition"
       convo.paymentTeaserShown = false
-      return reply(buildFullCourseDetailsMessage(courseInfo))
+      return reply(buildEnhancedCoursePresentation(detectedCourse.name, courseInfo))
     }
 
     if (!detectedCourse && courseInfoFromText && convo.step === "course_selection") {
       convo.path = "new_enrollment"
       convo.course = courseInfoFromText.title
-      convo.step = "diagnosis_goal"
+      convo.step = "offer_transition"
       convo.paymentTeaserShown = false
 
       if (isPriceQuestion) {
@@ -3041,7 +3075,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         return reply(buildPriceAnswerMessage(courseInfoFromText.title, courseInfoFromText))
       }
 
-      return reply(buildFullCourseDetailsMessage(courseInfoFromText))
+      return reply(buildEnhancedCoursePresentation(courseInfoFromText.title, courseInfoFromText))
     }
 
     if (isPriceQuestion && !convo.course) {
@@ -3190,9 +3224,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         return reply(buildEnrollmentHowToMessage())
       }
 
-      if (isLowContextReply(text)) {
-        return reply(buildGoalClarification(convo.course))
-      }
+      if (isLowContextReply(text)) return reply(buildGoalClarification(convo.course))
 
       const diagnosis = extractGoalAndExperience(text)
       convo.goal = diagnosis.goal
@@ -3203,8 +3235,8 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         return reply(buildConsultativeOfferTransition(convo))
       }
 
-      convo.step = "diagnosis_experience"
-      return reply(buildExperienceClarification(convo.course))
+      convo.step = "offer_transition"
+      return reply(buildConsultativeOfferTransition(convo))
     }
 
     if (convo.step === "diagnosis_experience") {
@@ -3223,35 +3255,12 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         return reply(buildEnrollmentHowToMessage())
       }
 
-      if (raw === "1") {
-        convo.step = "payment_intro"
-        convo.paymentTeaserShown = false
-        ensureSalesLead(convo)
-        convo.salesLead.stage = "payment_intro"
-        return reply(buildPaymentIntroMessage())
-      }
-
-      if (raw === "2") {
-        const courseInfo =
-          findSiteCourseKnowledge(convo.course, convo.course) ||
-          buildFallbackCourseInfoByName(convo.course)
-
-        if (courseInfo) {
-          return reply(buildFullCourseDetailsMessage(courseInfo))
-        }
-      }
-
-      if (raw === "3") {
-        convo.salesLead.stage = "enrollment_explanation"
-        return reply(buildEnrollmentHowToMessage())
-      }
-
       if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
         ensureSalesLead(convo)
         convo.salesLead.stage = "payment_intro"
-        return reply(buildPaymentIntroMessage())
+        return reply("Perfeito 😊 então vamos avançar. Posso te passar os valores agora e já te orientar na matrícula.")
       }
 
       if (isPriceQuestion) {
