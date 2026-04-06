@@ -1646,10 +1646,20 @@ function buildInstitutionalTrustBlock() {
   ].join("\n")
 }
 
+function buildCommercialEntryMessage() {
+  return `Perfeito 😊
+Eu posso te ajudar com 3 coisas:
+1 - te indicar um curso
+2 - te passar os valores
+3 - te explicar como funciona
+
+Se quiser, também pode me mandar direto o nome do curso que te chamou atenção.`
+}
+
 function buildMenuMessage() {
   return `Oi, seja bem-vindo(a) 😊
 
-Me fala: você quer conhecer um curso, saber valores ou já quer fazer sua matrícula?`
+${buildCommercialEntryMessage()}`
 }
 
 function buildCourseListMessage() {
@@ -1762,11 +1772,7 @@ function registerBotReply(convo = {}, responseText = "", intent = "") {
 function buildNoRepeatFallback() {
   return `Perfeito 😊
 
-Pra eu te ajudar sem ficar repetindo, me diz só qual caminho você quer agora:
-• ver mais cursos
-• valores
-• como funciona
-• matrícula`
+Pra seguir sem enrolação, me diga só um caminho agora: *curso*, *valores* ou *matrícula*.`
 }
 
 function preventLoop(convo = {}, message = "", intent = "") {
@@ -2083,7 +2089,7 @@ function isFinancialCriticalIntent(text = "") {
 
 function wantsPriceIntent(text = "") {
   const t = normalizeLoose(text)
-  return ["quanto custa", "qual valor", "preco", "preço", "valores", "quanto fica"].some(term => t.includes(term))
+  return ["quanto custa", "qual valor", "preco", "preço", "valores", "quanto fica", "valor"].some(term => t.includes(term))
 }
 
 function wantsPaymentOptionsIntent(text = "") {
@@ -2095,6 +2101,8 @@ function wantsEnrollmentIntent(text = "") {
   const t = normalizeLoose(text)
   return [
     "quero me matricular",
+    "quero matricula",
+    "quero matrícula",
     "quero comecar",
     "quero começar",
     "como faco pra entrar",
@@ -2103,7 +2111,6 @@ function wantsEnrollmentIntent(text = "") {
     "como faço pra me inscrever",
     "como entro",
     "como que eu entro",
-    "quero fazer",
     "quero iniciar"
   ].some(term => t.includes(term))
 }
@@ -2146,6 +2153,9 @@ function detectStrongIntent(text = "", convo = {}) {
   if (isFinancialCriticalIntent(text) && !wantsPaymentOptionsIntent(text)) return "second_via"
   if (wantsHumanAgentIntent(text)) return "human_agent"
   if (wantsStartOverIntent(text)) return "start_over"
+  if ((convo.selectedCourse || convo.course) && wantsHowCourseWorksIntent(text)) return "how_course_works"
+  if ((convo.selectedCourse || convo.course) && wantsPriceIntent(text)) return "price"
+  if ((convo.selectedCourse || convo.course) && (wantsEnrollmentIntent(text) || isEnrollmentHowToIntent(text) || wantsStartNow(text))) return "enrollment"
   if (wantsMoreCourses(text) || isGeneralCourseCatalogQuestion(text)) return "course_catalog_request"
   if (wantsCompareCoursesIntent(text)) return "compare_courses"
   if (sales.isCourseCatalogRequest(text) || wantsGroupedCourseCatalog(text)) return "course_catalog_request"
@@ -2228,14 +2238,22 @@ function buildPriceMessage(convo = {}, selectedCourse = null) {
 
 function buildHumanizedFallback(convo = {}, text = "") {
   if (isDirectYes(text)) {
-    return "Perfeito 😊 Eu te acompanho daqui. Você quer que eu te mostre cursos, valores ou já seguimos para matrícula?"
+    return `Perfeito 😊
+
+Me diz só o que você prefere agora: *curso*, *valores* ou *matrícula*.`
   }
 
-  if (convo.course) {
-    return `Perfeito 😊 Sobre *${convo.course}*, você quer ver valores, como funciona ou já iniciar sua matrícula?`
+  if (convo.course || convo.selectedCourse) {
+    const selected = convo.selectedCourse || convo.course
+    return `Perfeito 😊 Sobre *${selected}*, eu posso te explicar melhor como funciona, te passar os valores ou já iniciar sua matrícula.`
   }
 
-  return "Perfeito 😊 Me conta em uma frase o que você quer agora (curso, valor, pagamento ou matrícula) e eu sigo direto nisso."
+  const normalizedText = normalizeFlowText(text)
+  if (["quero fazer o curso", "quero conhecer os cursos", "quero estudar", "curso", "quero saber"].includes(normalizedText)) {
+    return buildCommercialEntryMessage()
+  }
+
+  return buildCommercialEntryMessage()
 }
 
 async function handleStrongIntent(intent = "", convo = {}, text = "", phone = "") {
@@ -2360,8 +2378,14 @@ Pode ser?`
     }
 
     case "how_course_works":
-      if (convo.course) {
-        return { intent, message: buildCourseFunctionalityMessage(convo.course) }
+      if (convo.selectedCourse || convo.course) {
+        const selected = convo.selectedCourse || convo.course
+        convo.path = "new_enrollment"
+        convo.step = "offer_transition"
+        convo.currentFlow = "commercial"
+        convo.commercialStage = "course_detail"
+        convo.lastOfferType = "course_explanation_detailed"
+        return { intent, message: buildCourseFunctionalityMessage(selected) }
       }
       return {
         intent,
@@ -2774,19 +2798,42 @@ function buildSelectedCourseAnswer(_text, courseInfo) {
 }
 
 function buildCourseFunctionalityMessage(courseName = "o curso") {
-  const safeCourseName = String(courseName || "").trim() || "o curso"
+  const fallbackName = String(courseName || "").trim() || "o curso"
+  const courseInfo =
+    findSiteCourseKnowledge(courseName, courseName) ||
+    buildFallbackCourseInfoByName(courseName)
 
-  return `Perfeito 😊
+  const displayName = courseInfo?.title || fallbackName
+  const summary = String(courseInfo?.summary || courseInfo?.description || "").trim().replace(/\.$/, "")
+  const workload = String(courseInfo?.workload || "").trim()
+  const duration = String(courseInfo?.duration || "").trim()
+  const learns = uniqueItems(courseInfo?.learns || []).slice(0, 8)
 
-O ${safeCourseName} funciona de forma online, pela plataforma da escola.
+  const blocks = ["Perfeito 😊"]
 
-Depois da inscrição, você recebe seu usuário e senha para acessar as aulas e estudar no seu tempo, com total flexibilidade.
+  if (summary) {
+    blocks.push(`Sobre *${displayName}*: ${summary}.`)
+  } else {
+    blocks.push(`Sobre *${displayName}*: é uma formação prática para desenvolver base sólida e aplicar no dia a dia da área.`)
+  }
 
-Na plataforma, você encontra materiais como apostilas digitais, vídeo-aulas, atividades e avaliações, tudo pensado para ajudar no seu aprendizado de forma prática e acessível.
+  blocks.push(`Ele funciona 100% pela plataforma online da escola: após a matrícula, você recebe acesso e consegue estudar no seu ritmo, com flexibilidade de horários.`)
+  blocks.push(`Durante os estudos, você tem acesso a apostilas, vídeos, atividades e avaliações, além de suporte pedagógico para tirar dúvidas e manter evolução constante.`)
 
-Você pode acessar 24 horas por dia e organizar sua rotina de estudos da forma que ficar melhor para você.
+  if (workload || duration) {
+    const labels = []
+    if (workload) labels.push(`carga horária de *${workload}*`)
+    if (duration) labels.push(`duração média de *${duration}*`)
+    blocks.push(`Esse curso conta com ${labels.join(" e ")}.`)
+  }
 
-Se quiser, eu também posso te explicar o que você aprende nesse curso e como funciona a inscrição.`
+  if (learns.length) {
+    blocks.push(`No conteúdo programático, você passa por temas como: *${learns.join(", ")}*.`)
+  }
+
+  blocks.push("Se quiser, agora eu já te passo os valores para começar ou, se preferir, te explico como funciona a matrícula 😊")
+
+  return blocks.join("\n\n")
 }
 
 function buildCourseDetailFollowUpMessage(text = "", courseInfo = null) {
