@@ -1904,6 +1904,11 @@ function buildGoalClarification(courseName = "") {
 }
 
 function buildAwaitingCourseChoiceReminder(convo = {}, text = "") {
+  const normalizedText = normalizeLoose(text)
+  if (["curso", "cursos", "um curso", "quero curso", "quero um curso"].includes(normalizedText)) {
+    return "Perfeito 😊 Me manda o nome do curso que te chamou atenção no site que eu te explico como funciona."
+  }
+
   if (wantsPriceQuestionWithoutCourse(text)) {
     return "Perfeito 😊 Antes do valor, me fala só o nome do curso que você quer e eu já te passo tudo certinho."
   }
@@ -2125,7 +2130,14 @@ function wantsStartOverIntent(text = "") {
 
 function wantsCompareCoursesIntent(text = "") {
   const t = normalizeLoose(text)
-  return t.includes("comparar") && t.includes("curso")
+  if (!t) return false
+
+  if (/\b(comparar|comparacao|comparação)\b/.test(t)) return true
+  if (/\b(diferenca|diferença)\s+entre\b/.test(t)) return true
+  if (/\bqual\s+(e|é)\s+melhor\s+entre\b/.test(t)) return true
+  if (/\bme\s+compara\b/.test(t)) return true
+
+  return false
 }
 
 function detectStrongIntent(text = "", convo = {}) {
@@ -2232,6 +2244,8 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.path = "existing_student"
       convo.step = "existing_student_cpf"
       convo.currentFlow = "financial"
+      convo.financialFlowLocked = true
+      convo.awaitingMainIntent = false
       clearPendingStep(convo)
       return {
         intent,
@@ -2264,11 +2278,15 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
+      convo.financialFlowLocked = false
       convo.commercialStage = "catalog_redirect"
       convo.lastOfferType = "site_catalog_redirect"
       convo.courseCatalogOffered = true
       convo.awaitingCourseChoice = true
+      convo.awaitingMainIntent = false
       convo.coursePresentationSent = false
+      convo.awaitingPriceDecision = false
+      convo.awaitingEnrollmentData = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: category || ""
@@ -2281,23 +2299,29 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.path = "new_enrollment"
       convo.step = "payment_intro"
       convo.currentFlow = "commercial"
+      convo.financialFlowLocked = false
       convo.commercialStage = "pricing"
       convo.lastOfferType = "show_price"
       convo.priceShown = true
+      convo.awaitingPriceDecision = true
       return { intent, message: buildPriceMessage(convo) }
 
     case "payment_options":
       convo.path = "new_enrollment"
       convo.step = "payment_choice"
       convo.currentFlow = "commercial"
+      convo.financialFlowLocked = false
       convo.salesLead.stage = "awaiting_payment_method"
       convo.commercialStage = "payment"
       convo.lastOfferType = "payment_guidance"
+      convo.awaitingPriceDecision = false
       return { intent, message: buildPaymentChoiceMessage() }
 
     case "enrollment":
       openEnrollmentConfirmationStep(convo)
       convo.pendingStep = "enrollment_intro_confirmation"
+      convo.awaitingEnrollmentData = true
+      convo.awaitingPriceDecision = false
       return {
         intent,
         message: `Perfeito 😊
@@ -2323,10 +2347,13 @@ Pode ser?`
       convo.path = "new_enrollment"
       convo.step = "offer_transition"
       convo.currentFlow = "commercial"
+      convo.financialFlowLocked = false
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
       convo.awaitingCourseChoice = false
       convo.coursePresentationSent = true
+      convo.awaitingPriceDecision = true
+      convo.awaitingEnrollmentData = false
       clearPendingStep(convo)
 
       return { intent, message: buildEnhancedCoursePresentation(courseInfo.title, courseInfo) }
@@ -3667,6 +3694,10 @@ async function processMessage(phone, text) {
     convo.courseCatalogOffered = Boolean(convo.courseCatalogOffered)
     convo.awaitingCourseChoice = Boolean(convo.awaitingCourseChoice)
     convo.coursePresentationSent = Boolean(convo.coursePresentationSent)
+    convo.awaitingMainIntent = Boolean(convo.awaitingMainIntent)
+    convo.awaitingPriceDecision = Boolean(convo.awaitingPriceDecision)
+    convo.awaitingEnrollmentData = Boolean(convo.awaitingEnrollmentData)
+    convo.financialFlowLocked = Boolean(convo.financialFlowLocked)
     const matchedKnowledgeCourse = findCourseInText(text)
     const detectedCourse = matchedKnowledgeCourse
       ? { name: extractCourseLabel(matchedKnowledgeCourse) }
@@ -3676,17 +3707,29 @@ async function processMessage(phone, text) {
     const normalizedText = normalize(text || "")
     const raw = String(text || "").trim().toLowerCase()
 
+    if (isFinancialCriticalIntent(text) && !wantsPaymentOptionsIntent(text)) {
+      convo.financialFlowLocked = true
+      const secondViaHandled = await handleStrongIntent("second_via", convo, text, phone)
+      if (secondViaHandled?.message) {
+        return replyWithState(secondViaHandled.message, secondViaHandled.extra || {}, secondViaHandled.intent)
+      }
+    }
+
     updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion)
 
     if (shouldPrioritizeCatalogRedirect(text, convo)) {
       convo.path = "new_enrollment"
       convo.step = "course_selection"
       convo.currentFlow = "commercial"
+      convo.financialFlowLocked = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
       convo.courseCatalogOffered = true
       convo.awaitingCourseChoice = true
+      convo.awaitingMainIntent = false
       convo.coursePresentationSent = false
+      convo.awaitingPriceDecision = false
+      convo.awaitingEnrollmentData = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: detectCategoryFromText(text) || convo.preferredCategory || ""
@@ -3713,11 +3756,15 @@ async function processMessage(phone, text) {
         convo.path = "new_enrollment"
         convo.step = "offer_transition"
         convo.currentFlow = "commercial"
+        convo.financialFlowLocked = false
         convo.commercialStage = "course_detail"
         convo.lastOfferType = "course_explanation"
         convo.courseCatalogOffered = true
         convo.awaitingCourseChoice = false
+        convo.awaitingMainIntent = false
         convo.coursePresentationSent = true
+        convo.awaitingPriceDecision = true
+        convo.awaitingEnrollmentData = false
         ensureSalesLead(convo)
         convo.salesLead.selectedCourse = convo.selectedCourse
         clearPendingStep(convo)

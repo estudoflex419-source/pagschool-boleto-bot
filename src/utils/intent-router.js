@@ -82,8 +82,17 @@ const INTENT_PATTERNS = Object.freeze({
   },
   compare_courses: {
     priority: 45,
-    phrases: ["comparar cursos", "qual melhor curso", "comparacao de cursos"],
-    keywords: ["comparar", "curso", "melhor"]
+    phrases: [
+      "comparar cursos",
+      "comparacao entre",
+      "comparação entre",
+      "diferenca entre",
+      "diferença entre",
+      "qual e melhor entre",
+      "qual é melhor entre",
+      "me compara"
+    ],
+    keywords: ["comparar", "comparacao", "diferenca", "melhor", "entre"]
   },
   affirmation: {
     priority: 20,
@@ -109,6 +118,18 @@ function normalizeIntentText(text = "") {
 
 function tokenize(text = "") {
   return normalizeIntentText(text).split(" ").filter(Boolean)
+}
+
+function hasClearCompareSignal(text = "") {
+  const t = normalizeIntentText(text)
+  if (!t) return false
+
+  if (/\b(comparar|comparacao|comparação)\b/.test(t)) return true
+  if (/\b(diferenca|diferença)\s+entre\b/.test(t)) return true
+  if (/\bqual\s+(e|é)\s+melhor\s+entre\b/.test(t)) return true
+  if (/\bme\s+compara\b/.test(t)) return true
+
+  return false
 }
 
 function detectCourseCategory(text = "") {
@@ -194,6 +215,7 @@ function getIntentCandidates(text, convo = {}, context = {}) {
 
   for (const [intent] of Object.entries(INTENT_PATTERNS)) {
     if (intent === "specific_course" && !context.hasSpecificCourseSignal) continue
+    if (intent === "compare_courses" && !hasClearCompareSignal(normalizedText)) continue
 
     const { score, reason } = scoreIntent(intent, normalizedText, convo)
 
@@ -254,6 +276,22 @@ function resolveBestIntent(candidates = [], convo = {}) {
 function detectIntent(text, convo = {}, context = {}) {
   const normalizedText = normalizeIntentText(text)
   const category = detectCourseCategory(normalizedText)
+  const explicitCompare = hasClearCompareSignal(normalizedText)
+
+  if (explicitCompare) {
+    return {
+      intent: "compare_courses",
+      score: 0.99,
+      priority: INTENT_PATTERNS.compare_courses.priority,
+      strong: true,
+      shouldOverrideFlow: true,
+      shouldConsumePendingStep: false,
+      normalizedText,
+      candidates: [{ intent: "compare_courses", score: 0.99, reason: "clear_compare_signal" }],
+      contextIntent: "",
+      reason: "clear_compare_signal"
+    }
+  }
 
   if (category) {
     return {
@@ -305,5 +343,6 @@ module.exports = {
   shouldOverrideCurrentFlow,
   shouldConsumePendingStep,
   detectCourseCategory,
+  hasClearCompareSignal,
   detectIntent
 }
