@@ -930,11 +930,7 @@ function buildFullCourseDetailsMessage(courseInfo) {
     lines.push("")
   }
 
-  lines.push("Se fizer sentido para você, já posso conduzir seu fechamento de matrícula agora mesmo.")
-  lines.push("Para avançar, me envie:")
-  lines.push("1 - forma de pagamento (Pix, carnê ou cartão)")
-  lines.push("2 - nome completo")
-  lines.push("3 - CPF")
+  lines.push("Se fizer sentido para você, já posso te explicar o próximo passo da matrícula.")
 
   return lines.join("\n").trim()
 }
@@ -1647,13 +1643,10 @@ function buildInstitutionalTrustBlock() {
 }
 
 function buildCommercialEntryMessage() {
-  return `Perfeito 😊
-Eu posso te ajudar com 3 coisas:
-1 - te indicar um curso
-2 - te passar os valores
-3 - te explicar como funciona
+  return `Oi! Seja muito bem-vindo(a)! 😊
+Vai ser um prazer te ajudar.
 
-Se quiser, também pode me mandar direto o nome do curso que te chamou atenção.`
+Me conta: você quer descobrir um curso ideal para você ou já tem algum em mente?`
 }
 
 function buildMenuMessage() {
@@ -1770,9 +1763,7 @@ function registerBotReply(convo = {}, responseText = "", intent = "") {
 }
 
 function buildNoRepeatFallback() {
-  return `Perfeito 😊
-
-Pra seguir sem enrolação, me diga só um caminho agora: *curso*, *valores* ou *matrícula*.`
+  return "Perfeito 😊 Me conta só qual curso você quer entender melhor para eu te ajudar de forma direta."
 }
 
 function preventLoop(convo = {}, message = "", intent = "") {
@@ -2147,6 +2138,87 @@ function wantsCompareCoursesIntent(text = "") {
   return false
 }
 
+function isCommercialGreeting(text = "") {
+  const t = normalizeFlowText(text)
+  return ["oi", "ola", "olá", "bom dia", "boa tarde", "boa noite", "menu", "inicio", "início"].includes(t)
+}
+
+function hasRealEnrollmentIntent(text = "") {
+  const t = normalizeFlowText(text)
+  return [
+    "quero me inscrever",
+    "quero fazer minha inscricao",
+    "quero fazer minha inscrição",
+    "quero fazer matricula",
+    "quero fazer matrícula",
+    "como faco a matricula",
+    "como faço a matrícula",
+    "como faco a inscricao",
+    "como faço a inscrição",
+    "quero começar",
+    "quero comecar",
+    "vamos fechar"
+  ].some(term => t.includes(term))
+}
+
+function isCourseDiscoveryIntent(text = "") {
+  const t = normalizeFlowText(text)
+  return [
+    "nao sei qual curso",
+    "não sei qual curso",
+    "tenho duvida",
+    "tenho dúvida",
+    "qual curso voce indica",
+    "qual curso você indica",
+    "quero uma indicacao",
+    "quero uma indicação",
+    "nao sei por onde comecar",
+    "não sei por onde começar"
+  ].some(term => t.includes(term))
+}
+
+function buildCourseDiscoveryQuestion(convo = {}) {
+  const askedGoal = Boolean(convo?.goal)
+  if (!askedGoal) {
+    return "Me conta uma coisa: você se identifica mais com saúde, tecnologia, administração, beleza ou outra área?"
+  }
+  return "Seu foco hoje é começar a trabalhar mais rápido, se aperfeiçoar ou mudar de área?"
+}
+
+function getCoursesByCategory(category = "") {
+  if (!category) return []
+  return ACTIVE_SITE_COURSE_KNOWLEDGE
+    .filter(course => inferCourseCategory(course) === category)
+    .slice(0, 2)
+}
+
+function buildConsultativeCategorySuggestion(category = "") {
+  const suggestions = getCoursesByCategory(category)
+  if (!suggestions.length) {
+    return "Perfeito 😊 Gostei da direção. Me fala uma área que você curte e eu te indico 1 ou 2 cursos bem alinhados."
+  }
+
+  const [first, second] = suggestions
+  const firstSummary = String(first.summary || "é uma formação prática e muito procurada").replace(/\.$/, "")
+  const secondLine = second
+    ? `Se você quiser uma segunda opção, também vale olhar *${second.title}*, que ${String(second.summary || "tem uma proposta bem prática").replace(/\.$/, "")}.`
+    : ""
+
+  return [
+    `Ótima área 😊 Pelo que você me falou, uma opção bem interessante é *${first.title}*, que ${firstSummary}.`,
+    secondLine,
+    "Se quiser, eu te explico melhor qualquer uma delas."
+  ].filter(Boolean).join("\n\n")
+}
+
+function buildEarlyPriceDeflection(convo = {}) {
+  const selected = convo.selectedCourse || convo.course || ""
+  if (selected) {
+    return `Ótima pergunta 😊 Antes de falar de valores, eu te explico rapidinho como funciona *${selected}* para você decidir com segurança.`
+  }
+  return "Ótima pergunta 😊 Eu já te passo valores no momento certo da matrícula. Antes disso, me conta só qual área você quer seguir para eu te indicar o melhor curso."
+}
+
 function detectStrongIntent(text = "", convo = {}) {
   const matchedCourse = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
 
@@ -2238,14 +2310,12 @@ function buildPriceMessage(convo = {}, selectedCourse = null) {
 
 function buildHumanizedFallback(convo = {}, text = "") {
   if (isDirectYes(text)) {
-    return `Perfeito 😊
-
-Me diz só o que você prefere agora: *curso*, *valores* ou *matrícula*.`
+    return "Perfeito 😊 Me conta qual curso você quer conhecer melhor."
   }
 
   if (convo.course || convo.selectedCourse) {
     const selected = convo.selectedCourse || convo.course
-    return `Perfeito 😊 Sobre *${selected}*, eu posso te explicar melhor como funciona, te passar os valores ou já iniciar sua matrícula.`
+    return `Perfeito 😊 Sobre *${selected}*, eu te explico melhor como funciona e te ajudo no próximo passo.`
   }
 
   const normalizedText = normalizeFlowText(text)
@@ -2788,7 +2858,7 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
     blocks.push(`Esse curso tem ${workloadLabel}${joiner}${durationLabel}.`.replace("Esse curso tem .", ""))
   }
 
-  blocks.push("Se quiser, agora eu já te passo os valores para começar ou, se preferir, te explico como funciona a matrícula 😊")
+  blocks.push("Se você quiser, eu também posso te explicar como funciona a matrícula 😊")
 
   return blocks.join("\n\n")
 }
@@ -2831,7 +2901,7 @@ function buildCourseFunctionalityMessage(courseName = "o curso") {
     blocks.push(`No conteúdo programático, você passa por temas como: *${learns.join(", ")}*.`)
   }
 
-  blocks.push("Se quiser, agora eu já te passo os valores para começar ou, se preferir, te explico como funciona a matrícula 😊")
+  blocks.push("Se fizer sentido, eu te explico o próximo passo da matrícula de forma simples 😊")
 
   return blocks.join("\n\n")
 }
@@ -2881,10 +2951,7 @@ function buildCourseDetailFollowUpMessage(text = "", courseInfo = null) {
   }
 
   lines.push("")
-  lines.push("Se fizer sentido para você, já te levo para o fechamento agora.")
-  lines.push("Para você já visualizar, as parcelas para começar hoje são:")
-  lines.push(buildPaymentSummaryLine())
-  lines.push("Se quiser, eu te ajudo a escolher a melhor e já seguimos para matrícula.")
+  lines.push("Se fizer sentido para você, eu te explico o próximo passo da matrícula.")
 
   return lines.join("\n")
 }
@@ -2926,7 +2993,7 @@ function buildConsultativeOfferTransition(convo = {}) {
     parts.push(`A carga horária informada é de ${courseInfo.workload}${duration}.`)
   }
 
-  parts.push("Se fizer sentido pra você, eu já posso te mostrar as parcelas e te orientar no próximo passo da matrícula.")
+  parts.push("Se fizer sentido pra você, eu já te explico o próximo passo da matrícula.")
 
   return parts.join("\n\n")
 }
@@ -3759,6 +3826,78 @@ async function processMessage(phone, text) {
       const secondViaHandled = await handleStrongIntent("second_via", convo, text, phone)
       if (secondViaHandled?.message) {
         return replyWithState(secondViaHandled.message, secondViaHandled.extra || {}, secondViaHandled.intent)
+      }
+    }
+
+    if (!convo.financialFlowLocked) {
+      const greetingOnly = isCommercialGreeting(text) && !convo.selectedCourse && !convo.course
+      if (greetingOnly) {
+        convo.currentFlow = "commercial"
+        convo.awaitingCareerDiscovery = true
+        convo.awaitingCourseChoice = false
+        convo.coursePresentationLevel = "none"
+        convo.awaitingEnrollmentInterest = false
+        convo.awaitingEnrollmentConfirmation = false
+        clearPendingStep(convo)
+        return replyWithState(buildCommercialEntryMessage(), {}, "commercial_greeting")
+      }
+
+      if (isCourseDiscoveryIntent(text)) {
+        convo.currentFlow = "commercial"
+        convo.awaitingCareerDiscovery = true
+        convo.awaitingCourseChoice = false
+        convo.coursePresentationLevel = convo.coursePresentationLevel || "none"
+        return replyWithState(buildCourseDiscoveryQuestion(convo), {}, "course_discovery")
+      }
+
+      const categoryFromText = detectCategoryFromText(text)
+      if (convo.awaitingCareerDiscovery && categoryFromText) {
+        convo.preferredCategory = categoryFromText
+        convo.selectedCategory = categoryFromText
+        convo.awaitingCareerDiscovery = false
+        convo.awaitingCourseChoice = true
+        convo.currentFlow = "commercial"
+        return replyWithState(buildConsultativeCategorySuggestion(categoryFromText), {}, "course_category")
+      }
+
+      if (wantsPriceIntent(text) && !hasRealEnrollmentIntent(text)) {
+        convo.currentFlow = "commercial"
+        convo.awaitingEnrollmentInterest = true
+        return replyWithState(buildEarlyPriceDeflection(convo), {}, "price_deferred")
+      }
+
+      const selectedInText = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
+      if (selectedInText?.title || selectedInText?.name) {
+        const courseInfo = normalizeCourseInfoCandidate(selectedInText)
+        const courseTitle = extractCourseLabel(courseInfo || selectedInText)
+        convo.course = courseTitle || convo.course
+        convo.selectedCourse = courseTitle || convo.selectedCourse
+        convo.currentFlow = "commercial"
+        convo.awaitingCourseChoice = false
+        convo.awaitingCareerDiscovery = false
+        convo.coursePresentationLevel = "intro"
+        convo.commercialStage = "course_detail"
+        convo.salesLead.selectedCourse = convo.selectedCourse
+        return replyWithState(buildEnhancedCoursePresentation(convo.selectedCourse, courseInfo), {}, "specific_course")
+      }
+
+      if ((convo.selectedCourse || convo.course) && wantsHowCourseWorksIntent(text)) {
+        const selected = convo.selectedCourse || convo.course
+        convo.currentFlow = "commercial"
+        convo.commercialStage = "course_detail"
+        convo.coursePresentationLevel = convo.coursePresentationLevel === "intro" ? "deep" : "deep"
+        return replyWithState(buildCourseFunctionalityMessage(selected), {}, "how_course_works")
+      }
+
+      if ((convo.selectedCourse || convo.course) && hasRealEnrollmentIntent(text)) {
+        const selected = convo.selectedCourse || convo.course
+        convo.currentFlow = "commercial"
+        convo.awaitingEnrollmentConfirmation = true
+        convo.awaitingEnrollmentInterest = false
+        convo.commercialStage = "enrollment"
+        convo.coursePresentationLevel = "closing"
+        convo.priceShown = true
+        return replyWithState(buildPriceAnswerMessage(selected, findSiteCourseKnowledge(selected, selected), { allowEarlyPrice: true }), {}, "enrollment")
       }
     }
 
