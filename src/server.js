@@ -578,10 +578,12 @@ function getPaymentPlan(_courseName = "") {
 function buildPaymentSummaryLine() {
   const carne = PAYMENT_OPTIONS.carne
   const cartao = PAYMENT_OPTIONS.cartao
+  const pix = PAYMENT_OPTIONS.pix
 
   return [
-    `💳 *Cartão:* ${cartao.installments}x de ${formatMoneyBR(cartao.installmentValue)}`,
-    `📘 *Carnê:* ${carne.installments}x de ${formatMoneyBR(carne.installmentValue)}`
+    `💳 Cartão: ${cartao.installments}x de ${formatMoneyBR(cartao.installmentValue)}`,
+    `📘 Carnê: ${carne.installments}x de ${formatMoneyBR(carne.installmentValue)}`,
+    `💰 À vista / PIX: ${formatMoneyBR(pix.total)}`
   ].join("\n")
 }
 
@@ -2706,47 +2708,38 @@ function buildCourseHighlights(courseInfo) {
 function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const normalizedCourseInfo = courseInfo || buildFallbackCourseInfoByName(selectedCourseName)
   const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
-  const category = inferCourseCategory(normalizedCourseInfo || { title: displayName })
+  const summary = String(normalizedCourseInfo?.summary || normalizedCourseInfo?.description || "").trim()
+  const learns = Array.isArray(normalizedCourseInfo?.learns)
+    ? uniqueItems(normalizedCourseInfo.learns).slice(0, 3)
+    : []
+  const workload = String(normalizedCourseInfo?.workload || "").trim()
+  const duration = String(normalizedCourseInfo?.duration || "").trim()
 
-  const profilesByCategory = {
-    saude: "gosta da área de cuidado, atendimento e rotina prática",
-    administrativo: "quer crescer com organização, gestão e rotina de escritório",
-    beleza: "quer atuar com estética, atendimento e serviços de alto giro",
-    tecnologia: "busca habilidades digitais e oportunidades no mercado online",
-    industrial: "curte operação técnica, manutenção e rotina de campo",
-    agro: "quer atuar com máquinas, operação e atividades do setor agrícola",
-    logistica: "gosta de organização operacional, pátio e movimentação de cargas",
-    educacao: "quer trabalhar com ensino, apoio educacional e desenvolvimento",
-    juridico: "busca atuação com normas, segurança e preparação técnica",
-    idiomas: "quer ampliar oportunidades com comunicação e linguagem",
-    gastronomia: "quer trabalhar com produção de alimentos e atendimento",
-    geral: "quer aprender de forma prática e evoluir profissionalmente"
+  const blocks = [`Ótima escolha 😊`]
+
+  if (summary) {
+    blocks.push(`O curso de *${displayName}* ${summary.replace(/\.$/, "")}.`)
+  } else {
+    blocks.push(`O curso de *${displayName}* é uma formação prática para você desenvolver conhecimento aplicado e evoluir com segurança.`)
   }
 
-  const benefitsByCategory = {
-    saude: "aprender de forma prática e entender melhor esse tipo de atuação",
-    administrativo: "se preparar para rotina profissional e fortalecer o currículo",
-    beleza: "desenvolver técnica para começar a atender com mais segurança",
-    tecnologia: "desenvolver habilidade prática e se posicionar melhor no mercado",
-    industrial: "ganhar base técnica para atuar com mais confiança",
-    agro: "aprender operação na prática e ampliar oportunidades de trabalho",
-    logistica: "entender a operação do setor e aumentar sua empregabilidade",
-    educacao: "ganhar repertório para atuar com mais preparo e segurança",
-    juridico: "ganhar base sólida para começar na área com direcionamento",
-    idiomas: "evoluir o conhecimento de forma aplicada ao dia a dia",
-    gastronomia: "aprender técnicas práticas para atuar na área",
-    geral: "ganhar base e se preparar melhor para novas oportunidades"
+  blocks.push("Ele funciona pela nossa plataforma online, para você estudar no seu ritmo, com acesso a apostilas, vídeos, atividades e avaliações.")
+  blocks.push("Durante o curso, você também conta com suporte pedagógico para tirar dúvidas e seguir com mais segurança.")
+
+  if (learns.length) {
+    blocks.push(`Na prática, você vai aprender temas como *${learns.join(", ")}*.`)
   }
 
-  const profile = profilesByCategory[category] || profilesByCategory.geral
-  const benefit = benefitsByCategory[category] || benefitsByCategory.geral
+  if (workload || duration) {
+    const workloadLabel = workload ? `carga horária de *${workload}*` : ""
+    const durationLabel = duration ? `duração média de *${duration}*` : ""
+    const joiner = workloadLabel && durationLabel ? " e " : ""
+    blocks.push(`Esse curso tem ${workloadLabel}${joiner}${durationLabel}.`.replace("Esse curso tem .", ""))
+  }
 
-  return `Ótima escolha 😊
-${displayName} costuma chamar bastante atenção de quem ${profile}.
+  blocks.push("Se quiser, agora eu já te passo os valores para começar ou, se preferir, te explico como funciona a matrícula 😊")
 
-É uma opção interessante para quem quer ${benefit}.
-
-Se você quiser, eu posso te explicar como funciona e depois já te passo as opções para começar.`
+  return blocks.join("\n\n")
 }
 
 function buildSelectedCourseAnswer(_text, courseInfo) {
@@ -2871,12 +2864,12 @@ function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {
 
   return `Ótima pergunta 😊
 
-Hoje a forma mais leve de começar costuma ficar assim:
+Hoje, as formas mais usadas para começar são estas:
 ${buildPaymentSummaryLine()}
 
 ${courseSummary}
 
-Se você quiser, eu te ajudo a escolher a melhor opção e já deixo sua matrícula encaminhada.`
+Se quiser, eu também posso te indicar rapidinho qual dessas costuma fazer mais sentido no seu caso 😊`
 }
 
 function buildPixMessage() {
