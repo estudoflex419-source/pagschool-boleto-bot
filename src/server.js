@@ -1535,6 +1535,29 @@ function findSiteCourseKnowledge(text, currentCourse = "") {
   return null
 }
 
+function findBestCourseCandidate(text = "", currentCourse = "") {
+  const resolvedByCatalog =
+    findCourseByName(text, getCourseCatalog()) ||
+    findCourseByName(text, ACTIVE_SITE_COURSE_KNOWLEDGE) ||
+    findCourseByName(text, fallbackSalesCourses)
+
+  if (resolvedByCatalog) {
+    return resolvedByCatalog
+  }
+
+  const resolvedByKnowledge = findSiteCourseKnowledge(text, currentCourse)
+  if (resolvedByKnowledge) {
+    return resolvedByKnowledge
+  }
+
+  const resolvedBySales = sales.findCourse(text)
+  if (resolvedBySales) {
+    return resolvedBySales
+  }
+
+  return null
+}
+
 function getCourseMatchTerms(course = {}) {
   const terms = new Set()
   const rawName = extractCourseLabel(course)
@@ -2306,10 +2329,7 @@ Pode ser?`
 
 function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "") {
   if (convo.pendingStep === "awaiting_course" || convo.pendingStep === "awaiting_course_selection") {
-    const selectedCourse =
-      findCourseByName(text, getCourseCatalog()) ||
-      findSiteCourseKnowledge(text, convo.course) ||
-      sales.findCourse(text)
+    const selectedCourse = findBestCourseCandidate(text, convo.course)
 
     if (selectedCourse?.title || selectedCourse?.name) {
       const courseInfo = normalizeCourseInfoCandidate(selectedCourse)
