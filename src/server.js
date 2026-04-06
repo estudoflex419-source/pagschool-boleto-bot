@@ -2108,7 +2108,7 @@ function wantsEnrollmentIntent(text = "") {
 
 function wantsHowCourseWorksIntent(text = "") {
   const t = normalizeLoose(text)
-  return ["como funciona", "e online", "é online", "tem prova", "como acesso", "tem suporte"].some(term => t.includes(term))
+  return ["como funciona", "como funciona o curso", "e online", "é online", "tem prova", "como acesso", "tem suporte", "como sao as aulas", "como são as aulas"].some(term => t.includes(term))
 }
 
 function wantsGoalHelpIntent(text = "") {
@@ -2831,34 +2831,40 @@ function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
   const summary = String(normalizedCourseInfo?.summary || normalizedCourseInfo?.description || "").trim()
   const learns = Array.isArray(normalizedCourseInfo?.learns)
-    ? uniqueItems(normalizedCourseInfo.learns).slice(0, 3)
+    ? uniqueItems(normalizedCourseInfo.learns).slice(0, 4)
     : []
   const workload = String(normalizedCourseInfo?.workload || "").trim()
   const duration = String(normalizedCourseInfo?.duration || "").trim()
+  const market = String(normalizedCourseInfo?.market || "").trim()
 
-  const blocks = [`Ótima escolha 😊`]
+  const blocks = [`Você escolheu *${displayName}* — ótima opção 😊`]
 
   if (summary) {
-    blocks.push(`O curso de *${displayName}* ${summary.replace(/\.$/, "")}.`)
+    blocks.push(`Esse curso ${summary.replace(/\.$/, "")}.`)
   } else {
-    blocks.push(`O curso de *${displayName}* é uma formação prática para você desenvolver conhecimento aplicado e evoluir com segurança.`)
+    blocks.push(`Esse curso é uma formação prática para desenvolver conhecimento aplicado e evoluir com segurança na área.`)
   }
 
-  blocks.push("Ele funciona pela nossa plataforma online, para você estudar no seu ritmo, com acesso a apostilas, vídeos, atividades e avaliações.")
-  blocks.push("Durante o curso, você também conta com suporte pedagógico para tirar dúvidas e seguir com mais segurança.")
+  blocks.push("Ele é indicado para quem busca uma formação com aplicação prática, com flexibilidade para estudar no próprio ritmo.")
+  blocks.push("O formato é 100% online, na plataforma da escola, com acesso a apostilas, vídeos, atividades e avaliações.")
+  blocks.push("Você também conta com suporte pedagógico para tirar dúvidas ao longo dos estudos.")
 
   if (learns.length) {
-    blocks.push(`Na prática, você vai aprender temas como *${learns.join(", ")}*.`)
+    blocks.push(`No conteúdo, você passa por temas como *${learns.join(", ")}*.`)
   }
 
   if (workload || duration) {
-    const workloadLabel = workload ? `carga horária de *${workload}*` : ""
-    const durationLabel = duration ? `duração média de *${duration}*` : ""
-    const joiner = workloadLabel && durationLabel ? " e " : ""
-    blocks.push(`Esse curso tem ${workloadLabel}${joiner}${durationLabel}.`.replace("Esse curso tem .", ""))
+    const labels = []
+    if (workload) labels.push(`carga horária de *${workload}*`)
+    if (duration) labels.push(`duração média de *${duration}*`)
+    blocks.push(`Sobre o tempo de formação: ${labels.join(" e ")}.`)
   }
 
-  blocks.push("Se você quiser, eu também posso te explicar como funciona a matrícula 😊")
+  if (market) {
+    blocks.push(`Essa formação pode fortalecer seu currículo para oportunidades em ${market}.`)
+  }
+
+  blocks.push("Se quiser, eu te explico agora como funciona no dia a dia, o que você aprende primeiro ou a parte do certificado.")
 
   return blocks.join("\n\n")
 }
@@ -2874,86 +2880,23 @@ function buildCourseFunctionalityMessage(courseName = "o curso") {
     buildFallbackCourseInfoByName(courseName)
 
   const displayName = courseInfo?.title || fallbackName
-  const summary = String(courseInfo?.summary || courseInfo?.description || "").trim().replace(/\.$/, "")
-  const workload = String(courseInfo?.workload || "").trim()
-  const duration = String(courseInfo?.duration || "").trim()
-  const learns = uniqueItems(courseInfo?.learns || []).slice(0, 8)
-
-  const blocks = ["Perfeito 😊"]
-
-  if (summary) {
-    blocks.push(`Sobre *${displayName}*: ${summary}.`)
-  } else {
-    blocks.push(`Sobre *${displayName}*: é uma formação prática para desenvolver base sólida e aplicar no dia a dia da área.`)
-  }
-
-  blocks.push(`Ele funciona 100% pela plataforma online da escola: após a matrícula, você recebe acesso e consegue estudar no seu ritmo, com flexibilidade de horários.`)
-  blocks.push(`Durante os estudos, você tem acesso a apostilas, vídeos, atividades e avaliações, além de suporte pedagógico para tirar dúvidas e manter evolução constante.`)
-
-  if (workload || duration) {
-    const labels = []
-    if (workload) labels.push(`carga horária de *${workload}*`)
-    if (duration) labels.push(`duração média de *${duration}*`)
-    blocks.push(`Esse curso conta com ${labels.join(" e ")}.`)
-  }
-
-  if (learns.length) {
-    blocks.push(`No conteúdo programático, você passa por temas como: *${learns.join(", ")}*.`)
-  }
-
-  blocks.push("Se fizer sentido, eu te explico o próximo passo da matrícula de forma simples 😊")
-
-  return blocks.join("\n\n")
+  return buildDirectCourseQuestionReply("how_works", {
+    ...courseInfo,
+    title: displayName
+  })
 }
 
 function buildCourseDetailFollowUpMessage(text = "", courseInfo = null) {
   if (!courseInfo) {
-    return "Perfeito 😊 Não encontrei os detalhes desse curso agora. Me confirma o nome certinho para eu te responder com precisão."
+    return "Me confirma o nome do curso para eu te responder com precisão 😊"
   }
 
-  const question = normalizeLoose(text)
-  const title = courseInfo.title || "esse curso"
-  const learns = uniqueItems(courseInfo.learns || [])
-  const lines = []
-
-  lines.push(`Perfeito 😊 Sobre *${title}*, te explico de forma direta:`)
-  lines.push("")
-
-  if (question.includes("conteudo") || question.includes("conteúdo") || question.includes("program")) {
-    if (learns.length) {
-      lines.push("*Conteúdo programático (principais temas):*")
-      for (const item of learns.slice(0, 10)) {
-        lines.push(`- ${item}`)
-      }
-    } else {
-      lines.push("*Conteúdo programático:* o documento não traz a grade item a item, mas o foco é formação prática para atuação inicial na área.")
-      if (courseInfo.summary) {
-        lines.push(`Resumo do foco: ${String(courseInfo.summary).trim().replace(/\.$/, "")}.`)
-      }
-    }
-  } else if (
-    question.includes("carga horaria") ||
-    question.includes("carga horária") ||
-    question.includes("duracao") ||
-    question.includes("duração") ||
-    question.includes("tempo")
-  ) {
-    lines.push(`*Carga horária:* ${courseInfo.workload || "não informada no documento"}`)
-    if (courseInfo.duration) {
-      lines.push(`*Duração média:* ${courseInfo.duration}`)
-    }
-  } else if (question.includes("salario") || question.includes("salário") || question.includes("media salarial") || question.includes("média salarial")) {
-    lines.push(`*Média salarial informada:* ${courseInfo.salary || "não informada no documento para esse curso"}`)
-  } else if (question.includes("mercado") || question.includes("atuacao") || question.includes("atuação")) {
-    lines.push(`*Mercado de trabalho / atuação:* ${courseInfo.market || "não detalhado no documento para esse curso"}`)
-  } else {
-    return buildFullCourseDetailsMessage(courseInfo)
+  const questionType = detectCourseQuestionType(text)
+  if (questionType) {
+    return buildDirectCourseQuestionReply(questionType, courseInfo)
   }
 
-  lines.push("")
-  lines.push("Se fizer sentido para você, eu te explico o próximo passo da matrícula.")
-
-  return lines.join("\n")
+  return buildFullCourseDetailsMessage(courseInfo)
 }
 
 function buildConsultativeOfferTransition(convo = {}) {
@@ -3650,6 +3593,155 @@ function isCourseFunctionalityQuestion(text) {
   ].some(term => t.includes(term))
 }
 
+
+function isCourseDurationQuestion(text = "") {
+  const t = normalizeLoose(text)
+
+  return [
+    "quanto tempo de curso",
+    "quanto tempo",
+    "qual a duracao",
+    "qual duração",
+    "duracao",
+    "duração",
+    "carga horaria",
+    "carga horária",
+    "quantas horas",
+    "tempo de curso",
+    "quantos meses",
+    "dura quanto"
+  ].some(term => t.includes(term))
+}
+
+function isCourseLearningQuestion(text = "") {
+  const t = normalizeLoose(text)
+
+  return [
+    "o que aprende",
+    "oque aprende",
+    "o que vou aprender",
+    "conteudo",
+    "conteúdo",
+    "conteudo programatico",
+    "conteúdo programático",
+    "grade do curso",
+    "materias",
+    "matérias"
+  ].some(term => t.includes(term))
+}
+
+function isCourseCertificateQuestion(text = "") {
+  const t = normalizeLoose(text)
+  return ["tem certificado", "certificado", "recebe certificado"].some(term => t.includes(term))
+}
+
+function isCourseOnlineQuestion(text = "") {
+  const t = normalizeLoose(text)
+  return ["e online", "é online", "curso online", "aulas online", "tem plataforma", "como acesso"].some(term => t.includes(term))
+}
+
+function detectCourseQuestionType(text = "") {
+  if (isCourseDurationQuestion(text)) return "duration"
+  if (isCourseFunctionalityQuestion(text)) return "how_works"
+  if (isCourseLearningQuestion(text)) return "learns"
+  if (isCourseCertificateQuestion(text)) return "certificate"
+  if (isCourseOnlineQuestion(text)) return "online"
+  return ""
+}
+
+function getSelectedCourseNameFromContext(convo = {}) {
+  return extractCourseLabel(
+    convo.selectedCourse ||
+      convo.course ||
+      convo.salesLead?.selectedCourse ||
+      convo.salesLead?.course ||
+      ""
+  )
+}
+
+function resolveSelectedCourseInfo(convo = {}, text = "") {
+  const selected = getSelectedCourseNameFromContext(convo)
+  if (!selected) return null
+
+  return (
+    findSiteCourseKnowledge(`${selected} ${text}`, selected) ||
+    findSiteCourseKnowledge(selected, selected) ||
+    buildFallbackCourseInfoByName(selected)
+  )
+}
+
+function buildDirectCourseQuestionReply(questionType = "", courseInfo = null) {
+  if (!courseInfo) {
+    return "Me confirma o nome do curso para eu te responder com precisão 😊"
+  }
+
+  const title = courseInfo.title || "esse curso"
+  const workload = String(courseInfo.workload || "").trim()
+  const duration = String(courseInfo.duration || "").trim()
+  const summary = String(courseInfo.summary || courseInfo.description || "").trim().replace(/\.$/, "")
+  const learns = uniqueItems(courseInfo.learns || []).slice(0, 8)
+
+  if (questionType === "duration") {
+    const durationLine = workload
+      ? `A carga horária do curso de ${title} é de ${workload} 😊`
+      : `A duração do curso de ${title} é ${duration || "informada na apresentação do curso"} 😊`
+
+    const details = [durationLine]
+    if (duration) {
+      details.push(`A duração média é de ${duration}.`)
+    }
+
+    details.push("Ele acontece pela plataforma online da escola, então você estuda no seu ritmo, com acesso a apostilas, vídeos, atividades e avaliações.")
+    details.push("Se quiser, eu também posso te mostrar o que você aprende nesse curso.")
+    return details.join("\n")
+  }
+
+  if (questionType === "how_works" || questionType === "online") {
+    const details = [
+      `O curso de ${title} funciona pela plataforma online da escola, então você pode estudar no seu ritmo e no horário que for melhor para você.`,
+      "Durante o curso, você tem acesso a apostilas, vídeos, atividades e avaliações, além de suporte pedagógico para acompanhar seus estudos."
+    ]
+
+    if (workload || duration) {
+      const labels = []
+      if (workload) labels.push(`carga horária de ${workload}`)
+      if (duration) labels.push(`duração média de ${duration}`)
+      details.push(`Ele tem ${labels.join(" e ")}.`)
+    }
+
+    details.push("Se quiser, eu também te explico os principais conteúdos que você vai aprender.")
+    return details.join("\n")
+  }
+
+  if (questionType === "learns") {
+    const details = []
+
+    if (summary) {
+      details.push(`No curso de ${title}, o foco é ${summary}.`)
+    } else {
+      details.push(`No curso de ${title}, o foco é formação prática para você aplicar no dia a dia da área.`)
+    }
+
+    if (learns.length) {
+      details.push(`Você aprende conteúdos como: ${learns.join(", ")}.`)
+    }
+
+    details.push("Tudo isso acontece pela plataforma online, com apostilas, vídeos, atividades, avaliações e suporte pedagógico.")
+    details.push("Se quiser, eu te explico também a carga horária e a rotina sugerida de estudo.")
+    return details.join("\n")
+  }
+
+  if (questionType === "certificate") {
+    return [
+      `Sim, o curso de ${title} tem certificado 😊`,
+      "A formação é online, pela plataforma da escola, com conteúdo prático para você estudar no seu ritmo.",
+      "Se quiser, eu também te explico a carga horária e o que você aprende no curso."
+    ].join("\n")
+  }
+
+  return buildFullCourseDetailsMessage(courseInfo)
+}
+
 function isEnrollmentHowToIntent(text) {
   const t = normalizeLoose(text)
 
@@ -3820,6 +3912,9 @@ async function processMessage(phone, text) {
     const isPriceQuestion = sales.isPriceQuestion(text)
     const normalizedText = normalize(text || "")
     const raw = String(text || "").trim().toLowerCase()
+    const selectedCourseName = getSelectedCourseNameFromContext(convo)
+    const selectedCourseInfo = resolveSelectedCourseInfo(convo, text)
+    const selectedCourseQuestionType = selectedCourseName ? detectCourseQuestionType(text) : ""
 
     if (isFinancialCriticalIntent(text) && !wantsPaymentOptionsIntent(text)) {
       convo.financialFlowLocked = true
@@ -3858,6 +3953,19 @@ async function processMessage(phone, text) {
         convo.awaitingCourseChoice = true
         convo.currentFlow = "commercial"
         return replyWithState(buildConsultativeCategorySuggestion(categoryFromText), {}, "course_category")
+      }
+
+      if (selectedCourseQuestionType && selectedCourseInfo) {
+        convo.currentFlow = "commercial"
+        convo.commercialStage = "course_detail"
+        convo.course = selectedCourseInfo.title || selectedCourseName || convo.course
+        convo.selectedCourse = selectedCourseInfo.title || selectedCourseName || convo.selectedCourse
+        convo.salesLead.selectedCourse = convo.selectedCourse
+        return replyWithState(
+          buildDirectCourseQuestionReply(selectedCourseQuestionType, selectedCourseInfo),
+          {},
+          `selected_course_${selectedCourseQuestionType}`
+        )
       }
 
       if (wantsPriceIntent(text) && !hasRealEnrollmentIntent(text)) {
@@ -4041,8 +4149,13 @@ async function processMessage(phone, text) {
 
         if (courseInfo) {
           convo.course = courseInfo.title || convo.course
+          convo.selectedCourse = convo.course
           convo.step = "offer_transition"
-          return replyWithState(buildFullCourseDetailsMessage(courseInfo), {}, "wants_course_info")
+          const questionType = detectCourseQuestionType(text)
+          const message = questionType
+            ? buildDirectCourseQuestionReply(questionType, courseInfo)
+            : buildFullCourseDetailsMessage(courseInfo)
+          return replyWithState(message, {}, "wants_course_info")
         }
       }
 
@@ -4620,12 +4733,16 @@ Pra se inscrever, eu te explico rapidinho como funciona a matrícula e já te mo
 Pode ser?`)
       }
 
-      if (sales.isAffirmative(text) || sales.detectCloseMoment(text)) {
+      if (sales.detectCloseMoment(text) || hasRealEnrollmentIntent(text)) {
         convo.step = "payment_intro"
         convo.paymentTeaserShown = false
         ensureSalesLead(convo)
         convo.salesLead.stage = "payment_intro"
-        return reply("Perfeito 😊 Que bom que você curtiu. Eu já te mostro as opções mais leves e te acompanho no próximo passo da matrícula.")
+        return reply("Perfeito, vamos seguir 😊 Eu já te mostro as opções para iniciar e te acompanho no próximo passo da matrícula.")
+      }
+
+      if (sales.isAffirmative(text)) {
+        return reply("Ótimo! Se você quiser, eu posso te explicar o conteúdo, o funcionamento, certificado ou já te passar os valores — você escolhe por onde prefere seguir 😊")
       }
 
       if (isPriceQuestion) {

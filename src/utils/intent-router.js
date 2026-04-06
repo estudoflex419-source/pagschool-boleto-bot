@@ -91,8 +91,26 @@ const INTENT_PATTERNS = Object.freeze({
   },
   how_course_works: {
     priority: 60,
-    phrases: ["como funciona", "me explica", "quero entender melhor", "como e", "como é", "me fala mais", "quero saber mais", "e online", "como acesso", "tem prova", "tem suporte", "como estudo"],
-    keywords: ["funciona", "explica", "entender", "online", "acesso", "prova", "suporte", "estudo", "mais"]
+    phrases: [
+      "como funciona",
+      "me explica",
+      "quero entender melhor",
+      "como e",
+      "como é",
+      "me fala mais",
+      "quero saber mais",
+      "e online",
+      "como acesso",
+      "tem prova",
+      "tem suporte",
+      "como estudo",
+      "quanto tempo de curso",
+      "qual a duracao",
+      "quantas horas",
+      "o que aprende",
+      "tem certificado"
+    ],
+    keywords: ["funciona", "explica", "entender", "online", "acesso", "prova", "suporte", "estudo", "duracao", "horas", "aprende", "certificado"]
   },
   goal_help: {
     priority: 58,
