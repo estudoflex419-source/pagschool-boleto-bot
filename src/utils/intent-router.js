@@ -67,8 +67,8 @@ const INTENT_PATTERNS = Object.freeze({
   },
   how_course_works: {
     priority: 60,
-    phrases: ["como funciona", "e online", "como acesso", "tem prova", "tem suporte", "como estudo"],
-    keywords: ["funciona", "online", "acesso", "prova", "suporte", "estudo"]
+    phrases: ["como funciona", "me explica", "quero entender melhor", "como e", "como é", "me fala mais", "quero saber mais", "e online", "como acesso", "tem prova", "tem suporte", "como estudo"],
+    keywords: ["funciona", "explica", "entender", "online", "acesso", "prova", "suporte", "estudo", "mais"]
   },
   goal_help: {
     priority: 58,
@@ -176,6 +176,7 @@ function getContextBoost(intent, convo = {}, normalizedText = "") {
   if (intent === "price" && (convo?.selectedCourse || convo?.course)) boost += 0.12
   if (intent === "payment_options" && convo?.priceShown) boost += 0.1
   if (intent === "enrollment" && (convo?.selectedCourse || convo?.priceShown || convo?.enrollmentIntent)) boost += 0.12
+  if (intent === "how_course_works" && (convo?.selectedCourse || convo?.course)) boost += 0.22
   if (intent === "second_via" && /\bcpf\b/.test(normalizedText)) boost += 0.15
   if (intent === "course_category" && convo?.preferredCategory) boost += 0.1
 

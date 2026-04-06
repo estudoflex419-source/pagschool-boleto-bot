@@ -472,9 +472,12 @@ Me diz como eu posso te ajudar melhor:
 function newEnrollmentIntro() {
   return `Perfeito 😊
 
-Vou te ajudar a encontrar a opção que mais combina com o que você busca.
+Eu posso te ajudar com 3 coisas:
+1 - te indicar um curso
+2 - te passar os valores
+3 - te explicar como funciona
 
-Hoje você já tem algum curso em mente ou quer que eu te mostre algumas opções?`
+Se quiser, também pode me mandar direto o nome do curso que te chamou atenção.`
 }
 
 function showCourses() {
@@ -548,7 +551,7 @@ Me fala qual curso chamou sua atenção que eu te explico melhor.`
   parts.push(
     "A carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática e se apresentar melhor no mercado."
   )
-  parts.push("Me conta: o que mais te interessou nesse curso?")
+  parts.push("Se quiser, agora eu posso te passar os valores para começar ou já te explicar como funciona a matrícula.")
 
   return parts.join("\n\n")
 }
