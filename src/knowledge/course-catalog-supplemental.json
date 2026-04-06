@@ -1,0 +1,250 @@
+[
+  {
+    "name": "Cabeleireiro(a)",
+    "aliases": ["cabeleireiro", "cabelereiro"],
+    "workloadHours": 96,
+    "salary": "R$ 2.000,00",
+    "summary": "Curso focado em cortes, coloração, tratamentos capilares e atendimento ao cliente.",
+    "description": "Formação para atuar com cortes, química capilar, finalização e rotinas de salão.",
+    "market": "Pode atuar em salões, atendimento autônomo, estética e serviços especializados.",
+    "programItems": [
+      "Hidróxidos",
+      "Tipos de cabelos",
+      "Tioglicolato de amônio",
+      "Colorimetria",
+      "Luzes, mechas e ombré hair",
+      "Formação de preço",
+      "Qualidade profissional"
+    ]
+  },
+  {
+    "name": "Barbeiro",
+    "aliases": ["barbeiro"],
+    "workloadHours": 96,
+    "salary": "R$ 1.590,00",
+    "summary": "Capacitação para cortes masculinos, barba, acabamento e atendimento especializado.",
+    "description": "Inclui técnicas clássicas e modernas de barbearia, biossegurança e experiência do cliente.",
+    "market": "Mercado em expansão em barbearias tradicionais, premium e atendimento personalizado.",
+    "programItems": [
+      "História da barbearia",
+      "Biossegurança",
+      "Design de barba",
+      "Técnicas de degradê",
+      "Colorimetria masculina",
+      "Relaxamento e massagem"
+    ]
+  },
+  {
+    "name": "Extensão de Cílios",
+    "aliases": ["extensao de cilios", "extensão de cílios", "cilios"],
+    "workloadHours": 96,
+    "summary": "Curso para aplicação, manutenção e remoção de extensão de cílios com segurança.",
+    "description": "Abrange técnicas clássico fio a fio, híbrida, volume russo e mega volume.",
+    "market": "Alta demanda em estética facial, salões e atendimento particular.",
+    "programItems": [
+      "Anatomia do pelo",
+      "Assepsia e preparação",
+      "Técnica clássica fio a fio",
+      "Técnica híbrida",
+      "Volume russo e mega volume",
+      "Manutenção e remoção",
+      "Precificação e marketing"
+    ]
+  },
+  {
+    "name": "Designer de Unhas",
+    "aliases": ["designer de unhas", "nail designer"],
+    "workloadHours": 96,
+    "salary": "R$ 1.431,00",
+    "summary": "Formação prática para manicure, pedicure, esmaltação e design de unhas.",
+    "description": "Inclui atendimento, biossegurança, técnicas de cutilagem, acabamento e tendências.",
+    "market": "Atuação em salões, estúdios e atendimento domiciliar.",
+    "programItems": [
+      "Recepção ao cliente",
+      "Ficha de anamnese",
+      "Remoção de cutículas",
+      "Lixar e esmaltar",
+      "Design passo a passo",
+      "Decoração para ocasiões"
+    ]
+  },
+  {
+    "name": "Designer de Sobrancelhas",
+    "aliases": ["designer de sobrancelhas", "sobrancelhas"],
+    "workloadHours": 96,
+    "salary": "R$ 1.273,00",
+    "summary": "Curso voltado à modelagem e correção de sobrancelhas com técnicas profissionais.",
+    "description": "Aborda visagismo, higienização, paquímetro, pinça, linha e correções.",
+    "market": "Grande procura em estética facial e serviços de beleza personalizados.",
+    "programItems": [
+      "Anatomia e fisiologia do pelo",
+      "Técnica de design",
+      "Uso de paquímetro",
+      "Modelagem com pinça",
+      "Modelagem com cera e linha",
+      "Visagismo",
+      "Biossegurança"
+    ]
+  },
+  {
+    "name": "Auxiliar de Farmácia",
+    "aliases": ["auxiliar de farmacia", "farmacia", "farmácia"],
+    "workloadHours": 196,
+    "salary": "R$ 1.420,00",
+    "summary": "Curso para atuar em farmácias e drogarias com foco técnico e atendimento.",
+    "description": "Inclui fundamentos de farmacologia, biossegurança, legislação e rotinas farmacêuticas.",
+    "market": "Emprego em farmácias, drogarias, hospitais e apoio ao farmacêutico.",
+    "programItems": [
+      "História da farmácia",
+      "Microbiologia",
+      "Bioética em saúde",
+      "Química analítica",
+      "Farmacognosia",
+      "Farmacotécnica",
+      "Farmácia hospitalar",
+      "Controle de qualidade"
+    ]
+  },
+  {
+    "name": "Cuidador de Idosos",
+    "aliases": ["cuidador de idosos", "idosos"],
+    "workloadHours": 196,
+    "salary": "R$ 1.420,00",
+    "summary": "Formação para cuidados diários, apoio familiar e acompanhamento da pessoa idosa.",
+    "description": "Trabalha rotinas de higiene, alimentação, mobilidade, comunicação e prevenção.",
+    "market": "Atuação domiciliar, clínicas, casas de repouso e serviços especializados.",
+    "programItems": [
+      "Estatuto do idoso",
+      "Rotinas de trabalho",
+      "Cuidados gerais e especiais",
+      "Processos de reabilitação",
+      "Estimulação física",
+      "Rede de apoio social"
+    ]
+  },
+  {
+    "name": "Agente de Saúde",
+    "aliases": ["agente de saude", "agente de saúde"],
+    "workloadHours": 196,
+    "salary": "R$ 1.435,00",
+    "summary": "Curso para promoção da saúde, prevenção de doenças e atuação em campo.",
+    "description": "Foco em vigilância, visitas domiciliares, endemias e educação em saúde.",
+    "market": "Atuação comunitária, campanhas de saúde pública e controle de vetores.",
+    "programItems": [
+      "Modelos de atenção à saúde (SUS)",
+      "Vigilância em saúde",
+      "Doenças endêmicas e epidêmicas",
+      "Manejo integrado de vetores",
+      "Visita domiciliar",
+      "Ética e cidadania"
+    ]
+  },
+  {
+    "name": "Análises Clínicas",
+    "aliases": ["analises clinicas", "análises clínicas"],
+    "workloadHours": 196,
+    "salary": "R$ 1.221,00",
+    "summary": "Capacita para rotinas laboratoriais em saúde e apoio ao diagnóstico.",
+    "description": "Inclui coleta, triagem, bioquímica, hematologia, imunologia e biossegurança.",
+    "market": "Atuação em laboratórios, clínicas, hospitais e pesquisa biomédica.",
+    "programItems": [
+      "Técnicas de coleta, triagem e esterilização",
+      "Bioquímica clínica",
+      "Hematologia",
+      "Parasitologia humana",
+      "Microbiologia médica",
+      "Urinálise e fluidos biológicos"
+    ]
+  },
+  {
+    "name": "Vitrinista",
+    "aliases": ["vitrinista", "vitrinismo"],
+    "workloadHours": 96,
+    "salary": "R$ 1.740,00",
+    "summary": "Curso de programação visual para vitrines e exposição de produtos.",
+    "description": "Trabalha design, vitrinismo, comportamento do consumidor e técnicas de exposição.",
+    "market": "Empregabilidade em varejo, lojas e projetos visuais comerciais.",
+    "programItems": [
+      "Partes da vitrine",
+      "Tipos de vitrines",
+      "Visual merchandising",
+      "Técnicas de exposição",
+      "Regras de exposição",
+      "Planejamento de vitrines"
+    ]
+  },
+  {
+    "name": "Micropigmentação Labial",
+    "aliases": ["micropigmentacao labial", "micropigmentação labial"],
+    "workloadHours": 96,
+    "salary": "R$ 2.150,00",
+    "summary": "Especialização em técnicas de micropigmentação para realce labial.",
+    "description": "Aborda biossegurança, neutralização, efeito batom/pixels e pós-procedimento.",
+    "market": "Demanda crescente em estética facial e atendimento personalizado.",
+    "programItems": [
+      "Materiais e agulhas",
+      "Anatomia dos lábios",
+      "Dermógrafo e posicionamento",
+      "Pré-procedimento",
+      "Técnicas de neutralização",
+      "Técnica efeito batom",
+      "Técnica efeito pixels",
+      "Correção do pigmento"
+    ]
+  },
+  {
+    "name": "Mega Hair",
+    "aliases": ["mega hair", "alongamento capilar"],
+    "workloadHours": 96,
+    "summary": "Curso para aplicação de extensões capilares e manutenção profissional.",
+    "description": "Inclui técnicas como nó italiano, entrelaçamento, queratina, microlink e nanofita.",
+    "market": "Atuação em salões, spas e serviços autônomos com alta demanda.",
+    "programItems": [
+      "Preparação do cabelo",
+      "Técnica do nó italiano",
+      "Técnica do entrelaçamento",
+      "Cápsulas de queratina",
+      "Microlink",
+      "Nanopeles com gel em fita",
+      "Remoção segura",
+      "Manutenção do alongamento"
+    ]
+  },
+  {
+    "name": "Maquiagem Profissional",
+    "aliases": ["maquiagem profissional", "maquiagem"],
+    "workloadHours": 96,
+    "salary": "R$ 1.727,00",
+    "summary": "Formação em maquiagem social e profissional com foco técnico e prático.",
+    "description": "Inclui preparação de pele, correções, técnicas para ocasiões e tendências.",
+    "market": "Mercado em expansão para eventos, atendimento pessoal e serviços de beleza.",
+    "programItems": [
+      "História da maquiagem",
+      "Diagnóstico e cuidados com a pele",
+      "Instrumentos e materiais",
+      "Correções faciais",
+      "Maquiagem natural e sofisticada",
+      "Maquiagem para noivas e festas",
+      "Dicas e truques de maquiagem"
+    ]
+  },
+  {
+    "name": "Depilação Profissional",
+    "aliases": ["depilacao profissional", "depilação profissional"],
+    "workloadHours": 96,
+    "salary": "R$ 1.495,00",
+    "summary": "Curso para técnicas de depilação com segurança, higiene e atendimento.",
+    "description": "Aborda tipos de pele e pelo, métodos depilatórios e práticas de biossegurança.",
+    "market": "Atuação em salões, clínicas, spas e serviços domiciliares.",
+    "programItems": [
+      "Materiais e instrumentos da depilação",
+      "Técnicas de depilação",
+      "Procedimentos por região",
+      "Tipos de cera",
+      "Descoloração de pelos",
+      "Cuidados pré e pós-depilatórios",
+      "EPIs e segurança no trabalho",
+      "Atendimento ao cliente"
+    ]
+  }
+]

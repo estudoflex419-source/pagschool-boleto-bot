@@ -77,6 +77,59 @@ function candidateKnowledgePaths() {
   ].filter(Boolean)
 }
 
+function loadSupplementalCourses() {
+  const supplementalPath = path.join(__dirname, "course-catalog-supplemental.json")
+
+  try {
+    if (!fs.existsSync(supplementalPath)) return []
+    const raw = fs.readFileSync(supplementalPath, "utf8")
+    const parsed = JSON.parse(raw)
+
+    if (!Array.isArray(parsed)) return []
+
+    return parsed
+      .map(item => {
+        const name = compactLine(item?.name || "")
+        if (!name) return null
+
+        const programItems = Array.isArray(item?.programItems)
+          ? uniqueItems(item.programItems.map(compactLine).filter(Boolean))
+          : []
+
+        const workloadHours = Number(item?.workloadHours) || null
+        const durationMonths = workloadHours && DURATION_BY_WORKLOAD[workloadHours]
+          ? DURATION_BY_WORKLOAD[workloadHours]
+          : null
+
+        const aliases = uniqueItems([
+          ...buildAliases(name),
+          ...(Array.isArray(item?.aliases) ? item.aliases.map(normalizeText) : [])
+        ]).filter(alias => alias && alias.length >= 3)
+
+        return {
+          name,
+          normalizedName: normalizeText(name),
+          aliases,
+          significantWords: buildSignificantWords(name),
+          workloadHours,
+          workloadLabel: workloadHours ? `${workloadHours}h` : "",
+          durationMonths,
+          durationLabel: durationMonths ? `${durationMonths} meses` : "",
+          salary: compactLine(item?.salary || ""),
+          summary: compactLine(item?.summary || ""),
+          description: compactLine(item?.description || ""),
+          market: compactLine(item?.market || ""),
+          programItems,
+          differentials: compactLine(item?.differentials || ""),
+          rawText: compactLine(item?.rawText || item?.description || "")
+        }
+      })
+      .filter(Boolean)
+  } catch (_error) {
+    return []
+  }
+}
+
 function resolveKnowledgeSourcePath() {
   for (const candidate of candidateKnowledgePaths()) {
     try {
@@ -92,10 +145,114 @@ function resolveKnowledgeSourcePath() {
 }
 
 function splitBlocks(rawText) {
-  return String(rawText || "")
+  const text = String(rawText || "")
+  const separatedByRule = text
     .split(/\r?\n\s*-{20,}\s*\r?\n/g)
     .map(block => String(block || "").trim())
     .filter(Boolean)
+
+  if (separatedByRule.length > 1) {
+    return separatedByRule
+  }
+
+  const lines = text.split(/\r?\n/)
+  const starts = []
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const current = compactLine(lines[i])
+    if (!current) continue
+    if (isCatalogHeaderLine(current) || isPageNumberLine(current)) continue
+    if (isHeaderCourseLine(current)) continue
+    if (isWorkloadLine(current)) continue
+    if (isSalaryLine(current)) continue
+    if (detectSection(current)) continue
+    if (!looksLikeCourseTitle(current)) continue
+
+    let hasNearbyWorkload = false
+    let nearbySignals = 0
+
+    for (let j = i + 1; j < Math.min(i + 30, lines.length); j += 1) {
+      const next = compactLine(lines[j])
+      if (!next) continue
+      if (isCatalogHeaderLine(next) || isPageNumberLine(next)) continue
+      if (isWorkloadLine(next)) {
+        hasNearbyWorkload = true
+        nearbySignals += 3
+        break
+      }
+      if (isSalaryLine(next)) {
+        nearbySignals += 2
+        continue
+      }
+      if (detectSection(next)) {
+        nearbySignals += 1
+        // section right after title is a good signal, but continue to still
+        // prioritize finding workload when available.
+        break
+      }
+
+      // Found other real content before workload; this line is likely not a course title.
+      if (
+        /^[•\-]/.test(next) ||
+        next.endsWith(":")
+      ) {
+        break
+      }
+    }
+
+    if (hasNearbyWorkload || nearbySignals >= 3) {
+      starts.push(i)
+    }
+  }
+
+  if (starts.length < 2) {
+    return separatedByRule
+  }
+
+  const blocks = []
+
+  for (let index = 0; index < starts.length; index += 1) {
+    const start = starts[index]
+    const end = index + 1 < starts.length ? starts[index + 1] : lines.length
+    const block = lines.slice(start, end).join("\n").trim()
+
+    if (block) {
+      blocks.push(block)
+    }
+  }
+
+  return blocks
+}
+
+function isCatalogHeaderLine(line) {
+  return normalizeText(line) === "conteudo programatico dos cursos"
+}
+
+function isPageNumberLine(line) {
+  return /^p[aá]gina\s*\d+$/i.test(String(line || "").trim())
+}
+
+function looksLikeCourseTitle(line) {
+  const clean = compactLine(line)
+  if (!clean) return false
+  if (/^[•\-]/.test(clean)) return false
+  if (clean.endsWith(":")) return false
+  if (clean.length > 90) return false
+
+  const words = clean.split(/\s+/).filter(Boolean)
+  if (words.length === 0 || words.length > 10) return false
+  if (!hasEnoughTitleWords(words)) return false
+
+  return /[A-Za-zÀ-ÿ]/.test(clean)
+}
+
+function hasEnoughTitleWords(words) {
+  const significant = words.filter(word => {
+    const normalized = normalizeText(word)
+    return normalized.length >= 3 && !STOPWORDS.has(normalized)
+  })
+
+  return significant.length >= 1
 }
 
 function isHeaderCourseLine(line) {
@@ -382,11 +539,12 @@ let CACHE = null
 
 function parseKnowledgeFile() {
   const sourcePath = resolveKnowledgeSourcePath()
+  const supplementalCourses = loadSupplementalCourses()
 
   if (!sourcePath) {
     return {
       sourcePath: "",
-      courses: []
+      courses: mergeDuplicateCourses(supplementalCourses)
     }
   }
 
@@ -402,7 +560,7 @@ function parseKnowledgeFile() {
 
   const blocks = splitBlocks(fileText)
   const parsed = blocks.map(parseCourseBlock).filter(Boolean)
-  const courses = mergeDuplicateCourses(parsed)
+  const courses = mergeDuplicateCourses([...parsed, ...supplementalCourses])
 
   return {
     sourcePath,
