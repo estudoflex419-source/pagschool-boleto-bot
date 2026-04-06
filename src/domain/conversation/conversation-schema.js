@@ -47,7 +47,7 @@ function createDefaultConversation() {
     awaitingCourseChoice: false,
     awaitingCareerDiscovery: false,
     coursePresentationSent: false,
-    selectedCourse: "",
+    selectedCourse: null,
     coursePresentationLevel: "none",
     selectedCategory: "",
     paymentPreference: "",

@@ -249,6 +249,24 @@ function extractCourseLabel(value = "") {
   return ""
 }
 
+function isHydratedSelectedCourse(value = null) {
+  if (!value || typeof value !== "object") return false
+  if (Array.isArray(value)) return false
+
+  const label = extractCourseLabel(value)
+  if (!label) return false
+
+  return Boolean(
+    value.summary ||
+      value.description ||
+      value.workload ||
+      value.duration ||
+      value.salary ||
+      value.programContent ||
+      value.learns
+  )
+}
+
 function normalizeCourseInfoCandidate(candidate) {
   if (!candidate) return null
 
@@ -275,6 +293,81 @@ function normalizeCourseInfoCandidate(candidate) {
   }
 
   return buildFallbackCourseInfoByName(label)
+}
+
+function withExpandedCourseInfo(courseInfo = null) {
+  const normalized = normalizeCourseInfoCandidate(courseInfo)
+  if (!normalized) return null
+
+  const title = extractCourseLabel(normalized)
+  const learns = uniqueItems(
+    Array.isArray(normalized.learns)
+      ? normalized.learns
+      : Array.isArray(normalized.programContent)
+        ? normalized.programContent
+        : []
+  )
+  const aliases = uniqueItems(
+    Array.isArray(normalized.aliases)
+      ? normalized.aliases
+      : []
+  )
+  const category = inferCourseCategory({ ...normalized, title })
+
+  return {
+    ...normalized,
+    title,
+    name: title,
+    category,
+    workload: String(normalized.workload || "").trim(),
+    duration: String(normalized.duration || "").trim(),
+    salary: String(normalized.salary || "").trim(),
+    summary: String(normalized.summary || "").trim(),
+    professionSummary: String(normalized.market || normalized.professionSummary || "").trim(),
+    programContent: learns,
+    learns,
+    aliases
+  }
+}
+
+function setSelectedCourseContext(convo = {}, candidate = null, { preserveCurrentName = true } = {}) {
+  const hydrated = withExpandedCourseInfo(candidate)
+  if (!hydrated) return null
+
+  const title = extractCourseLabel(hydrated)
+  if (!title) return null
+
+  convo.selectedCourse = hydrated
+  convo.course = title
+  ensureSalesLead(convo)
+  convo.salesLead.selectedCourse = title
+  convo.salesLead.selectedCourseInfo = hydrated
+
+  if (!preserveCurrentName) {
+    convo.salesLead.course = title
+  }
+
+  return hydrated
+}
+
+function ensureSelectedCourseContext(convo = {}, text = "") {
+  if (isHydratedSelectedCourse(convo.selectedCourse)) {
+    const refreshed = withExpandedCourseInfo(convo.selectedCourse)
+    if (refreshed) {
+      setSelectedCourseContext(convo, refreshed)
+      return refreshed
+    }
+  }
+
+  const selectedName = getSelectedCourseNameFromContext(convo)
+  if (!selectedName) return null
+
+  const resolved =
+    findSiteCourseKnowledge(`${selectedName} ${text}`.trim(), selectedName) ||
+    findSiteCourseKnowledge(selectedName, selectedName) ||
+    buildFallbackCourseInfoByName(selectedName)
+
+  return setSelectedCourseContext(convo, resolved || { title: selectedName })
 }
 
 function getCourseSearchText(course = {}) {
@@ -2301,7 +2394,7 @@ function buildConsultativeCategorySuggestion(category = "") {
 }
 
 function buildEarlyPriceDeflection(convo = {}) {
-  const selected = convo.selectedCourse || convo.course || ""
+  const selected = getSelectedCourseNameFromContext(convo)
   if (selected) {
     return `Ótima pergunta 😊 Antes de falar de valores, eu te explico rapidinho como funciona *${selected}* para você decidir com segurança.`
   }
@@ -2314,9 +2407,12 @@ function detectStrongIntent(text = "", convo = {}) {
   if (isFinancialCriticalIntent(text) && !wantsPaymentOptionsIntent(text)) return "second_via"
   if (wantsHumanAgentIntent(text)) return "human_agent"
   if (wantsStartOverIntent(text)) return "start_over"
-  if ((convo.selectedCourse || convo.course) && wantsHowCourseWorksIntent(text)) return "how_course_works"
-  if ((convo.selectedCourse || convo.course) && wantsPriceIntent(text)) return "price"
-  if ((convo.selectedCourse || convo.course) && (wantsEnrollmentIntent(text) || isEnrollmentHowToIntent(text) || wantsStartNow(text))) return "enrollment"
+  if (getSelectedCourseNameFromContext(convo) && wantsHowCourseWorksIntent(text)) return "how_course_works"
+  if (getSelectedCourseNameFromContext(convo) && wantsPriceIntent(text)) return "price"
+  if (
+    getSelectedCourseNameFromContext(convo) &&
+    (wantsEnrollmentIntent(text) || isEnrollmentHowToIntent(text) || wantsStartNow(text))
+  ) return "enrollment"
   if (wantsMoreCourses(text) || isGeneralCourseCatalogQuestion(text)) return "course_catalog_request"
   if (wantsCompareCoursesIntent(text)) return "compare_courses"
   if (sales.isCourseCatalogRequest(text) || wantsGroupedCourseCatalog(text)) return "course_catalog_request"
@@ -2403,7 +2499,7 @@ function buildHumanizedFallback(convo = {}, text = "") {
   }
 
   if (convo.course || convo.selectedCourse) {
-    const selected = convo.selectedCourse || convo.course
+    const selected = getSelectedCourseNameFromContext(convo)
     return `Perfeito 😊 Sobre *${selected}*, eu te explico melhor como funciona e te ajudo no próximo passo.`
   }
 
@@ -2517,9 +2613,7 @@ Pode ser?`
         }
       }
 
-      convo.course = courseInfo.title
-      convo.selectedCourse = courseInfo.title
-      convo.salesLead.selectedCourse = courseInfo.title
+      setSelectedCourseContext(convo, courseInfo)
       convo.selectedCategory = inferCourseCategory(courseInfo)
       convo.path = "new_enrollment"
       convo.step = "offer_transition"
@@ -2537,8 +2631,8 @@ Pode ser?`
     }
 
     case "how_course_works":
-      if (convo.selectedCourse || convo.course) {
-        const selected = convo.selectedCourse || convo.course
+      if (getSelectedCourseNameFromContext(convo)) {
+        const selected = getSelectedCourseNameFromContext(convo)
         convo.path = "new_enrollment"
         convo.step = "offer_transition"
         convo.currentFlow = "commercial"
@@ -2579,11 +2673,8 @@ function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "
     const selectedCourse = findBestCourseCandidate(text, convo.course)
 
     if (selectedCourse?.title || selectedCourse?.name) {
-      const courseInfo = normalizeCourseInfoCandidate(selectedCourse)
+      const courseInfo = setSelectedCourseContext(convo, selectedCourse) || normalizeCourseInfoCandidate(selectedCourse)
       const courseTitle = extractCourseLabel(courseInfo || selectedCourse)
-
-      convo.course = courseTitle || convo.course
-      convo.selectedCourse = courseTitle || convo.selectedCourse
       convo.selectedCategory = inferCourseCategory(courseInfo || { title: courseTitle })
       convo.path = "new_enrollment"
       convo.step = "offer_transition"
@@ -2592,13 +2683,11 @@ function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "
       convo.lastOfferType = "course_explanation"
       convo.awaitingCourseChoice = false
       convo.coursePresentationSent = true
-      ensureSalesLead(convo)
-      convo.salesLead.selectedCourse = convo.selectedCourse
       clearPendingStep(convo)
 
       return {
         intent: "pending_awaiting_course_match",
-        message: buildEnhancedCoursePresentation(convo.selectedCourse, courseInfo)
+        message: buildEnhancedCoursePresentation(getSelectedCourseNameFromContext(convo), courseInfo)
       }
     }
 
@@ -2658,10 +2747,8 @@ function updateCommercialMemory(convo, text, detectedCourse, isPriceQuestion) {
   const lowContext = isLowContextReply(text)
 
   if (detectedCourse?.name) {
-    convo.course = detectedCourse.name
-    convo.selectedCourse = detectedCourse.name
+    setSelectedCourseContext(convo, { title: detectedCourse.name })
     convo.salesLead.course = detectedCourse.name
-    convo.salesLead.selectedCourse = detectedCourse.name
     const category = inferCourseCategory(findSiteCourseKnowledge(detectedCourse.name, detectedCourse.name) || { title: detectedCourse.name })
     convo.selectedCategory = category
     convo.commercialStage = convo.commercialStage === "closing" ? "closing" : "course_detail"
@@ -2708,14 +2795,12 @@ function inferPreferredCategory(text = "", intentResult = {}, convo = {}) {
 function inferSelectedCourse(text = "", intentResult = {}, convo = {}) {
   const courseInfo = findSiteCourseKnowledge(text, convo.course)
   if (courseInfo?.title) {
-    convo.selectedCourse = courseInfo.title
-    convo.course = courseInfo.title
-    convo.salesLead.selectedCourse = courseInfo.title
+    setSelectedCourseContext(convo, courseInfo)
     return courseInfo.title
   }
 
   if (intentResult?.intent === "specific_course" && convo.course) {
-    convo.selectedCourse = convo.course
+    setSelectedCourseContext(convo, { title: convo.course })
     return convo.course
   }
 
@@ -3742,6 +3827,7 @@ function getSelectedCourseNameFromContext(convo = {}) {
   return extractCourseLabel(
     convo.selectedCourse ||
       convo.course ||
+      convo.salesLead?.selectedCourseInfo ||
       convo.salesLead?.selectedCourse ||
       convo.salesLead?.course ||
       ""
@@ -3749,13 +3835,16 @@ function getSelectedCourseNameFromContext(convo = {}) {
 }
 
 function resolveSelectedCourseInfo(convo = {}, text = "") {
+  const hydrated = ensureSelectedCourseContext(convo, text)
+  if (hydrated) return hydrated
+
   const selected = getSelectedCourseNameFromContext(convo)
   if (!selected) return null
 
-  return (
+  return withExpandedCourseInfo(
     findSiteCourseKnowledge(`${selected} ${text}`, selected) ||
-    findSiteCourseKnowledge(selected, selected) ||
-    buildFallbackCourseInfoByName(selected)
+      findSiteCourseKnowledge(selected, selected) ||
+      buildFallbackCourseInfoByName(selected)
   )
 }
 
@@ -3993,6 +4082,7 @@ async function processMessage(phone, text) {
     convo.awaitingPriceDecision = Boolean(convo.awaitingPriceDecision)
     convo.awaitingEnrollmentData = Boolean(convo.awaitingEnrollmentData)
     convo.financialFlowLocked = Boolean(convo.financialFlowLocked)
+    ensureSelectedCourseContext(convo, text)
     const matchedKnowledgeCourse = findCourseInText(text)
     const detectedCourse = matchedKnowledgeCourse
       ? { name: extractCourseLabel(matchedKnowledgeCourse) }
@@ -4020,18 +4110,19 @@ async function processMessage(phone, text) {
         const explicitCourseTitle = extractCourseLabel(explicitCourseInfo || explicitCourseMention.course)
 
         if (explicitCourseTitle) {
-          convo.course = explicitCourseTitle
-          convo.selectedCourse = explicitCourseTitle
+          const hydratedCourse = setSelectedCourseContext(convo, explicitCourseInfo || { title: explicitCourseTitle })
           convo.currentFlow = "commercial"
           convo.awaitingCourseChoice = false
           convo.awaitingCareerDiscovery = false
           convo.coursePresentationLevel = "initial"
           convo.commercialStage = "course_detail"
-          convo.salesLead.selectedCourse = convo.selectedCourse
           clearPendingStep(convo)
 
           return replyWithState(
-            buildEnhancedCoursePresentation(convo.selectedCourse, explicitCourseInfo),
+            buildEnhancedCoursePresentation(
+              hydratedCourse?.title || explicitCourseTitle,
+              hydratedCourse || explicitCourseInfo
+            ),
             {},
             `explicit_course_${explicitCourseMention.matchType || "match"}`
           )
@@ -4081,11 +4172,12 @@ async function processMessage(phone, text) {
       if (selectedCourseQuestionType && selectedCourseInfo) {
         convo.currentFlow = "commercial"
         convo.commercialStage = "course_detail"
-        convo.course = selectedCourseInfo.title || selectedCourseName || convo.course
-        convo.selectedCourse = selectedCourseInfo.title || selectedCourseName || convo.selectedCourse
-        convo.salesLead.selectedCourse = convo.selectedCourse
+        const hydratedCourse = setSelectedCourseContext(
+          convo,
+          selectedCourseInfo.title ? selectedCourseInfo : { ...selectedCourseInfo, title: selectedCourseName }
+        )
         return replyWithState(
-          buildDirectCourseQuestionReply(selectedCourseQuestionType, selectedCourseInfo),
+          buildDirectCourseQuestionReply(selectedCourseQuestionType, hydratedCourse || selectedCourseInfo),
           {},
           `selected_course_${selectedCourseQuestionType}`
         )
@@ -4099,29 +4191,30 @@ async function processMessage(phone, text) {
 
       const selectedInText = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
       if (selectedInText?.title || selectedInText?.name) {
-        const courseInfo = normalizeCourseInfoCandidate(selectedInText)
+        const courseInfo = setSelectedCourseContext(convo, selectedInText) || normalizeCourseInfoCandidate(selectedInText)
         const courseTitle = extractCourseLabel(courseInfo || selectedInText)
-        convo.course = courseTitle || convo.course
-        convo.selectedCourse = courseTitle || convo.selectedCourse
         convo.currentFlow = "commercial"
         convo.awaitingCourseChoice = false
         convo.awaitingCareerDiscovery = false
         convo.coursePresentationLevel = "intro"
         convo.commercialStage = "course_detail"
-        convo.salesLead.selectedCourse = convo.selectedCourse
-        return replyWithState(buildEnhancedCoursePresentation(convo.selectedCourse, courseInfo), {}, "specific_course")
+        return replyWithState(
+          buildEnhancedCoursePresentation(getSelectedCourseNameFromContext(convo), courseInfo),
+          {},
+          "specific_course"
+        )
       }
 
-      if ((convo.selectedCourse || convo.course) && wantsHowCourseWorksIntent(text)) {
-        const selected = convo.selectedCourse || convo.course
+      if (getSelectedCourseNameFromContext(convo) && wantsHowCourseWorksIntent(text)) {
+        const selected = getSelectedCourseNameFromContext(convo)
         convo.currentFlow = "commercial"
         convo.commercialStage = "course_detail"
         convo.coursePresentationLevel = convo.coursePresentationLevel === "intro" ? "deep" : "deep"
         return replyWithState(buildCourseFunctionalityMessage(selected), {}, "how_course_works")
       }
 
-      if ((convo.selectedCourse || convo.course) && hasRealEnrollmentIntent(text)) {
-        const selected = convo.selectedCourse || convo.course
+      if (getSelectedCourseNameFromContext(convo) && hasRealEnrollmentIntent(text)) {
+        const selected = getSelectedCourseNameFromContext(convo)
         convo.currentFlow = "commercial"
         convo.awaitingEnrollmentConfirmation = true
         convo.awaitingEnrollmentInterest = false
@@ -4164,11 +4257,9 @@ async function processMessage(phone, text) {
       const matchedCourse = findBestCourseCandidate(text, convo.course)
 
       if (matchedCourse?.title || matchedCourse?.name) {
-        const courseInfo = normalizeCourseInfoCandidate(matchedCourse)
+        const courseInfo = setSelectedCourseContext(convo, matchedCourse) || normalizeCourseInfoCandidate(matchedCourse)
         const courseTitle = extractCourseLabel(courseInfo || matchedCourse)
 
-        convo.course = courseTitle || convo.course
-        convo.selectedCourse = courseTitle || convo.selectedCourse
         convo.selectedCategory = inferCourseCategory(courseInfo || { title: courseTitle })
         convo.path = "new_enrollment"
         convo.step = "offer_transition"
@@ -4182,12 +4273,10 @@ async function processMessage(phone, text) {
         convo.coursePresentationSent = true
         convo.awaitingPriceDecision = true
         convo.awaitingEnrollmentData = false
-        ensureSalesLead(convo)
-        convo.salesLead.selectedCourse = convo.selectedCourse
         clearPendingStep(convo)
 
         return replyWithState(
-          buildEnhancedCoursePresentation(convo.selectedCourse, courseInfo),
+          buildEnhancedCoursePresentation(getSelectedCourseNameFromContext(convo), courseInfo),
           {},
           "pending_awaiting_course_match"
         )
@@ -4271,8 +4360,7 @@ async function processMessage(phone, text) {
           buildFallbackCourseInfoByName(convo.course)
 
         if (courseInfo) {
-          convo.course = courseInfo.title || convo.course
-          convo.selectedCourse = convo.course
+          setSelectedCourseContext(convo, courseInfo)
           convo.step = "offer_transition"
           const questionType = detectCourseQuestionType(text)
           const message = questionType
@@ -4651,9 +4739,8 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         normalizedDetectedCourse === normalizedCurrentCourse
 
       convo.path = "new_enrollment"
-      convo.course = detectedCourse.name
+      setSelectedCourseContext(convo, courseInfo || { title: detectedCourse.name })
       clearPendingStep(convo)
-      convo.selectedCourse = detectedCourse.name
       convo.selectedCategory = inferCourseCategory(courseInfo || { title: detectedCourse.name })
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
@@ -4680,9 +4767,8 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
     if (!detectedCourse && courseInfoFromText && convo.step === "course_selection") {
       convo.path = "new_enrollment"
-      convo.course = courseInfoFromText.title
+      setSelectedCourseContext(convo, courseInfoFromText)
       clearPendingStep(convo)
-      convo.selectedCourse = courseInfoFromText.title
       convo.selectedCategory = inferCourseCategory(courseInfoFromText)
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
@@ -4775,8 +4861,7 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
 
     if (convo.step === "course_selection") {
       if (courseInfoFromText) {
-        convo.course = courseInfoFromText.title
-        convo.selectedCourse = courseInfoFromText.title
+        setSelectedCourseContext(convo, courseInfoFromText)
         convo.selectedCategory = inferCourseCategory(courseInfoFromText)
         convo.commercialStage = "course_detail"
         convo.lastOfferType = "course_explanation"
