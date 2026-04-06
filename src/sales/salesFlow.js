@@ -10,6 +10,22 @@ function uniqueItems(items = []) {
   return [...new Set(items.filter(Boolean))]
 }
 
+
+function pickLead(text = "") {
+  const options = [
+    "Certo 😊",
+    "Entendi 😊",
+    "Boa escolha 😊",
+    "Perfeito, vamos lá 😊"
+  ]
+
+  const normalized = normalizeText(text)
+  if (!normalized) return options[0]
+
+  const index = normalized.charCodeAt(0) % options.length
+  return options[index]
+}
+
 const PIX_CASH_VALUE_LABEL = "R$ 550,00"
 
 const {
@@ -511,21 +527,16 @@ function buildCourseExtraBlock(course) {
 
 function presentCourse(course) {
   if (!course) {
-    return `Perfeito 😊
-
-Me fala qual curso chamou sua atenção que eu te explico melhor.`
+    return `Me fala o curso que você escolheu e eu te explico tudo de forma prática 😊`
   }
 
   const parts = []
 
-  parts.push("Ótima escolha 😊")
-  parts.push(`${course.name} ${course.summary}.`)
+  parts.push(`${pickLead(course.name)} Você escolheu *${course.name}*.`)
+  parts.push(`Esse curso ${course.summary}.`)
   parts.push(`${course.fit}.`)
-
-  const extra = buildCourseExtraBlock(course)
-  if (extra) {
-    parts.push(extra)
-  }
+  parts.push("Ele funciona pela plataforma online, para estudar no seu ritmo, com acesso a apostilas, vídeos, atividades e avaliações.")
+  parts.push("Você também conta com suporte pedagógico para tirar dúvidas durante a formação.")
 
   const learns = buildCourseLearnBlock(course)
   if (learns) {
@@ -537,13 +548,12 @@ Me fala qual curso chamou sua atenção que eu te explico melhor.`
     parts.push(market)
   }
 
-  parts.push(
-    "Além do conteúdo, é uma formação que ajuda a fortalecer o currículo e pode fazer diferença para quem quer buscar oportunidade na área."
-  )
-  parts.push(
-    "A carta de estágio também pode ser um diferencial interessante para quem quer buscar vivência prática e se apresentar melhor no mercado."
-  )
-  parts.push("Se quiser, agora eu posso te passar os valores para começar ou já te explicar como funciona a matrícula.")
+  const extra = buildCourseExtraBlock(course)
+  if (extra) {
+    parts.push(extra)
+  }
+
+  parts.push("Se quiser, agora eu posso te explicar como funciona no dia a dia, o que você aprende primeiro ou a parte do certificado.")
 
   return parts.join("\n\n")
 }
@@ -597,7 +607,7 @@ function buildValueConnection(convo = {}) {
     parts.push(`Isso pode fortalecer seu currículo para buscar oportunidade em ${selectedCourse.market}.`)
   }
 
-  parts.push("Posso te explicar melhor como funciona o curso ou, se preferir, já te passo os valores.")
+  parts.push("Se quiser, eu te explico melhor como funciona o curso, os conteúdos e a rotina de estudos.")
 
   return parts.join("\n\n")
 }
