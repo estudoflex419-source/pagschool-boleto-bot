@@ -3823,6 +3823,22 @@ function detectCourseQuestionType(text = "") {
   return ""
 }
 
+function isSelectedCourseFollowUpQuestion(text = "") {
+  const t = normalizeLoose(text)
+  if (!t) return false
+
+  if (detectCourseQuestionType(text)) return true
+
+  return [
+    "como funciona",
+    "quanto tempo de curso",
+    "o que aprende",
+    "e online",
+    "é online",
+    "tem certificado"
+  ].some(term => t.includes(term))
+}
+
 function getSelectedCourseNameFromContext(convo = {}) {
   return extractCourseLabel(
     convo.selectedCourse ||
@@ -4105,8 +4121,29 @@ async function processMessage(phone, text) {
     }
 
     if (!convo.financialFlowLocked) {
+      if (convo.selectedCourse && isSelectedCourseFollowUpQuestion(text)) {
+        const selectedCourseFromContext = resolveSelectedCourseInfo(convo, text)
+        const questionType = detectCourseQuestionType(text) || "how_works"
+
+        if (selectedCourseFromContext) {
+          const hydratedCourse = setSelectedCourseContext(convo, selectedCourseFromContext) || selectedCourseFromContext
+          convo.currentFlow = "commercial"
+          convo.commercialStage = "course_detail"
+          convo.awaitingCourseChoice = false
+          convo.awaitingCareerDiscovery = false
+          clearPendingStep(convo)
+          return replyWithState(
+            buildDirectCourseQuestionReply(questionType, hydratedCourse),
+            {},
+            `selected_course_followup_${questionType}`
+          )
+        }
+      }
+
       if (explicitCourseMention?.courseInfo || explicitCourseMention?.course) {
-        const explicitCourseInfo = explicitCourseMention.courseInfo || normalizeCourseInfoCandidate(explicitCourseMention.course)
+        const explicitCourseInfo =
+          withExpandedCourseInfo(explicitCourseMention.courseInfo || explicitCourseMention.course) ||
+          normalizeCourseInfoCandidate(explicitCourseMention.courseInfo || explicitCourseMention.course)
         const explicitCourseTitle = extractCourseLabel(explicitCourseInfo || explicitCourseMention.course)
 
         if (explicitCourseTitle) {

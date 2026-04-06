@@ -527,7 +527,7 @@ function buildCourseExtraBlock(course) {
 
 function presentCourse(course) {
   if (!course) {
-    return `Me fala o curso que você escolheu e eu te explico tudo de forma prática 😊`
+    return `Perfeito 😊 Eu te explico o curso de forma prática: como funciona, o que você aprende, duração e certificado.`
   }
 
   const parts = []
