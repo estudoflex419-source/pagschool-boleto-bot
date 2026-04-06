@@ -1556,6 +1556,95 @@ function findBestCourseCandidate(text = "", currentCourse = "") {
   return null
 }
 
+function escapeRegex(text = "") {
+  return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function looksLikeExplicitCourseRequest(text = "") {
+  const t = normalizeIntentText(text)
+  if (!t) return false
+
+  return [
+    /\bcurso\b/,
+    /\bme fala sobre\b/,
+    /\bme explica\b/,
+    /\bquero saber sobre\b/,
+    /\btenho interesse em\b/,
+    /\bsobre\b/
+  ].some(pattern => pattern.test(t))
+}
+
+function resolveExplicitCourseMention(text = "") {
+  const normalizedText = normalizeIntentText(text)
+  if (!normalizedText) return null
+
+  const explicitContext = looksLikeExplicitCourseRequest(normalizedText)
+  const wordCount = normalizedText.split(" ").filter(Boolean).length
+  const catalogs = [getCourseCatalog(), ACTIVE_SITE_COURSE_KNOWLEDGE, fallbackSalesCourses]
+
+  let bestMatch = null
+
+  for (const catalog of catalogs) {
+    for (const course of catalog || []) {
+      const terms = getCourseMatchTerms(course)
+
+      for (const term of terms) {
+        if (!term || term.length < 3) continue
+
+        if (normalizedText === term) {
+          return {
+            course,
+            courseInfo: normalizeCourseInfoCandidate(course),
+            matchType: "exact"
+          }
+        }
+
+        const boundaryPattern = new RegExp(`\\b${escapeRegex(term)}\\b`)
+        const hasBoundaryMatch = boundaryPattern.test(normalizedText)
+
+        if (explicitContext && hasBoundaryMatch) {
+          return {
+            course,
+            courseInfo: normalizeCourseInfoCandidate(course),
+            matchType: "normalized"
+          }
+        }
+
+        if (wordCount <= 4 && hasBoundaryMatch) {
+          if (!bestMatch || term.length > bestMatch.termLength) {
+            bestMatch = {
+              course,
+              termLength: term.length,
+              matchType: "alias"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (bestMatch) {
+    return {
+      course: bestMatch.course,
+      courseInfo: normalizeCourseInfoCandidate(bestMatch.course),
+      matchType: bestMatch.matchType
+    }
+  }
+
+  if (explicitContext) {
+    const fuzzyCourse = findBestCourseCandidate(text)
+    if (fuzzyCourse) {
+      return {
+        course: fuzzyCourse,
+        courseInfo: normalizeCourseInfoCandidate(fuzzyCourse),
+        matchType: "fuzzy"
+      }
+    }
+  }
+
+  return null
+}
+
 function getCourseMatchTerms(course = {}) {
   const terms = new Set()
   const rawName = extractCourseLabel(course)
@@ -3915,6 +4004,7 @@ async function processMessage(phone, text) {
     const selectedCourseName = getSelectedCourseNameFromContext(convo)
     const selectedCourseInfo = resolveSelectedCourseInfo(convo, text)
     const selectedCourseQuestionType = selectedCourseName ? detectCourseQuestionType(text) : ""
+    const explicitCourseMention = resolveExplicitCourseMention(text)
 
     if (isFinancialCriticalIntent(text) && !wantsPaymentOptionsIntent(text)) {
       convo.financialFlowLocked = true
@@ -3925,6 +4015,29 @@ async function processMessage(phone, text) {
     }
 
     if (!convo.financialFlowLocked) {
+      if (explicitCourseMention?.courseInfo || explicitCourseMention?.course) {
+        const explicitCourseInfo = explicitCourseMention.courseInfo || normalizeCourseInfoCandidate(explicitCourseMention.course)
+        const explicitCourseTitle = extractCourseLabel(explicitCourseInfo || explicitCourseMention.course)
+
+        if (explicitCourseTitle) {
+          convo.course = explicitCourseTitle
+          convo.selectedCourse = explicitCourseTitle
+          convo.currentFlow = "commercial"
+          convo.awaitingCourseChoice = false
+          convo.awaitingCareerDiscovery = false
+          convo.coursePresentationLevel = "initial"
+          convo.commercialStage = "course_detail"
+          convo.salesLead.selectedCourse = convo.selectedCourse
+          clearPendingStep(convo)
+
+          return replyWithState(
+            buildEnhancedCoursePresentation(convo.selectedCourse, explicitCourseInfo),
+            {},
+            `explicit_course_${explicitCourseMention.matchType || "match"}`
+          )
+        }
+      }
+
       const greetingOnly = isCommercialGreeting(text) && !convo.selectedCourse && !convo.course
       if (greetingOnly) {
         convo.currentFlow = "commercial"
@@ -3937,6 +4050,17 @@ async function processMessage(phone, text) {
         return replyWithState(buildCommercialEntryMessage(), {}, "commercial_greeting")
       }
 
+      const categoryFromText = detectCategoryFromText(text)
+      if (categoryFromText && isCourseDiscoveryIntent(text)) {
+        convo.preferredCategory = categoryFromText
+        convo.selectedCategory = categoryFromText
+        convo.awaitingCareerDiscovery = false
+        convo.awaitingCourseChoice = true
+        convo.currentFlow = "commercial"
+        convo.coursePresentationLevel = convo.coursePresentationLevel || "none"
+        return replyWithState(buildConsultativeCategorySuggestion(categoryFromText), {}, "course_category")
+      }
+
       if (isCourseDiscoveryIntent(text)) {
         convo.currentFlow = "commercial"
         convo.awaitingCareerDiscovery = true
@@ -3945,7 +4069,6 @@ async function processMessage(phone, text) {
         return replyWithState(buildCourseDiscoveryQuestion(convo), {}, "course_discovery")
       }
 
-      const categoryFromText = detectCategoryFromText(text)
       if (convo.awaitingCareerDiscovery && categoryFromText) {
         convo.preferredCategory = categoryFromText
         convo.selectedCategory = categoryFromText
