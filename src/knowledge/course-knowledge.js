@@ -499,7 +499,85 @@ function scoreCourseMatch(course, haystack) {
     score = Math.max(score, 180 + matchedWords * 80)
   }
 
+  const haystackPhrases = buildHaystackPhrases(haystack, 4)
+  let fuzzyBest = 0
+
+  for (const alias of course.aliases || []) {
+    if (!alias || alias.length < 5) continue
+
+    for (const phrase of haystackPhrases) {
+      if (!phrase) continue
+      const similarity = computeSimilarity(alias, phrase)
+      if (similarity > fuzzyBest) {
+        fuzzyBest = similarity
+      }
+    }
+  }
+
+  if (fuzzyBest >= 0.86) {
+    score = Math.max(score, 130 + Math.round(fuzzyBest * 100))
+  }
+
   return score
+}
+
+function buildHaystackPhrases(haystack = "", maxWords = 4) {
+  const words = normalizeText(haystack).split(" ").filter(Boolean)
+  if (!words.length) return []
+
+  const phrases = new Set([words.join(" ")])
+
+  for (let size = 1; size <= Math.max(1, maxWords); size += 1) {
+    for (let i = 0; i <= words.length - size; i += 1) {
+      phrases.add(words.slice(i, i + size).join(" "))
+    }
+  }
+
+  return [...phrases]
+}
+
+function computeSimilarity(a = "", b = "") {
+  const source = String(a || "").trim()
+  const target = String(b || "").trim()
+  if (!source || !target) return 0
+  if (source === target) return 1
+
+  const distance = levenshteinDistance(source, target)
+  const maxLength = Math.max(source.length, target.length)
+  if (!maxLength) return 0
+
+  return 1 - distance / maxLength
+}
+
+function levenshteinDistance(a = "", b = "") {
+  const source = String(a || "")
+  const target = String(b || "")
+
+  if (!source) return target.length
+  if (!target) return source.length
+
+  const matrix = Array.from({ length: source.length + 1 }, () => new Array(target.length + 1).fill(0))
+
+  for (let i = 0; i <= source.length; i += 1) {
+    matrix[i][0] = i
+  }
+
+  for (let j = 0; j <= target.length; j += 1) {
+    matrix[0][j] = j
+  }
+
+  for (let i = 1; i <= source.length; i += 1) {
+    for (let j = 1; j <= target.length; j += 1) {
+      const cost = source[i - 1] === target[j - 1] ? 0 : 1
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      )
+    }
+  }
+
+  return matrix[source.length][target.length]
 }
 
 function mergeDuplicateCourses(courses = []) {

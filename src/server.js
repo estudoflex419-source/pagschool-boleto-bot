@@ -578,10 +578,12 @@ function getPaymentPlan(_courseName = "") {
 function buildPaymentSummaryLine() {
   const carne = PAYMENT_OPTIONS.carne
   const cartao = PAYMENT_OPTIONS.cartao
+  const pix = PAYMENT_OPTIONS.pix
 
   return [
-    `💳 *Cartão:* ${cartao.installments}x de ${formatMoneyBR(cartao.installmentValue)}`,
-    `📘 *Carnê:* ${carne.installments}x de ${formatMoneyBR(carne.installmentValue)}`
+    `💳 Cartão: ${cartao.installments}x de ${formatMoneyBR(cartao.installmentValue)}`,
+    `📘 Carnê: ${carne.installments}x de ${formatMoneyBR(carne.installmentValue)}`,
+    `💰 À vista / PIX: ${formatMoneyBR(pix.total)}`
   ].join("\n")
 }
 
@@ -1880,6 +1882,8 @@ function buildTwoCourseRecommendationMessage(convo = {}) {
 }
 
 function shouldPrioritizeCatalogRedirect(text = "", convo = {}) {
+  if (convo.awaitingCourseChoice) return false
+
   const matchedCourse = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
   if (matchedCourse?.title || matchedCourse?.name) return false
 
@@ -1897,6 +1901,34 @@ function buildGoalClarification(courseName = "") {
   const label = String(courseName || "esse curso").trim()
 
   return `Perfeito 😊 Se você quiser, eu te explico o *${label}* de forma prática e depois já te mostro valores e matrícula.`
+}
+
+function buildAwaitingCourseChoiceReminder(convo = {}, text = "") {
+  if (wantsPriceQuestionWithoutCourse(text)) {
+    return "Perfeito 😊 Antes do valor, me fala só o nome do curso que você quer e eu já te passo tudo certinho."
+  }
+
+  const preferredCategory = convo.preferredCategory || detectCategoryFromText(text)
+  if (preferredCategory === "saude") {
+    return "Perfeito 😊 Me manda o nome exato do curso (ex.: Agente de Saúde, Socorrista ou Farmácia) que eu te explico rapidinho."
+  }
+
+  return "Perfeito 😊 Me manda só o nome do curso que te chamou atenção que eu te explico de forma direta."
+}
+
+function wantsPriceQuestionWithoutCourse(text = "") {
+  const t = normalizeLoose(text)
+  if (!t) return false
+
+  return [
+    "valor",
+    "quanto custa",
+    "preco",
+    "preço",
+    "quanto fica",
+    "mensalidade",
+    "pagamento"
+  ].some(term => t.includes(term))
 }
 
 function mapGoalReply(text = "") {
@@ -2234,6 +2266,9 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.currentFlow = "commercial"
       convo.commercialStage = "catalog_redirect"
       convo.lastOfferType = "site_catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: category || ""
@@ -2290,6 +2325,8 @@ Pode ser?`
       convo.currentFlow = "commercial"
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
+      convo.awaitingCourseChoice = false
+      convo.coursePresentationSent = true
       clearPendingStep(convo)
 
       return { intent, message: buildEnhancedCoursePresentation(courseInfo.title, courseInfo) }
@@ -2343,6 +2380,8 @@ function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "
       convo.currentFlow = "commercial"
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
+      convo.awaitingCourseChoice = false
+      convo.coursePresentationSent = true
       ensureSalesLead(convo)
       convo.salesLead.selectedCourse = convo.selectedCourse
       clearPendingStep(convo)
@@ -2669,47 +2708,38 @@ function buildCourseHighlights(courseInfo) {
 function buildEnhancedCoursePresentation(selectedCourseName, courseInfo) {
   const normalizedCourseInfo = courseInfo || buildFallbackCourseInfoByName(selectedCourseName)
   const displayName = selectedCourseName || normalizedCourseInfo?.title || "esse curso"
-  const category = inferCourseCategory(normalizedCourseInfo || { title: displayName })
+  const summary = String(normalizedCourseInfo?.summary || normalizedCourseInfo?.description || "").trim()
+  const learns = Array.isArray(normalizedCourseInfo?.learns)
+    ? uniqueItems(normalizedCourseInfo.learns).slice(0, 3)
+    : []
+  const workload = String(normalizedCourseInfo?.workload || "").trim()
+  const duration = String(normalizedCourseInfo?.duration || "").trim()
 
-  const profilesByCategory = {
-    saude: "gosta da área de cuidado, atendimento e rotina prática",
-    administrativo: "quer crescer com organização, gestão e rotina de escritório",
-    beleza: "quer atuar com estética, atendimento e serviços de alto giro",
-    tecnologia: "busca habilidades digitais e oportunidades no mercado online",
-    industrial: "curte operação técnica, manutenção e rotina de campo",
-    agro: "quer atuar com máquinas, operação e atividades do setor agrícola",
-    logistica: "gosta de organização operacional, pátio e movimentação de cargas",
-    educacao: "quer trabalhar com ensino, apoio educacional e desenvolvimento",
-    juridico: "busca atuação com normas, segurança e preparação técnica",
-    idiomas: "quer ampliar oportunidades com comunicação e linguagem",
-    gastronomia: "quer trabalhar com produção de alimentos e atendimento",
-    geral: "quer aprender de forma prática e evoluir profissionalmente"
+  const blocks = [`Ótima escolha 😊`]
+
+  if (summary) {
+    blocks.push(`O curso de *${displayName}* ${summary.replace(/\.$/, "")}.`)
+  } else {
+    blocks.push(`O curso de *${displayName}* é uma formação prática para você desenvolver conhecimento aplicado e evoluir com segurança.`)
   }
 
-  const benefitsByCategory = {
-    saude: "aprender de forma prática e entender melhor esse tipo de atuação",
-    administrativo: "se preparar para rotina profissional e fortalecer o currículo",
-    beleza: "desenvolver técnica para começar a atender com mais segurança",
-    tecnologia: "desenvolver habilidade prática e se posicionar melhor no mercado",
-    industrial: "ganhar base técnica para atuar com mais confiança",
-    agro: "aprender operação na prática e ampliar oportunidades de trabalho",
-    logistica: "entender a operação do setor e aumentar sua empregabilidade",
-    educacao: "ganhar repertório para atuar com mais preparo e segurança",
-    juridico: "ganhar base sólida para começar na área com direcionamento",
-    idiomas: "evoluir o conhecimento de forma aplicada ao dia a dia",
-    gastronomia: "aprender técnicas práticas para atuar na área",
-    geral: "ganhar base e se preparar melhor para novas oportunidades"
+  blocks.push("Ele funciona pela nossa plataforma online, para você estudar no seu ritmo, com acesso a apostilas, vídeos, atividades e avaliações.")
+  blocks.push("Durante o curso, você também conta com suporte pedagógico para tirar dúvidas e seguir com mais segurança.")
+
+  if (learns.length) {
+    blocks.push(`Na prática, você vai aprender temas como *${learns.join(", ")}*.`)
   }
 
-  const profile = profilesByCategory[category] || profilesByCategory.geral
-  const benefit = benefitsByCategory[category] || benefitsByCategory.geral
+  if (workload || duration) {
+    const workloadLabel = workload ? `carga horária de *${workload}*` : ""
+    const durationLabel = duration ? `duração média de *${duration}*` : ""
+    const joiner = workloadLabel && durationLabel ? " e " : ""
+    blocks.push(`Esse curso tem ${workloadLabel}${joiner}${durationLabel}.`.replace("Esse curso tem .", ""))
+  }
 
-  return `Ótima escolha 😊
-${displayName} costuma chamar bastante atenção de quem ${profile}.
+  blocks.push("Se quiser, agora eu já te passo os valores para começar ou, se preferir, te explico como funciona a matrícula 😊")
 
-É uma opção interessante para quem quer ${benefit}.
-
-Se você quiser, eu posso te explicar como funciona e depois já te passo as opções para começar.`
+  return blocks.join("\n\n")
 }
 
 function buildSelectedCourseAnswer(_text, courseInfo) {
@@ -2834,12 +2864,12 @@ function buildPriceAnswerMessage(courseName = "", courseInfo = null, options = {
 
   return `Ótima pergunta 😊
 
-Hoje a forma mais leve de começar costuma ficar assim:
+Hoje, as formas mais usadas para começar são estas:
 ${buildPaymentSummaryLine()}
 
 ${courseSummary}
 
-Se você quiser, eu te ajudo a escolher a melhor opção e já deixo sua matrícula encaminhada.`
+Se quiser, eu também posso te indicar rapidinho qual dessas costuma fazer mais sentido no seu caso 😊`
 }
 
 function buildPixMessage() {
@@ -3634,6 +3664,9 @@ async function processMessage(phone, text) {
     }
 
     ensureSalesLead(convo)
+    convo.courseCatalogOffered = Boolean(convo.courseCatalogOffered)
+    convo.awaitingCourseChoice = Boolean(convo.awaitingCourseChoice)
+    convo.coursePresentationSent = Boolean(convo.coursePresentationSent)
     const matchedKnowledgeCourse = findCourseInText(text)
     const detectedCourse = matchedKnowledgeCourse
       ? { name: extractCourseLabel(matchedKnowledgeCourse) }
@@ -3651,6 +3684,9 @@ async function processMessage(phone, text) {
       convo.currentFlow = "commercial"
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: detectCategoryFromText(text) || convo.preferredCategory || ""
@@ -3659,15 +3695,13 @@ async function processMessage(phone, text) {
     }
 
     if (
+      convo.awaitingCourseChoice ||
       convo.pendingStep === "awaiting_course_selection" ||
       convo.pendingStep === "awaiting_course" ||
       convo.commercialStage === "catalog_redirect" ||
       convo.lastOfferType === "site_catalog_redirect"
     ) {
-      const matchedCourse =
-        findCourseByName(text, getCourseCatalog()) ||
-        findSiteCourseKnowledge(text, convo.course) ||
-        sales.findCourse(text)
+      const matchedCourse = findBestCourseCandidate(text, convo.course)
 
       if (matchedCourse?.title || matchedCourse?.name) {
         const courseInfo = normalizeCourseInfoCandidate(matchedCourse)
@@ -3681,6 +3715,9 @@ async function processMessage(phone, text) {
         convo.currentFlow = "commercial"
         convo.commercialStage = "course_detail"
         convo.lastOfferType = "course_explanation"
+        convo.courseCatalogOffered = true
+        convo.awaitingCourseChoice = false
+        convo.coursePresentationSent = true
         ensureSalesLead(convo)
         convo.salesLead.selectedCourse = convo.selectedCourse
         clearPendingStep(convo)
@@ -3688,9 +3725,15 @@ async function processMessage(phone, text) {
         return replyWithState(
           buildEnhancedCoursePresentation(convo.selectedCourse, courseInfo),
           {},
-          "specific_course"
+          "pending_awaiting_course_match"
         )
       }
+
+      return replyWithState(
+        buildAwaitingCourseChoiceReminder(convo, text),
+        {},
+        "pending_awaiting_course_reminder"
+      )
     }
 
     const intentResult = detectIntent(text, convo, {
@@ -4036,6 +4079,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.paymentTeaserShown = false
         convo.lastOfferType = "site_catalog_redirect"
         convo.commercialStage = "catalog_redirect"
+        convo.courseCatalogOffered = true
+        convo.awaitingCourseChoice = true
+        convo.coursePresentationSent = false
         setPendingStep(convo, "awaiting_course", {
           source: "course_catalog_request",
           category: convo.preferredCategory || ""
@@ -4082,6 +4128,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
@@ -4095,6 +4144,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
@@ -4108,6 +4160,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
@@ -4133,6 +4188,8 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.selectedCategory = inferCourseCategory(courseInfo || { title: detectedCourse.name })
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
+      convo.awaitingCourseChoice = false
+      convo.coursePresentationSent = true
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
@@ -4160,6 +4217,8 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.selectedCategory = inferCourseCategory(courseInfoFromText)
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
+      convo.awaitingCourseChoice = false
+      convo.coursePresentationSent = true
       convo.step = "offer_transition"
       convo.paymentTeaserShown = false
 
