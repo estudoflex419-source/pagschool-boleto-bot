@@ -669,7 +669,18 @@ function getCourseByName(name) {
   const normalized = normalizeText(name)
   if (!normalized) return null
 
-  return getCourseCatalog().find(course => course.normalizedName === normalized) || null
+  for (const course of getCourseCatalog()) {
+    if (course.normalizedName === normalized) return course
+
+    const aliases = Array.isArray(course.aliases) ? course.aliases : []
+    if (aliases.includes(normalized)) return course
+
+    if (normalized.includes(course.normalizedName) || course.normalizedName.includes(normalized)) {
+      return course
+    }
+  }
+
+  return null
 }
 
 function findCoursesInText(text, limit = 3) {
@@ -698,15 +709,22 @@ function findCourseInText(text) {
 function toServerCourseInfo(course) {
   if (!course) return null
 
+  const title = course.name
+  const aliases = Array.isArray(course.aliases) ? course.aliases : []
+  const learns = Array.isArray(course.programItems) ? course.programItems : []
+
   return {
-    title: course.name,
-    aliases: course.aliases,
+    title,
+    name: title,
+    aliases,
     workload: course.workloadLabel,
     duration: course.durationLabel,
     salary: course.salary,
     summary: course.summary,
     description: course.description,
-    learns: course.programItems,
+    professionSummary: course.market,
+    programContent: learns,
+    learns,
     market: course.market,
     differentials: course.differentials,
     sourceText: course.rawText
