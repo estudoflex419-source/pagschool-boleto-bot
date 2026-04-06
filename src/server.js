@@ -1880,6 +1880,8 @@ function buildTwoCourseRecommendationMessage(convo = {}) {
 }
 
 function shouldPrioritizeCatalogRedirect(text = "", convo = {}) {
+  if (convo.awaitingCourseChoice) return false
+
   const matchedCourse = findSiteCourseKnowledge(text, convo.course) || sales.findCourse(text)
   if (matchedCourse?.title || matchedCourse?.name) return false
 
@@ -1897,6 +1899,34 @@ function buildGoalClarification(courseName = "") {
   const label = String(courseName || "esse curso").trim()
 
   return `Perfeito 😊 Se você quiser, eu te explico o *${label}* de forma prática e depois já te mostro valores e matrícula.`
+}
+
+function buildAwaitingCourseChoiceReminder(convo = {}, text = "") {
+  if (wantsPriceQuestionWithoutCourse(text)) {
+    return "Perfeito 😊 Antes do valor, me fala só o nome do curso que você quer e eu já te passo tudo certinho."
+  }
+
+  const preferredCategory = convo.preferredCategory || detectCategoryFromText(text)
+  if (preferredCategory === "saude") {
+    return "Perfeito 😊 Me manda o nome exato do curso (ex.: Agente de Saúde, Socorrista ou Farmácia) que eu te explico rapidinho."
+  }
+
+  return "Perfeito 😊 Me manda só o nome do curso que te chamou atenção que eu te explico de forma direta."
+}
+
+function wantsPriceQuestionWithoutCourse(text = "") {
+  const t = normalizeLoose(text)
+  if (!t) return false
+
+  return [
+    "valor",
+    "quanto custa",
+    "preco",
+    "preço",
+    "quanto fica",
+    "mensalidade",
+    "pagamento"
+  ].some(term => t.includes(term))
 }
 
 function mapGoalReply(text = "") {
@@ -2234,6 +2264,9 @@ async function handleStrongIntent(intent = "", convo = {}, text = "", phone = ""
       convo.currentFlow = "commercial"
       convo.commercialStage = "catalog_redirect"
       convo.lastOfferType = "site_catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: category || ""
@@ -2290,6 +2323,8 @@ Pode ser?`
       convo.currentFlow = "commercial"
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
+      convo.awaitingCourseChoice = false
+      convo.coursePresentationSent = true
       clearPendingStep(convo)
 
       return { intent, message: buildEnhancedCoursePresentation(courseInfo.title, courseInfo) }
@@ -2343,6 +2378,8 @@ function handlePendingCommercialStep(convo = {}, text = "", contextualIntent = "
       convo.currentFlow = "commercial"
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
+      convo.awaitingCourseChoice = false
+      convo.coursePresentationSent = true
       ensureSalesLead(convo)
       convo.salesLead.selectedCourse = convo.selectedCourse
       clearPendingStep(convo)
@@ -3634,6 +3671,9 @@ async function processMessage(phone, text) {
     }
 
     ensureSalesLead(convo)
+    convo.courseCatalogOffered = Boolean(convo.courseCatalogOffered)
+    convo.awaitingCourseChoice = Boolean(convo.awaitingCourseChoice)
+    convo.coursePresentationSent = Boolean(convo.coursePresentationSent)
     const matchedKnowledgeCourse = findCourseInText(text)
     const detectedCourse = matchedKnowledgeCourse
       ? { name: extractCourseLabel(matchedKnowledgeCourse) }
@@ -3651,6 +3691,9 @@ async function processMessage(phone, text) {
       convo.currentFlow = "commercial"
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: detectCategoryFromText(text) || convo.preferredCategory || ""
@@ -3659,15 +3702,13 @@ async function processMessage(phone, text) {
     }
 
     if (
+      convo.awaitingCourseChoice ||
       convo.pendingStep === "awaiting_course_selection" ||
       convo.pendingStep === "awaiting_course" ||
       convo.commercialStage === "catalog_redirect" ||
       convo.lastOfferType === "site_catalog_redirect"
     ) {
-      const matchedCourse =
-        findCourseByName(text, getCourseCatalog()) ||
-        findSiteCourseKnowledge(text, convo.course) ||
-        sales.findCourse(text)
+      const matchedCourse = findBestCourseCandidate(text, convo.course)
 
       if (matchedCourse?.title || matchedCourse?.name) {
         const courseInfo = normalizeCourseInfoCandidate(matchedCourse)
@@ -3681,6 +3722,9 @@ async function processMessage(phone, text) {
         convo.currentFlow = "commercial"
         convo.commercialStage = "course_detail"
         convo.lastOfferType = "course_explanation"
+        convo.courseCatalogOffered = true
+        convo.awaitingCourseChoice = false
+        convo.coursePresentationSent = true
         ensureSalesLead(convo)
         convo.salesLead.selectedCourse = convo.selectedCourse
         clearPendingStep(convo)
@@ -3688,9 +3732,15 @@ async function processMessage(phone, text) {
         return replyWithState(
           buildEnhancedCoursePresentation(convo.selectedCourse, courseInfo),
           {},
-          "specific_course"
+          "pending_awaiting_course_match"
         )
       }
+
+      return replyWithState(
+        buildAwaitingCourseChoiceReminder(convo, text),
+        {},
+        "pending_awaiting_course_reminder"
+      )
     }
 
     const intentResult = detectIntent(text, convo, {
@@ -4036,6 +4086,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
         convo.paymentTeaserShown = false
         convo.lastOfferType = "site_catalog_redirect"
         convo.commercialStage = "catalog_redirect"
+        convo.courseCatalogOffered = true
+        convo.awaitingCourseChoice = true
+        convo.coursePresentationSent = false
         setPendingStep(convo, "awaiting_course", {
           source: "course_catalog_request",
           category: convo.preferredCategory || ""
@@ -4082,6 +4135,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
@@ -4095,6 +4151,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
@@ -4108,6 +4167,9 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.paymentTeaserShown = false
       convo.lastOfferType = "site_catalog_redirect"
       convo.commercialStage = "catalog_redirect"
+      convo.courseCatalogOffered = true
+      convo.awaitingCourseChoice = true
+      convo.coursePresentationSent = false
       setPendingStep(convo, "awaiting_course", {
         source: "course_catalog_request",
         category: convo.preferredCategory || ""
@@ -4133,6 +4195,8 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.selectedCategory = inferCourseCategory(courseInfo || { title: detectedCourse.name })
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
+      convo.awaitingCourseChoice = false
+      convo.coursePresentationSent = true
 
       if (isPriceQuestion) {
         convo.step = "payment_intro"
@@ -4160,6 +4224,8 @@ Assim que a emissão estiver concluída, ele é enviado por aqui.`)
       convo.selectedCategory = inferCourseCategory(courseInfoFromText)
       convo.commercialStage = "course_detail"
       convo.lastOfferType = "course_explanation"
+      convo.awaitingCourseChoice = false
+      convo.coursePresentationSent = true
       convo.step = "offer_transition"
       convo.paymentTeaserShown = false
 
