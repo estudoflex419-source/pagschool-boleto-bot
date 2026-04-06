@@ -13,7 +13,8 @@ const OVERRIDE_INTENTS = new Set([
   "goal_help",
   "course_list",
   "compare_courses",
-  "course_category"
+  "course_category",
+  "course_discovery"
 ])
 
 const INTENT_PATTERNS = Object.freeze({
@@ -52,8 +53,31 @@ const INTENT_PATTERNS = Object.freeze({
   },
   enrollment: {
     priority: 74,
-    phrases: ["quero me matricular", "quero fazer matricula", "quero comecar", "quero iniciar", "quero entrar", "como faco pra me inscrever", "como me inscrevo", "como entro"],
+    phrases: [
+      "quero me matricular",
+      "quero fazer matricula",
+      "quero fazer minha inscricao",
+      "quero comecar",
+      "quero iniciar",
+      "quero entrar",
+      "quero me inscrever",
+      "como faco pra me inscrever",
+      "como me inscrevo",
+      "como entro",
+      "vamos fechar"
+    ],
     keywords: ["matricula", "comecar", "iniciar", "entrar", "inscrever"]
+  },
+  course_discovery: {
+    priority: 73,
+    phrases: [
+      "nao sei qual curso",
+      "nao sei por onde comecar",
+      "qual curso voce indica",
+      "quero uma indicacao",
+      "tenho duvida de curso"
+    ],
+    keywords: ["indicacao", "indicar", "duvida", "duvida", "curso"]
   },
   payment_options: {
     priority: 72,
@@ -177,6 +201,7 @@ function getContextBoost(intent, convo = {}, normalizedText = "") {
   if (intent === "payment_options" && convo?.priceShown) boost += 0.1
   if (intent === "enrollment" && (convo?.selectedCourse || convo?.priceShown || convo?.enrollmentIntent)) boost += 0.12
   if (intent === "how_course_works" && (convo?.selectedCourse || convo?.course)) boost += 0.22
+  if (intent === "course_discovery" && (convo?.awaitingCareerDiscovery || convo?.awaitingCourseChoice)) boost += 0.2
   if (intent === "second_via" && /\bcpf\b/.test(normalizedText)) boost += 0.15
   if (intent === "course_category" && convo?.preferredCategory) boost += 0.1
 

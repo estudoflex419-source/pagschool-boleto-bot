@@ -460,24 +460,16 @@ function getCourseByName(name) {
 }
 
 function menu() {
-  return `Oi 😊 Seja bem-vindo(a) à Estudo Flex.
+  return `Oi! Seja muito bem-vindo(a)! 😊
+Vai ser um prazer te ajudar.
 
-Me diz como eu posso te ajudar melhor:
-
-1 - Já sou aluno(a)
-2 - Quero fazer uma nova matrícula
-3 - Quero conhecer os cursos`
+Me conta: você quer descobrir um curso ideal para você ou já tem algum em mente?`
 }
 
 function newEnrollmentIntro() {
   return `Perfeito 😊
 
-Eu posso te ajudar com 3 coisas:
-1 - te indicar um curso
-2 - te passar os valores
-3 - te explicar como funciona
-
-Se quiser, também pode me mandar direto o nome do curso que te chamou atenção.`
+Me conta rapidinho: você já tem algum curso em mente ou quer que eu te indique uma opção com base no seu objetivo?`
 }
 
 function showCourses() {
