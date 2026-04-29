@@ -4,7 +4,9 @@
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "lint": "node -e \"console.log('lint placeholder')\""
   },
   "dependencies": {
     "axios": "^1.7.9",

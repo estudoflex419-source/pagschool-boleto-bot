@@ -242,9 +242,27 @@ async function sendDocumentBuffer(
   }
 }
 
+
+async function sendTemplateMessage(to, templateName, languageCode = "pt_BR", components = []) {
+  ensureMetaConfig()
+  const payload = { messaging_product: "whatsapp", to: String(to), type: "template", template: { name: String(templateName), language: { code: languageCode }, components } }
+  const resp = await axios.post(`${GRAPH_BASE}/${META_PHONE_ID}/messages`, payload, { headers: { Authorization: `Bearer ${META_TOKEN}`, "Content-Type": "application/json" }, timeout: 60000, validateStatus: () => true })
+  if (resp.status < 200 || resp.status >= 300) throw new Error(`Falha ao enviar template pela Meta (${resp.status})`)
+  return resp.data
+}
+
+async function sendOverdueReminderTemplate(to, components = []) {
+  const templateName = String(process.env.WHATSAPP_OVERDUE_TEMPLATE_NAME || "").trim()
+  const lang = String(process.env.WHATSAPP_OVERDUE_TEMPLATE_LANGUAGE || "pt_BR").trim()
+  if (!templateName) throw new Error("WHATSAPP_OVERDUE_TEMPLATE_NAME não configurado")
+  return sendTemplateMessage(to, templateName, lang, components)
+}
+
 module.exports = {
   sendText,
   uploadDocumentBuffer,
   sendDocumentByMediaId,
-  sendDocumentBuffer
+  sendDocumentBuffer,
+  sendTemplateMessage,
+  sendOverdueReminderTemplate
 }
