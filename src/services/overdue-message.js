@@ -1,0 +1,1 @@
+"use strict";function buildOverdueText(name,phone){const n=String(name||"").trim().split(/\s+/)[0];const i=n?`Olá, ${n}.`:"Olá,";return `${i} Identificamos boleto em atraso no seu cadastro da Escola Brasil/Estudo Flex. Caso tenha qualquer dúvida sobre os boletos, entre em contato com nossa central: ${phone}.`;}module.exports={buildOverdueText};

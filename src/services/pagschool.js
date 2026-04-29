@@ -1727,10 +1727,42 @@ async function criarMatriculaComCarne(input) {
   }
 }
 
+
+async function listarAlunosPaginado() {
+  const limit = Number(process.env.PAGSCHOOL_SCAN_LIMIT || 50)
+  const maxPages = Number(process.env.PAGSCHOOL_SCAN_MAX_PAGES || 0)
+  const delayMs = Number(process.env.PAGSCHOOL_REQUEST_DELAY_MS || 200)
+  let offset = 0
+  let page = 0
+  const alunos = []
+  while (true) {
+    if (maxPages > 0 && page >= maxPages) break
+    const data = await apiRequest('get', `/aluno/all?status=CURSANDO&limit=${limit}&offset=${offset}&filter=`)
+    const rows = Array.isArray(data?.rows) ? data.rows : []
+    alunos.push(...rows.map(normalizarAluno))
+    if (rows.length < limit) break
+    offset += limit
+    page += 1
+    if (delayMs > 0) await sleep(delayMs)
+  }
+  return alunos
+}
+function normalizarAluno(a={}){ return { id:a.id, nome:a.nome||a.nomeAluno||'', cpf:a.cpf||'', telefoneCelular:a.telefoneCelular||a.celular||'', telefoneCelularResponsavel:a.telefoneCelularResponsavel||a.celularResponsavel||'', alunoResponsavelFinanceiro:Boolean(a.alunoResponsavelFinanceiro), nomeResponsavel:a.nomeResponsavel||'' } }
+function normalizarParcela(p={}){ return { id:p.id, valor:p.valor, valorPago:p.valorPago, numeroBoleto:p.numeroBoleto, vencimento:p.vencimento, dataPagamento:p.dataPagamento, numeroParcela:p.numeroParcela, status:p.status, nossoNumero:p.nossoNumero, contrato_id:p.contrato_id } }
+function normalizarContrato(c={}){ return { ...c, id:c.id, aluno_id:c.aluno_id, parcelas:Array.isArray(c.parcelas)?c.parcelas.map(normalizarParcela):[] } }
+async function buscarContratosPorAluno(alunoId){ const data=await apiRequest('get', `/contrato/by-aluno/${alunoId}`); return (Array.isArray(data)?data:[]).map(normalizarContrato) }
+async function listarParcelasEmAtraso(){ const { isParcelaOverdue } = require('./overdue-detector'); const alunos = await listarAlunosPaginado(); const out=[]; for(const aluno of alunos){ try{ const contratos=await buscarContratosPorAluno(aluno.id); for(const contrato of contratos){ for(const parcela of (contrato.parcelas||[])){ if(isParcelaOverdue(parcela)){ out.push({aluno, contrato, parcela}); } } } } catch(e){ console.error('[overdue][pagschool] erro aluno', aluno.id, e.message); } } return out }
+
 module.exports = {
   obterSegundaViaPorCpf,
   criarMatriculaComCarne,
   gerarBoletoParcela,
   baixarPdfParcela,
-  buildPdfPayloadFromSecondVia
+  buildPdfPayloadFromSecondVia,
+  listarAlunosPaginado,
+  buscarContratosPorAluno,
+  listarParcelasEmAtraso,
+  normalizarAluno,
+  normalizarContrato,
+  normalizarParcela
 }
