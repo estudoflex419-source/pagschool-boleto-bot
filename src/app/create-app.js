@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 const express = require("express");
 const cors = require("cors");
@@ -18,6 +18,10 @@ function createApp({ healthRoutes, metaRoutes, pdfRoutes }) {
   if (metaRoutes) app.use("/", metaRoutes);
   if (pdfRoutes) app.use("/", pdfRoutes);
 
+  return app;
+}
+
+function attachFinalHandlers(app) {
   app.use((_req, res) => {
     res.status(404).json({
       ok: false,
@@ -30,12 +34,12 @@ function createApp({ healthRoutes, metaRoutes, pdfRoutes }) {
     res.status(500).json({
       ok: false,
       message: "Erro interno do servidor",
+      error: process.env.NODE_ENV === "production" ? undefined : error.message,
     });
   });
-
-  return app;
 }
 
 module.exports = {
   createApp,
+  attachFinalHandlers,
 };
