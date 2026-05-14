@@ -80,6 +80,14 @@ function htmlEscape(value) {
     .replace(/'/g, "&#039;");
 }
 
+function jsStringEscape(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$/g, "\\$")
+    .replace(/</g, "\\u003C");
+}
+
 function getPublicBase(req) {
   const host = String(req.get("host") || "").trim();
   if (!host) return "";
@@ -314,18 +322,29 @@ function createPortalFinanceiroRoutes() {
       line-height: 1.5;
       font-size: 14px;
     }
-    a {
-      display: inline-flex;
+    .download-btn {
+      display: flex;
       align-items: center;
       justify-content: center;
       width: 100%;
       min-height: 54px;
+      border: 0;
       border-radius: 18px;
       background: linear-gradient(135deg, #0b2854, #2563eb);
       color: white;
       text-decoration: none;
       font-weight: 950;
+      font-size: 16px;
+      cursor: pointer;
       box-shadow: 0 16px 32px rgba(37, 99, 235, .24);
+    }
+    .direct-link {
+      display: block;
+      margin-top: 14px;
+      color: #2563eb;
+      font-weight: 800;
+      word-break: break-word;
+      font-size: 13px;
     }
     small {
       display: block;
@@ -339,15 +358,17 @@ function createPortalFinanceiroRoutes() {
   <div class="card">
     <div class="icon">📄</div>
     <h1>Carnê encontrado</h1>
-    <p>Para evitar bloqueio do visualizador de PDF do navegador, clique abaixo para baixar o arquivo.</p>
-    <a id="downloadLink" href="${htmlEscape(downloadUrl)}">Baixar PDF do carnê</a>
-    <small>Se o download não iniciar, toque no botão acima.</small>
+    <p>O arquivo está pronto. Clique no botão abaixo para baixar o PDF do carnê.</p>
+    <form action="${htmlEscape(downloadUrl)}" method="get">
+      <button class="download-btn" type="submit">Baixar PDF do carnê</button>
+    </form>
+    <a class="direct-link" href="${htmlEscape(downloadUrl)}" target="_self">Se o botão não funcionar, clique neste link direto</a>
+    <small>Após baixar, confira o arquivo na pasta Downloads do computador ou celular.</small>
   </div>
   <script>
-    setTimeout(function () {
-      var el = document.getElementById('downloadLink');
-      if (el) el.click();
-    }, 700);
+    function baixarAgora() {
+      window.location.href = `${jsStringEscape(downloadUrl)}`;
+    }
   </script>
 </body>
 </html>`);
@@ -433,7 +454,7 @@ function createPortalFinanceiroRoutes() {
       const boleto = normalizarBoletoPortal(secondVia);
       const base = getPublicBase(req);
       const pdfUrlSeguro = boleto.parcelaId && boleto.nossoNumero
-        ? `${base}/portal/financeiro/abrir-pdf/${encodeURIComponent(boleto.parcelaId)}/${encodeURIComponent(boleto.nossoNumero)}`
+        ? `${base}/portal/financeiro/download-pdf/${encodeURIComponent(boleto.parcelaId)}/${encodeURIComponent(boleto.nossoNumero)}`
         : boleto.pdfUrl;
 
       if (!secondVia?.aluno) {
