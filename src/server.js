@@ -247,7 +247,12 @@ function createPortalFinanceiroRoutes() {
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="carne-${parcelaId}.pdf"`);
-      res.setHeader("Cache-Control", "private, max-age=60");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("X-Frame-Options", "ALLOWALL");
 
       return res.send(buffer);
     } catch (error) {
