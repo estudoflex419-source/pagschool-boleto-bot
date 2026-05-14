@@ -5,7 +5,7 @@ require("dotenv").config();
 const express = require("express");
 const { PORT, META_VERIFY_TOKEN } = require("./config");
 const { sendText } = require("./services/meta");
-const { obterSegundaViaPorCpf } = require("./services/pagschool");
+const { obterSegundaViaPorCpf, baixarPdfParcela } = require("./services/pagschool");
 const { isParcelaOverdue } = require("./services/overdue-detector");
 const store = require("./services/overdue-reminder-store");
 const {
@@ -199,6 +199,19 @@ function portalFinanceiroAllowed(req) {
   return recebido === token;
 }
 
+function normalizePdfBuffer(data) {
+  if (!data) return Buffer.alloc(0);
+  if (Buffer.isBuffer(data)) return data;
+  if (data instanceof ArrayBuffer) return Buffer.from(data);
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer);
+
+  try {
+    return Buffer.from(data);
+  } catch (_error) {
+    return Buffer.alloc(0);
+  }
+}
+
 function createPortalFinanceiroRoutes() {
   const router = express.Router();
 
@@ -208,6 +221,43 @@ function createPortalFinanceiroRoutes() {
       service: "portal-financeiro",
       status: "online"
     });
+  });
+
+  router.get(["/carne/pdf/:parcelaId/:nossoNumero", "/boleto/pdf/:parcelaId/:nossoNumero"], async (req, res) => {
+    try {
+      const parcelaId = onlyDigits(req.params.parcelaId || "");
+      const nossoNumero = onlyDigits(req.params.nossoNumero || "");
+
+      if (!parcelaId || !nossoNumero) {
+        return res.status(400).json({
+          ok: false,
+          message: "Dados do PDF inválidos."
+        });
+      }
+
+      const pdfResp = await baixarPdfParcela(parcelaId, nossoNumero);
+      const buffer = normalizePdfBuffer(pdfResp?.data);
+
+      if (!buffer.length) {
+        return res.status(404).json({
+          ok: false,
+          message: "PDF não encontrado ou vazio."
+        });
+      }
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="carne-${parcelaId}.pdf"`);
+      res.setHeader("Cache-Control", "private, max-age=60");
+
+      return res.send(buffer);
+    } catch (error) {
+      console.error("[portal-financeiro] erro ao abrir PDF:", error);
+
+      return res.status(500).json({
+        ok: false,
+        message: "Não foi possível abrir o PDF do carnê/boleto agora."
+      });
+    }
   });
 
   router.post("/portal/financeiro/boleto", async (req, res) => {
