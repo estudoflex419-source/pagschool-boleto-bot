@@ -2,6 +2,7 @@
 
 require("dotenv").config();
 
+const express = require("express");
 const { PORT, META_VERIFY_TOKEN } = require("./config");
 const { sendText } = require("./services/meta");
 const { obterSegundaViaPorCpf } = require("./services/pagschool");
@@ -180,32 +181,6 @@ async function processMessage(_phone, text) {
   };
 }
 
-const app = createApp({
-  healthRoutes: createHealthRoutes(),
-  metaRoutes: createMetaRoutes({
-    verifyToken: META_VERIFY_TOKEN,
-    processMessage,
-    metaClient: { sendText },
-    metaWebhookParser,
-    processedMessageStore,
-    conversationService,
-    createDefaultConversation,
-    normalizePhone: onlyDigits
-  })
-});
-
-function debugAllowed(req) {
-  const token = String(process.env.DEBUG_TOKEN || "");
-
-  return Boolean(
-    token &&
-      (
-        req.headers["x-debug-token"] === token ||
-        req.query.debugToken === token
-      )
-  );
-}
-
 function portalFinanceiroAllowed(req) {
   const token = String(process.env.PORTAL_FINANCEIRO_TOKEN || "").trim();
 
@@ -224,106 +199,132 @@ function portalFinanceiroAllowed(req) {
   return recebido === token;
 }
 
-/**
- * Rota usada pela Plataforma do Aluno no Wix.
- *
- * Entrada esperada:
- * POST /portal/financeiro/boleto
- * {
- *   "cpf": "00000000000",
- *   "usuario": "opcional",
- *   "nome": "opcional"
- * }
- *
- * Se você configurar PORTAL_FINANCEIRO_TOKEN no ambiente,
- * o Wix precisa enviar o mesmo token no header:
- * x-portal-financeiro-token
- */
-app.post("/portal/financeiro/boleto", async (req, res) => {
-  try {
-    if (!portalFinanceiroAllowed(req)) {
-      return res.status(401).json({
-        ok: false,
-        code: "UNAUTHORIZED",
-        message: "Acesso não autorizado."
-      });
-    }
+function createPortalFinanceiroRoutes() {
+  const router = express.Router();
 
-    const cpf = onlyDigits(
-      req.body?.cpf ||
-        req.body?.documento ||
-        req.body?.cpfAluno ||
-        req.body?.alunoCpf ||
-        ""
-    );
+  router.get("/portal/financeiro/health", (_req, res) => {
+    res.json({
+      ok: true,
+      service: "portal-financeiro",
+      status: "online"
+    });
+  });
 
-    if (cpf.length !== 11) {
-      return res.status(400).json({
-        ok: false,
-        code: "CPF_INVALIDO",
-        message: "Informe um CPF válido com 11 dígitos."
-      });
-    }
+  router.post("/portal/financeiro/boleto", async (req, res) => {
+    try {
+      if (!portalFinanceiroAllowed(req)) {
+        return res.status(401).json({
+          ok: false,
+          code: "UNAUTHORIZED",
+          message: "Acesso não autorizado."
+        });
+      }
 
-    const secondVia = await obterSegundaViaPorCpf(cpf);
-    const boleto = normalizarBoletoPortal(secondVia);
+      const cpf = onlyDigits(
+        req.body?.cpf ||
+          req.body?.documento ||
+          req.body?.cpfAluno ||
+          req.body?.alunoCpf ||
+          ""
+      );
 
-    if (!secondVia?.aluno) {
-      return res.status(404).json({
-        ok: false,
-        code: "ALUNO_NAO_ENCONTRADO",
-        message: "Não encontramos cadastro financeiro para este CPF."
-      });
-    }
+      if (cpf.length !== 11) {
+        return res.status(400).json({
+          ok: false,
+          code: "CPF_INVALIDO",
+          message: "Informe um CPF válido com 11 dígitos."
+        });
+      }
 
-    if (!secondVia?.parcela || !boleto.parcelaId) {
-      return res.status(404).json({
-        ok: false,
-        code: "BOLETO_NAO_ENCONTRADO",
-        message: "Não encontramos carnê/boleto em aberto para este aluno.",
+      const secondVia = await obterSegundaViaPorCpf(cpf);
+      const boleto = normalizarBoletoPortal(secondVia);
+
+      if (!secondVia?.aluno) {
+        return res.status(404).json({
+          ok: false,
+          code: "ALUNO_NAO_ENCONTRADO",
+          message: "Não encontramos cadastro financeiro para este CPF."
+        });
+      }
+
+      if (!secondVia?.parcela || !boleto.parcelaId) {
+        return res.status(404).json({
+          ok: false,
+          code: "BOLETO_NAO_ENCONTRADO",
+          message: "Não encontramos carnê/boleto em aberto para este aluno.",
+          aluno: {
+            nome: boleto.alunoNome
+          }
+        });
+      }
+
+      return res.json({
+        ok: true,
+        message: "Carnê/boleto localizado com sucesso.",
         aluno: {
           nome: boleto.alunoNome
+        },
+        curso: {
+          nome: boleto.cursoNome
+        },
+        boleto: {
+          parcelaId: boleto.parcelaId,
+          numeroParcela: boleto.numeroParcela,
+          status: boleto.status,
+          emAtraso: boleto.emAtraso,
+          valor: boleto.valor,
+          valorFormatado: boleto.valorFormatado,
+          vencimento: boleto.vencimento,
+          vencimentoFormatado: boleto.vencimentoFormatado,
+          linhaDigitavel: boleto.linhaDigitavel,
+          nossoNumero: boleto.nossoNumero,
+          pdfUrl: boleto.pdfUrl
+        },
+        suporte: {
+          telefone: "13981038646",
+          whatsappUrl: "https://wa.me/5513981038646?text=Ol%C3%A1%2C%20preciso%20de%20ajuda%20com%20meu%20financeiro."
         }
       });
+    } catch (error) {
+      console.error("[portal-financeiro] erro ao buscar boleto:", error);
+
+      return res.status(500).json({
+        ok: false,
+        code: "ERRO_INTERNO",
+        message: "Não foi possível consultar o carnê/boleto agora. Tente novamente ou fale com o suporte financeiro."
+      });
     }
+  });
 
-    return res.json({
-      ok: true,
-      message: "Carnê/boleto localizado com sucesso.",
-      aluno: {
-        nome: boleto.alunoNome
-      },
-      curso: {
-        nome: boleto.cursoNome
-      },
-      boleto: {
-        parcelaId: boleto.parcelaId,
-        numeroParcela: boleto.numeroParcela,
-        status: boleto.status,
-        emAtraso: boleto.emAtraso,
-        valor: boleto.valor,
-        valorFormatado: boleto.valorFormatado,
-        vencimento: boleto.vencimento,
-        vencimentoFormatado: boleto.vencimentoFormatado,
-        linhaDigitavel: boleto.linhaDigitavel,
-        nossoNumero: boleto.nossoNumero,
-        pdfUrl: boleto.pdfUrl
-      },
-      suporte: {
-        telefone: "13981038646",
-        whatsappUrl: "https://wa.me/5513981038646?text=Ol%C3%A1%2C%20preciso%20de%20ajuda%20com%20meu%20financeiro."
-      }
-    });
-  } catch (error) {
-    console.error("[portal-financeiro] erro ao buscar boleto:", error);
+  return router;
+}
 
-    return res.status(500).json({
-      ok: false,
-      code: "ERRO_INTERNO",
-      message: "Não foi possível consultar o carnê/boleto agora. Tente novamente ou fale com o suporte financeiro."
-    });
-  }
+const app = createApp({
+  healthRoutes: createHealthRoutes(),
+  metaRoutes: createMetaRoutes({
+    verifyToken: META_VERIFY_TOKEN,
+    processMessage,
+    metaClient: { sendText },
+    metaWebhookParser,
+    processedMessageStore,
+    conversationService,
+    createDefaultConversation,
+    normalizePhone: onlyDigits
+  }),
+  pdfRoutes: createPortalFinanceiroRoutes()
 });
+
+function debugAllowed(req) {
+  const token = String(process.env.DEBUG_TOKEN || "");
+
+  return Boolean(
+    token &&
+      (
+        req.headers["x-debug-token"] === token ||
+        req.query.debugToken === token
+      )
+  );
+}
 
 app.get("/debug/overdue/status", (req, res) => {
   if (!debugAllowed(req)) {
