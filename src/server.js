@@ -5,7 +5,11 @@ require("dotenv").config();
 const express = require("express");
 const { PORT, META_VERIFY_TOKEN } = require("./config");
 const { sendText } = require("./services/meta");
-const { obterSegundaViaPorCpf, baixarPdfParcela } = require("./services/pagschool");
+const {
+  obterSegundaViaPorCpf,
+  baixarPdfParcela,
+  criarMatriculaComCarne
+} = require("./services/pagschool");
 const { isParcelaOverdue } = require("./services/overdue-detector");
 const store = require("./services/overdue-reminder-store");
 const {
@@ -84,6 +88,24 @@ function getPublicBase(req) {
   const host = String(req.get("host") || "").trim();
   if (!host) return "";
   return `https://${host}`;
+}
+
+function parseMoneyBR(value) {
+  const clean = String(value || "")
+    .replace(/R\$/gi, "")
+    .replace(/\s/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .replace(/[^0-9.-]/g, "");
+
+  const number = Number(clean);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function normalizarNomePlataforma(nome) {
+  const clean = String(nome || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return /^PLATAFORMA\s+/i.test(clean) ? clean : `PLATAFORMA ${clean}`;
 }
 
 function normalizarBoletoPortal(secondVia) {
@@ -236,6 +258,49 @@ async function carregarPdfBuffer(parcelaId, nossoNumero) {
   }
 
   return buffer;
+}
+
+function criarPdfUrlSeguro(req, boleto) {
+  const base = getPublicBase(req);
+
+  if (boleto?.parcelaId && boleto?.nossoNumero) {
+    return `${base}/portal/financeiro/download-pdf/${encodeURIComponent(boleto.parcelaId)}/${encodeURIComponent(boleto.nossoNumero)}`;
+  }
+
+  return boleto?.pdfUrl || "";
+}
+
+function montarRespostaBoleto(req, secondVia, message) {
+  const boleto = normalizarBoletoPortal(secondVia);
+  const pdfUrlSeguro = criarPdfUrlSeguro(req, boleto);
+
+  return {
+    ok: true,
+    message: message || "Carnê/boleto localizado com sucesso.",
+    aluno: {
+      nome: boleto.alunoNome
+    },
+    curso: {
+      nome: boleto.cursoNome
+    },
+    boleto: {
+      parcelaId: boleto.parcelaId,
+      numeroParcela: boleto.numeroParcela,
+      status: boleto.status,
+      emAtraso: boleto.emAtraso,
+      valor: boleto.valor,
+      valorFormatado: boleto.valorFormatado,
+      vencimento: boleto.vencimento,
+      vencimentoFormatado: boleto.vencimentoFormatado,
+      linhaDigitavel: boleto.linhaDigitavel,
+      nossoNumero: boleto.nossoNumero,
+      pdfUrl: pdfUrlSeguro
+    },
+    suporte: {
+      telefone: "13981038646",
+      whatsappUrl: "https://wa.me/5513981038646?text=Ol%C3%A1%2C%20preciso%20de%20ajuda%20com%20meu%20financeiro."
+    }
+  };
 }
 
 function createPortalFinanceiroRoutes() {
@@ -438,11 +503,6 @@ function createPortalFinanceiroRoutes() {
       }
 
       const secondVia = await obterSegundaViaPorCpf(cpf);
-      const boleto = normalizarBoletoPortal(secondVia);
-      const base = getPublicBase(req);
-      const pdfUrlSeguro = boleto.parcelaId && boleto.nossoNumero
-        ? `${base}/portal/financeiro/download-pdf/${encodeURIComponent(boleto.parcelaId)}/${encodeURIComponent(boleto.nossoNumero)}`
-        : boleto.pdfUrl;
 
       if (!secondVia?.aluno) {
         return res.status(404).json({
@@ -451,6 +511,8 @@ function createPortalFinanceiroRoutes() {
           message: "Não encontramos cadastro financeiro para este CPF."
         });
       }
+
+      const boleto = normalizarBoletoPortal(secondVia);
 
       if (!secondVia?.parcela || !boleto.parcelaId) {
         return res.status(404).json({
@@ -463,33 +525,7 @@ function createPortalFinanceiroRoutes() {
         });
       }
 
-      return res.json({
-        ok: true,
-        message: "Carnê/boleto localizado com sucesso.",
-        aluno: {
-          nome: boleto.alunoNome
-        },
-        curso: {
-          nome: boleto.cursoNome
-        },
-        boleto: {
-          parcelaId: boleto.parcelaId,
-          numeroParcela: boleto.numeroParcela,
-          status: boleto.status,
-          emAtraso: boleto.emAtraso,
-          valor: boleto.valor,
-          valorFormatado: boleto.valorFormatado,
-          vencimento: boleto.vencimento,
-          vencimentoFormatado: boleto.vencimentoFormatado,
-          linhaDigitavel: boleto.linhaDigitavel,
-          nossoNumero: boleto.nossoNumero,
-          pdfUrl: pdfUrlSeguro
-        },
-        suporte: {
-          telefone: "13981038646",
-          whatsappUrl: "https://wa.me/5513981038646?text=Ol%C3%A1%2C%20preciso%20de%20ajuda%20com%20meu%20financeiro."
-        }
-      });
+      return res.json(montarRespostaBoleto(req, secondVia, "Carnê/boleto localizado com sucesso."));
     } catch (error) {
       console.error("[portal-financeiro] erro ao buscar boleto:", error);
 
@@ -497,6 +533,134 @@ function createPortalFinanceiroRoutes() {
         ok: false,
         code: "ERRO_INTERNO",
         message: "Não foi possível consultar o carnê/boleto agora. Tente novamente ou fale com o suporte financeiro."
+      });
+    }
+  });
+
+  router.post("/portal/financeiro/criar-carne", async (req, res) => {
+    try {
+      if (!portalFinanceiroAllowed(req)) {
+        return res.status(401).json({
+          ok: false,
+          code: "UNAUTHORIZED",
+          message: "Acesso não autorizado."
+        });
+      }
+
+      const body = req.body || {};
+      const cpf = onlyDigits(body.cpf || body.documento || body.cpfAluno || "");
+      const nomeOriginal = pickFirstFilled(body.nomeAluno, body.nome, body.alunoNome);
+      const nomeAluno = normalizarNomePlataforma(nomeOriginal);
+      const telefoneCelular = onlyDigits(body.telefoneCelular || body.telefone || body.whatsapp || "");
+      const email = String(body.email || "").trim().toLowerCase();
+      const nomeCurso = String(body.nomeCurso || body.curso || "").trim();
+      const quantidadeParcelas = Number(body.quantidadeParcelas || body.parcelas || 0);
+      const valorParcela = parseMoneyBR(body.valorParcela || body.valor || 0);
+      const dueDay = Math.min(Math.max(Number(body.dueDay || body.diaVencimento || 0), 1), 28);
+
+      if (cpf.length !== 11) {
+        return res.status(400).json({ ok: false, code: "CPF_INVALIDO", message: "Informe um CPF válido com 11 dígitos." });
+      }
+
+      if (!nomeOriginal || nomeOriginal.trim().length < 5) {
+        return res.status(400).json({ ok: false, code: "NOME_INVALIDO", message: "Informe o nome completo do aluno." });
+      }
+
+      if (telefoneCelular.length < 10) {
+        return res.status(400).json({ ok: false, code: "TELEFONE_INVALIDO", message: "Informe um telefone/WhatsApp válido." });
+      }
+
+      if (!email || !email.includes("@")) {
+        return res.status(400).json({ ok: false, code: "EMAIL_INVALIDO", message: "Informe um e-mail válido." });
+      }
+
+      if (!nomeCurso || nomeCurso.length < 3) {
+        return res.status(400).json({ ok: false, code: "CURSO_INVALIDO", message: "Informe o curso para criar o carnê." });
+      }
+
+      if (!Number.isFinite(quantidadeParcelas) || quantidadeParcelas < 1 || quantidadeParcelas > 24) {
+        return res.status(400).json({ ok: false, code: "PARCELAS_INVALIDAS", message: "Informe a quantidade de parcelas entre 1 e 24." });
+      }
+
+      if (!Number.isFinite(valorParcela) || valorParcela <= 0) {
+        return res.status(400).json({ ok: false, code: "VALOR_INVALIDO", message: "Informe o valor de cada parcela." });
+      }
+
+      if (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 28) {
+        return res.status(400).json({ ok: false, code: "VENCIMENTO_INVALIDO", message: "Informe um dia de vencimento entre 1 e 28." });
+      }
+
+      const numeroContrato = `PLATAFORMA-${Date.now()}`;
+
+      const created = await criarMatriculaComCarne({
+        cpf,
+        nomeAluno,
+        telefoneCelular,
+        email,
+        nomeCurso,
+        quantidadeParcelas,
+        parcelas: quantidadeParcelas,
+        valorParcela,
+        dueDay,
+        numeroContrato,
+        dataNascimento: String(body.dataNascimento || "01/01/1990").trim(),
+        genero: String(body.genero || "NAO INFORMADO").trim(),
+        cep: onlyDigits(body.cep || "00000000").slice(0, 8) || "00000000",
+        logradouro: String(body.logradouro || "Nao informado").trim(),
+        enderecoComplemento: String(body.enderecoComplemento || "Criado pela plataforma do aluno").trim(),
+        bairro: String(body.bairro || "Nao informado").trim(),
+        local: String(body.local || body.cidade || "Nao informado").trim(),
+        uf: String(body.uf || "SP").trim().toUpperCase().slice(0, 2),
+        numero: String(body.numero || "0").trim(),
+        origem: "PLATAFORMA"
+      });
+
+      if (created?.error) {
+        return res.status(500).json({
+          ok: false,
+          code: "ERRO_CRIAR_CARNE",
+          message: `Não foi possível criar o carnê: ${created.error}`
+        });
+      }
+
+      const secondVia = created?.secondVia || await obterSegundaViaPorCpf(cpf);
+
+      if (!secondVia?.parcela) {
+        return res.status(202).json({
+          ok: true,
+          code: "CARNE_CRIADO_SEM_BOLETO",
+          message: "Cadastro/contrato criado pela plataforma, mas o boleto ainda não ficou disponível. Tente consultar novamente em alguns instantes.",
+          aluno: { nome: nomeAluno },
+          curso: { nome: nomeCurso },
+          contrato: created?.contrato || null,
+          suporte: {
+            telefone: "13981038646",
+            whatsappUrl: "https://wa.me/5513981038646?text=Ol%C3%A1%2C%20preciso%20de%20ajuda%20com%20meu%20financeiro."
+          }
+        });
+      }
+
+      const resposta = montarRespostaBoleto(req, secondVia, "Carnê criado pela plataforma com sucesso.");
+      resposta.criadoPelaPlataforma = true;
+      resposta.contrato = {
+        id: created?.contrato?.id || "",
+        numeroContrato
+      };
+      resposta.plano = {
+        quantidadeParcelas,
+        valorParcela,
+        valorParcelaFormatado: formatMoneyBR(valorParcela),
+        diaVencimento: dueDay
+      };
+
+      return res.json(resposta);
+    } catch (error) {
+      console.error("[portal-financeiro] erro ao criar carnê:", error);
+
+      return res.status(500).json({
+        ok: false,
+        code: "ERRO_INTERNO_CRIAR_CARNE",
+        message: "Não foi possível criar o carnê agora. Confira os dados ou fale com o suporte financeiro."
       });
     }
   });
