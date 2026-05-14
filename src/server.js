@@ -80,14 +80,6 @@ function htmlEscape(value) {
     .replace(/'/g, "&#039;");
 }
 
-function jsStringEscape(value) {
-  return String(value || "")
-    .replace(/\\/g, "\\\\")
-    .replace(/`/g, "\\`")
-    .replace(/\$/g, "\\$")
-    .replace(/</g, "\\u003C");
-}
-
 function getPublicBase(req) {
   const host = String(req.get("host") || "").trim();
   if (!host) return "";
@@ -365,11 +357,6 @@ function createPortalFinanceiroRoutes() {
     <a class="direct-link" href="${htmlEscape(downloadUrl)}" target="_self">Se o botão não funcionar, clique neste link direto</a>
     <small>Após baixar, confira o arquivo na pasta Downloads do computador ou celular.</small>
   </div>
-  <script>
-    function baixarAgora() {
-      window.location.href = `${jsStringEscape(downloadUrl)}`;
-    }
-  </script>
 </body>
 </html>`);
     } catch (error) {
