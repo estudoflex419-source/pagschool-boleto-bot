@@ -71,6 +71,21 @@ function formatDateBR(value) {
   });
 }
 
+function htmlEscape(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function getPublicBase(req) {
+  const host = String(req.get("host") || "").trim();
+  if (!host) return "";
+  return `https://${host}`;
+}
+
 function normalizarBoletoPortal(secondVia) {
   const aluno = secondVia?.aluno || {};
   const contrato = secondVia?.contract || secondVia?.contrato || {};
@@ -212,6 +227,17 @@ function normalizePdfBuffer(data) {
   }
 }
 
+async function carregarPdfBuffer(parcelaId, nossoNumero) {
+  const pdfResp = await baixarPdfParcela(parcelaId, nossoNumero);
+  const buffer = normalizePdfBuffer(pdfResp?.data);
+
+  if (!buffer.length) {
+    throw new Error("PDF não encontrado ou vazio.");
+  }
+
+  return buffer;
+}
+
 function createPortalFinanceiroRoutes() {
   const router = express.Router();
 
@@ -223,7 +249,115 @@ function createPortalFinanceiroRoutes() {
     });
   });
 
-  router.get(["/carne/pdf/:parcelaId/:nossoNumero", "/boleto/pdf/:parcelaId/:nossoNumero"], async (req, res) => {
+  router.get("/portal/financeiro/abrir-pdf/:parcelaId/:nossoNumero", async (req, res) => {
+    try {
+      const parcelaId = onlyDigits(req.params.parcelaId || "");
+      const nossoNumero = onlyDigits(req.params.nossoNumero || "");
+
+      if (!parcelaId || !nossoNumero) {
+        return res.status(400).send("Dados do PDF inválidos.");
+      }
+
+      const base = getPublicBase(req);
+      const downloadUrl = `${base}/portal/financeiro/download-pdf/${encodeURIComponent(parcelaId)}/${encodeURIComponent(nossoNumero)}`;
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+
+      return res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Baixar carnê</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(135deg, #eff6ff, #dbeafe);
+      color: #0f172a;
+      padding: 24px;
+    }
+    .card {
+      width: min(100%, 520px);
+      background: #ffffff;
+      border: 1px solid #dbe5f3;
+      border-radius: 28px;
+      padding: 30px;
+      text-align: center;
+      box-shadow: 0 24px 70px rgba(15, 23, 42, .13);
+    }
+    .icon {
+      width: 74px;
+      height: 74px;
+      border-radius: 24px;
+      display: grid;
+      place-items: center;
+      margin: 0 auto 16px;
+      background: linear-gradient(135deg, #0b2854, #2563eb);
+      color: white;
+      font-size: 34px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      letter-spacing: -1px;
+      color: #06152f;
+    }
+    p {
+      margin: 0 0 20px;
+      color: #64748b;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+    a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 54px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #0b2854, #2563eb);
+      color: white;
+      text-decoration: none;
+      font-weight: 950;
+      box-shadow: 0 16px 32px rgba(37, 99, 235, .24);
+    }
+    small {
+      display: block;
+      margin-top: 14px;
+      color: #64748b;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">📄</div>
+    <h1>Carnê encontrado</h1>
+    <p>Para evitar bloqueio do visualizador de PDF do navegador, clique abaixo para baixar o arquivo.</p>
+    <a id="downloadLink" href="${htmlEscape(downloadUrl)}">Baixar PDF do carnê</a>
+    <small>Se o download não iniciar, toque no botão acima.</small>
+  </div>
+  <script>
+    setTimeout(function () {
+      var el = document.getElementById('downloadLink');
+      if (el) el.click();
+    }, 700);
+  </script>
+</body>
+</html>`);
+    } catch (error) {
+      console.error("[portal-financeiro] erro ao abrir página do PDF:", error);
+      return res.status(500).send("Não foi possível preparar o PDF agora.");
+    }
+  });
+
+  router.get("/portal/financeiro/download-pdf/:parcelaId/:nossoNumero", async (req, res) => {
     try {
       const parcelaId = onlyDigits(req.params.parcelaId || "");
       const nossoNumero = onlyDigits(req.params.nossoNumero || "");
@@ -235,34 +369,38 @@ function createPortalFinanceiroRoutes() {
         });
       }
 
-      const pdfResp = await baixarPdfParcela(parcelaId, nossoNumero);
-      const buffer = normalizePdfBuffer(pdfResp?.data);
+      const buffer = await carregarPdfBuffer(parcelaId, nossoNumero);
 
-      if (!buffer.length) {
-        return res.status(404).json({
-          ok: false,
-          message: "PDF não encontrado ou vazio."
-        });
-      }
-
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `inline; filename="carne-${parcelaId}.pdf"`);
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename="carne-${parcelaId}.pdf"`);
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
       res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("X-Frame-Options", "ALLOWALL");
 
       return res.send(buffer);
     } catch (error) {
-      console.error("[portal-financeiro] erro ao abrir PDF:", error);
+      console.error("[portal-financeiro] erro ao baixar PDF:", error);
 
       return res.status(500).json({
         ok: false,
-        message: "Não foi possível abrir o PDF do carnê/boleto agora."
+        message: "Não foi possível baixar o PDF do carnê/boleto agora."
       });
     }
+  });
+
+  router.get(["/carne/pdf/:parcelaId/:nossoNumero", "/boleto/pdf/:parcelaId/:nossoNumero"], async (req, res) => {
+    const parcelaId = onlyDigits(req.params.parcelaId || "");
+    const nossoNumero = onlyDigits(req.params.nossoNumero || "");
+
+    if (!parcelaId || !nossoNumero) {
+      return res.status(400).json({
+        ok: false,
+        message: "Dados do PDF inválidos."
+      });
+    }
+
+    return res.redirect(302, `/portal/financeiro/abrir-pdf/${encodeURIComponent(parcelaId)}/${encodeURIComponent(nossoNumero)}`);
   });
 
   router.post("/portal/financeiro/boleto", async (req, res) => {
@@ -293,6 +431,10 @@ function createPortalFinanceiroRoutes() {
 
       const secondVia = await obterSegundaViaPorCpf(cpf);
       const boleto = normalizarBoletoPortal(secondVia);
+      const base = getPublicBase(req);
+      const pdfUrlSeguro = boleto.parcelaId && boleto.nossoNumero
+        ? `${base}/portal/financeiro/abrir-pdf/${encodeURIComponent(boleto.parcelaId)}/${encodeURIComponent(boleto.nossoNumero)}`
+        : boleto.pdfUrl;
 
       if (!secondVia?.aluno) {
         return res.status(404).json({
@@ -333,7 +475,7 @@ function createPortalFinanceiroRoutes() {
           vencimentoFormatado: boleto.vencimentoFormatado,
           linhaDigitavel: boleto.linhaDigitavel,
           nossoNumero: boleto.nossoNumero,
-          pdfUrl: boleto.pdfUrl
+          pdfUrl: pdfUrlSeguro
         },
         suporte: {
           telefone: "13981038646",
