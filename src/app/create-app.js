@@ -10,6 +10,12 @@ function createApp({ healthRoutes, metaRoutes, pdfRoutes }) {
 
   app.use(cors());
   app.use(helmet({ contentSecurityPolicy: false }));
+  app.use((req, res, next) => {
+    res.removeHeader("Cross-Origin-Resource-Policy");
+    res.removeHeader("Cross-Origin-Opener-Policy");
+    res.removeHeader("Cross-Origin-Embedder-Policy");
+    next();
+  });
   app.use(morgan("dev"));
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ extended: true, limit: "5mb" }));
